@@ -11,6 +11,11 @@ import { STATE_WITH_2_FAMILIES } from '../fixtures'
 
 configure({ adapter: new Adapter() })
 
+// requests stay pending, so that no component updates after a test has finished
+beforeEach(() => {
+  global.fetch = jest.fn(() => new Promise(() => {}))
+})
+
 const configureStore = configureMockStore([thunk])
 
 const INITIAL_ENTRIES = ['/project/R0237_1000_genomes_demo/family_page/F011652_1']
@@ -27,6 +32,8 @@ test('renders the family display name and its individuals', () => {
   )
 
   expect(wrapper.find('IndividualRow').length).toEqual(3)
+  expect(wrapper.find('KnownVariantMatches').props()).toEqual({ familyGuid: 'F011652_1', hideEmpty: true })
+  expect(global.fetch.mock.calls.map(call => call[0])).toContain('/api/family/F011652_1/known_variant_matches?')
 })
 
 test('renders discovery genes and disables search when data is not loaded, with no workspace loading message', () => {

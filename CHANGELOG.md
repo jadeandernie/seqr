@@ -2,6 +2,9 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds known variant checks: variants recorded with a verdict are automatically matched against newly loaded families (REQUIRES DB MIGRATION)
+  * Matching runs as part of `check_for_new_samples_from_pipeline`. The new `check_known_variants` command
+  backfills existing families and only needs a cron entry if periodic rechecks are wanted.
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

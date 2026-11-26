@@ -1059,6 +1059,13 @@ def get_clickhouse_key_lookup(genome_version, dataset_type, variants_ids):
     return lookup
 
 
+def get_clickhouse_family_keys(genome_version, dataset_type, project_guids, family_guids, keys):
+    entries = ENTRY_CLASS_MAP[genome_version][dataset_type].objects.filter(
+        project_guid__in=project_guids, family_guid__in=family_guids, key__in=keys,
+    )
+    return set(entries.values_list('family_guid', 'key'))
+
+
 def delete_clickhouse_project(project, dataset_type, sample_type=None):
     if dataset_type == Dataset.DATASET_TYPE_SV_CALLS and sample_type == Dataset.SAMPLE_TYPE_WES:
         dataset_type = 'GCNV'

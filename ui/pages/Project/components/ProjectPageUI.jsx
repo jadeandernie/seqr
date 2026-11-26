@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 
 import { getProjectDetailsIsLoading } from 'redux/selectors'
 import DataLoader from 'shared/components/DataLoader'
+import KnownVariantMatches from 'shared/components/panel/known-variants/KnownVariantMatches'
 import { HorizontalSpacer, VerticalSpacer } from 'shared/components/Spacers'
 import { SectionHeader } from 'shared/components/StyledComponents'
 import {
@@ -71,6 +72,12 @@ const mapSectionStateToProps = (state, ownProps) => ({
 
 const ProjectSection = connect(mapSectionStateToProps)(ProjectSectionComponent)
 
+const mapKnownVariantMatchesStateToProps = state => ({
+  projectGuid: getCurrentProject(state).projectGuid,
+})
+
+const ProjectKnownVariantMatches = connect(mapKnownVariantMatchesStateToProps)(KnownVariantMatches)
+
 const NO_DETAIL_FIELDS = [
   { id: FAMILY_FIELD_ANALYSIS_STATUS, colWidth: 2 },
   { id: FAMILY_FIELD_ANALYSED_BY, colWidth: 2 },
@@ -103,6 +110,12 @@ const ProjectPageUI = React.memo(({ analysisGroupGuid, load, loading, familiesLo
           <ProjectSection label="Variant Tags" linkPath={analysisGroupGuid ? `saved_variants/analysis_group/${analysisGroupGuid}` : 'saved_variants'} linkText="View All" loading={loading}>
             <VariantTags analysisGroupGuid={analysisGroupGuid} />
           </ProjectSection>
+          <VerticalSpacer height={10} />
+          {!analysisGroupGuid && (
+            <ProjectSection label="Known Variant Matches">
+              <ProjectKnownVariantMatches />
+            </ProjectSection>
+          )}
         </Grid.Column>
         <Grid.Column width={4}>
           {!analysisGroupGuid && (

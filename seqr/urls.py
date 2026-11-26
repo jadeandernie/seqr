@@ -148,6 +148,9 @@ from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_pro
 from matchmaker.views import external_api
 from seqr.views.utils.file_utils import save_temp_file
 from seqr.views.apis.feature_updates_api import get_feature_updates
+from seqr.views.apis.known_variant_api import known_variant_checks, create_known_variant_check, \
+    update_known_variant_check, delete_known_variant_check, project_known_variant_matches, \
+    family_known_variant_matches, update_known_variant_match
 
 react_app_pages = [
     'dashboard',
@@ -346,6 +349,14 @@ api_endpoints = {
     'summary_data/matchmaker': mme_details,
     'summary_data/update_external_analysis': bulk_update_family_external_analysis,
     'summary_data/individual_metadata/(?P<project_guid>[^/]+)': individual_metadata,
+
+    'known_variant_checks/create': create_known_variant_check,
+    'known_variant_checks/(?P<check_guid>[^/]+)/update': update_known_variant_check,
+    'known_variant_checks/(?P<check_guid>[^/]+)/delete': delete_known_variant_check,
+    'known_variant_checks': known_variant_checks,
+    'known_variant_matches/(?P<match_guid>[^/]+)/update': update_known_variant_match,
+    'project/(?P<project_guid>[^/]+)/known_variant_matches': project_known_variant_matches,
+    'family/(?P<family_guid>[^/]+)/known_variant_matches': family_known_variant_matches,
 
     'send_vlm_email': send_vlm_email,
 

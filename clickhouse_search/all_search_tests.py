@@ -40,7 +40,8 @@ from clickhouse_search.test_utils import VARIANT1, VARIANT2, VARIANT3, VARIANT4,
     DEFAULT_PROJECT_FAMILIES, SINGLE_FAMILY_PROJECT_FAMILIES, SV_PROJECT_FAMILIES, MULTI_PROJECT_PROJECT_FAMILIES, \
     format_cached_variant
 from reference_data.models import Omim
-from seqr.models import Project, Family, Dataset, VariantSearch, VariantSearchResults, Individual
+from seqr.models import Project, Family, Dataset, VariantSearch, VariantSearchResults, Individual, KnownVariantCheck
+from seqr.utils.known_variant_utils import find_known_variant_matches
 from seqr.views.apis.data_manager_api import trigger_delete_project
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, GENE_VARIANT_FIELDS, MATCHMAKER_SUBMISSION_FIELDS, \
     SAVED_VARIANT_DETAIL_FIELDS, FUNCTIONAL_FIELDS, TAG_FIELDS, FAMILY_FIELDS, INDIVIDUAL_FIELDS, IGV_SAMPLE_FIELDS, \
@@ -2688,6 +2689,25 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         self._assert_expected_search(
             [VARIANT2, VARIANT1, SV_VARIANT1, GCNV_VARIANT1, MITO_VARIANT1], search_hash=search_hash, sort='cadd',
         )
+
+    def test_known_variant_matching(self):
+        for variant_id, dataset_type, check_kwargs in [
+            ('1-10439-AC-A', 'SNV_INDEL', {'is_global': True}),
+            ('1-9310123-T-C', 'SNV_INDEL', {'source_project': Project.objects.get(guid='R0004_non_analyst_project')}),
+            ('1-91502721-G-A', 'SNV_INDEL', {}),
+            ('2-1234-A-C', 'SNV_INDEL', {'is_global': True}),
+            ('M-4429-G-A', 'MITO', {'is_global': True}),
+        ]:
+            KnownVariantCheck.objects.create(
+                variant_id=variant_id, dataset_type=dataset_type, genome_version='38', verdict='C', **check_kwargs,
+            )
+
+        matches = find_known_variant_matches(Family.objects.all())
+        self.assertSetEqual({(match.known_variant_check.variant_id, match.family.guid) for match in matches}, {
+            ('1-10439-AC-A', 'F000002_2'), ('1-10439-AC-A', 'F000011_11'), ('1-9310123-T-C', 'F000014_14'),
+            ('M-4429-G-A', 'F000002_2'),
+        })
+        self.assertListEqual(find_known_variant_matches(Family.objects.all()), [])
 
 class ClickhouseDeleteDataTests(ClickhouseSearchTestCase):
     databases = '__all__'

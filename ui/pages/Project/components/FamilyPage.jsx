@@ -17,6 +17,7 @@ import { Error404 } from 'shared/components/page/Errors'
 import Family from 'shared/components/panel/family/Family'
 import FamilyReads from 'shared/components/panel/family/FamilyReads'
 import DataLoader from 'shared/components/DataLoader'
+import KnownVariantMatches from 'shared/components/panel/known-variants/KnownVariantMatches'
 import { VerticalSpacer, HorizontalSpacer } from 'shared/components/Spacers'
 import { HelpIcon, ButtonLink } from 'shared/components/StyledComponents'
 
@@ -202,11 +203,14 @@ const mapStateToProps = (state, ownProps) => ({
 export const FamilyDetail = connect(mapStateToProps)(BaseFamilyDetail)
 
 const FamilyPage = ({ familyGuid }) => (
-  <FamilyDetail
-    familyGuid={familyGuid}
-    showVariantDetails
-    fields={FAMILY_DETAIL_FIELDS}
-  />
+  <div>
+    <KnownVariantMatches familyGuid={familyGuid} hideEmpty />
+    <FamilyDetail
+      familyGuid={familyGuid}
+      showVariantDetails
+      fields={FAMILY_DETAIL_FIELDS}
+    />
+  </div>
 )
 
 FamilyPage.propTypes = {

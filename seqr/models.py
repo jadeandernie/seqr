@@ -841,6 +841,76 @@ class SavedVariant(ModelWithGUID):
                         'sv_type', 'gene_ids', 'genotypes']
 
 
+class KnownVariantCheck(ModelWithGUID):
+    VERDICT_CONFIRMED_CAUSAL = 'C'
+    VERDICT_SUSPECTED_CONFIRMED = 'S'
+    VERDICT_SUSPECTED_REFUTED = 'R'
+    VERDICT_BENIGN_ARTEFACT = 'B'
+    VERDICT_CHOICES = (
+        (VERDICT_CONFIRMED_CAUSAL, 'Confirmed causal'),
+        (VERDICT_SUSPECTED_CONFIRMED, 'Suspected, confirmed on follow-up'),
+        (VERDICT_SUSPECTED_REFUTED, 'Suspected, refuted on follow-up'),
+        (VERDICT_BENIGN_ARTEFACT, 'Benign or artefact (expected noise)'),
+    )
+    # SV identity is callset-specific, so SV checks are not supported
+    DATASET_TYPE_CHOICES = SavedVariant.DATASET_TYPE_CHOICES[:2]
+
+    genome_version = models.CharField(max_length=5, choices=GENOME_VERSION_CHOICES)
+    dataset_type = models.CharField(max_length=13, choices=DATASET_TYPE_CHOICES)
+    variant_id = models.TextField(db_index=True)
+    gene_ids = ArrayField(models.CharField(max_length=20), default=list, blank=True)
+
+    verdict = models.CharField(max_length=1, choices=VERDICT_CHOICES)
+    pubmed_id = models.CharField(max_length=10, null=True, blank=True)
+    clinvar_accession = models.CharField(max_length=20, null=True, blank=True)
+
+    source_saved_variant = models.ForeignKey('SavedVariant', null=True, blank=True, on_delete=models.SET_NULL)
+    source_project = models.ForeignKey('Project', null=True, blank=True, on_delete=models.SET_NULL)
+
+    is_global = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    def __unicode__(self):
+        return self.variant_id
+
+    GUID_PREFIX = 'KVC'
+
+    class Meta:
+        unique_together = ('genome_version', 'dataset_type', 'variant_id', 'created_by')
+
+        json_fields = [
+            'guid', 'genome_version', 'dataset_type', 'variant_id', 'gene_ids', 'verdict', 'pubmed_id',
+            'clinvar_accession', 'is_global', 'is_active', 'created_date', 'last_modified_date',
+        ]
+
+
+class KnownVariantMatch(ModelWithGUID):
+    STATUS_NEW = 'N'
+    STATUS_RELEVANT = 'R'
+    STATUS_DISMISSED = 'D'
+    STATUS_CHOICES = (
+        (STATUS_NEW, 'New'),
+        (STATUS_RELEVANT, 'Reviewed: relevant'),
+        (STATUS_DISMISSED, 'Dismissed'),
+    )
+
+    known_variant_check = models.ForeignKey('KnownVariantCheck', on_delete=models.CASCADE)
+    family = models.ForeignKey('Family', on_delete=models.CASCADE)
+    first_seen = models.DateField(auto_now_add=True)
+    status = models.CharField(max_length=1, choices=STATUS_CHOICES, default=STATUS_NEW)
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
+
+    def __unicode__(self):
+        return f'{self.known_variant_check_id}_{self.family_id}'
+
+    GUID_PREFIX = 'KVM'
+
+    class Meta:
+        unique_together = ('known_variant_check', 'family')
+
+        json_fields = ['guid', 'first_seen', 'status']
+
+
 class VariantTagType(ModelWithGUID):
     project = models.ForeignKey('Project', null=True, blank=True, on_delete=models.CASCADE)
 

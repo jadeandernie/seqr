@@ -25,6 +25,7 @@ import ProjectNotifications from './ProjectNotifications'
 import { GeneLists, AddGeneListsButton } from './GeneLists'
 import FamilyTable from './FamilyTable/FamilyTable'
 import VariantTags from './VariantTags'
+import ReportTemplateManagerButton from './ReportTemplates/ReportTemplateManager'
 
 const CreateAnalysisGroupButtons = () => ([
   <UpdateAnalysisGroupButton key="create" />,
@@ -90,6 +91,14 @@ const ProjectPageUI = React.memo(({ analysisGroupGuid, load, loading, familiesLo
           <ProjectSection label="Gene Lists" editButton={<AddGeneListsButton />} collaboratorEdit>
             <GeneLists />
           </ProjectSection>
+          {!analysisGroupGuid && (
+            <div>
+              <VerticalSpacer height={10} />
+              <ProjectSection label="Report Templates" editButton={<ReportTemplateManagerButton />}>
+                Research summary reports can be generated from each family page
+              </ProjectSection>
+            </div>
+          )}
         </Grid.Column>
         <Grid.Column width={8}>
           <ProjectSection label="Overview">

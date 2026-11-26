@@ -1,6 +1,8 @@
 # _seqr_ Changes
 
 ## dev
+* Adds report templates to generate research summary reports for a family (REQUIRES DB MIGRATION)
+  * To add the default templates, run `./manage.py loaddata report_templates`
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
 
 ## 11/24/26

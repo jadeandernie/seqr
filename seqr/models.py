@@ -1104,6 +1104,39 @@ class DynamicAnalysisGroup(ModelWithGUID):
         json_fields = ['guid', 'name', 'criteria']
 
 
+class ReportTemplate(ModelWithGUID):
+    AUDIENCE_RESEARCHER = 'researcher'
+    AUDIENCE_CLINICIAN = 'clinician'
+    AUDIENCE_CHOICES = (
+        (AUDIENCE_RESEARCHER, 'Researcher'),
+        (AUDIENCE_CLINICIAN, 'Clinician'),
+    )
+
+    # A null project is a global template, available to all projects
+    project = models.ForeignKey('Project', null=True, blank=True, on_delete=models.CASCADE)
+
+    name = models.CharField(max_length=100)
+    description = models.TextField(null=True, blank=True)
+    audience = models.CharField(max_length=10, choices=AUDIENCE_CHOICES)
+    body = models.TextField()
+
+    def __unicode__(self):
+        return self.name.strip()
+
+    GUID_PREFIX = 'RT'
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'audience', 'name'], name='unique_project_report_template'),
+            models.UniqueConstraint(
+                fields=['audience', 'name'], condition=models.Q(project__isnull=True),
+                name='unique_global_report_template',
+            ),
+        ]
+
+        json_fields = ['guid', 'name', 'description', 'audience', 'body', 'created_date', 'last_modified_date']
+
+
 class VariantSearch(ModelWithGUID):
     name = models.CharField(max_length=200, null=True)
     order = models.FloatField(null=True, blank=True)

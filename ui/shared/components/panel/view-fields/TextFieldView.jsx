@@ -25,6 +25,16 @@ const MarkdownContainer = styled.div`
 
 const MAPPED_HTML_COMPONENTS = { code: 'div', pre: 'p' }
 
+export const Markdown = React.memo(({ children }) => (
+  <React.Suspense fallback={<Loader active inline="centered" />}>
+    <ReactMarkdown linkTarget="_blank">{children || ''}</ReactMarkdown>
+  </React.Suspense>
+))
+
+Markdown.propTypes = {
+  children: PropTypes.string,
+}
+
 const LazyRichTextEditor = props => <React.Suspense fallback={<Loader />}><RichTextEditor {...props} /></React.Suspense>
 
 const RICH_TEXT_FIELD = {

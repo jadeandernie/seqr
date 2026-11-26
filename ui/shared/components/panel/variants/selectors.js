@@ -228,8 +228,24 @@ export const getPairedFilteredSavedVariants = createSelector(
   },
 )
 
-export const getSavedVariantVisibleIndices = createSelector(
+export const getSavedVariantTotalPages = createSelector(
+  getPairedFilteredSavedVariants, getSavedVariantTableState,
+  (filteredSavedVariants, { recordsPerPage = 25 }) => Math.max(
+    1, Math.ceil(filteredSavedVariants.length / recordsPerPage),
+  ),
+)
+
+// Filtering can leave fewer pages than the page stored in the table state
+export const getSavedVariantPagedTableState = createSelector(
   getSavedVariantTableState,
+  getSavedVariantTotalPages,
+  (tableState, totalPages) => (
+    (tableState.page || 1) > totalPages ? { ...tableState, page: totalPages } : tableState
+  ),
+)
+
+export const getSavedVariantVisibleIndices = createSelector(
+  getSavedVariantPagedTableState,
   ({ page = 1, recordsPerPage = 25 }) => ([(page - 1) * recordsPerPage, page * recordsPerPage]),
 )
 
@@ -252,13 +268,6 @@ export const getVisibleSortedSavedVariants = createSelector(
     ) || (Array.isArray(a) ? a[0] : a).xpos - (Array.isArray(b) ? b[0] : b).xpos)
     return pairedFilteredSavedVariants.slice(...visibleIndices)
   },
-)
-
-export const getSavedVariantTotalPages = createSelector(
-  getPairedFilteredSavedVariants, getSavedVariantTableState,
-  (filteredSavedVariants, { recordsPerPage = 25 }) => Math.max(
-    1, Math.ceil(filteredSavedVariants.length / recordsPerPage),
-  ),
 )
 
 const getSavedVariantExportData = createSelector(

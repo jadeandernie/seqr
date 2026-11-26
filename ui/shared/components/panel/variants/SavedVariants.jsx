@@ -14,7 +14,7 @@ import { ButtonLink } from '../../StyledComponents'
 import DataLoader from '../../DataLoader'
 import Variants from './Variants'
 import {
-  getPairedSelectedSavedVariants, getPairedFilteredSavedVariants, getSavedVariantTableState,
+  getPairedSelectedSavedVariants, getPairedFilteredSavedVariants, getSavedVariantPagedTableState,
   getSavedVariantVisibleIndices, getSavedVariantTotalPages, getSavedVariantExportConfig,
   getVisibleSortedSavedVariants,
 } from './selectors'
@@ -156,7 +156,7 @@ const mapStateToProps = (state, ownProps) => ({
   variantsToDisplay: getVisibleSortedSavedVariants(state, ownProps),
   totalVariantsCount: getPairedSelectedSavedVariants(state, ownProps).length,
   filteredVariantsCount: getPairedFilteredSavedVariants(state, ownProps).length,
-  tableState: getSavedVariantTableState(state, ownProps),
+  tableState: getSavedVariantPagedTableState(state, ownProps),
   firstRecordIndex: getSavedVariantVisibleIndices(state, ownProps)[0],
   totalPages: getSavedVariantTotalPages(state, ownProps),
   variantExportConfig: getSavedVariantExportConfig(state, ownProps),

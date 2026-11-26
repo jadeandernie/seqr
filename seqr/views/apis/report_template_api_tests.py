@@ -527,19 +527,29 @@ class ReportTemplateAPITest(AuthenticationTestCase):
 class ReportTemplateClickhouseAPITest(ClickhouseSearchTestCase):
     fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'clickhouse_saved_variants', 'report_templates']
 
-    def test_family_report_clickhouse_annotations(self):
-        Project.objects.filter(guid=PROJECT_GUID).update(genome_version='37')
-        self.login_data_manager_user()
+    def _get_variant_fields(self):
         response = self.client.post(
             reverse(preview_family_report, args=[KEY_VARIANT_FAMILY_GUID]), content_type='application/json',
             data=json.dumps({'body': VARIANTS_BODY}))
         self.assertEqual(response.status_code, 200)
-        fields = _body(response.json()['markdown']).strip().strip('[]').split('|')
-        self.assertEqual(len(fields), 9)
-        self.assertEqual(fields[0], '1-248367227-TC-T')
-        self.assertEqual(fields[2], 'ENST00000262738.3:c.3955G\\>A')
-        self.assertEqual(fields[3], 'ENST00000505820.2:c.1586-17C\\>G')
-        self.assertEqual(fields[6], 'Uncertain significance')
+        return _body(response.json()['markdown']).strip().strip('[]').split('|')
+
+    def test_family_report_clickhouse_annotations(self):
+        Project.objects.filter(guid=PROJECT_GUID).update(genome_version='37')
+        self.login_data_manager_user()
+
+        # The saved variant's selected transcript has no HGVS annotation
+        expected_fields = [
+            '1-248367227-TC-T', 'OR4G11P, RP11', 'Not recorded', 'Not recorded',
+            'HG00731: Homozygous, HG00732: Heterozygous', mock.ANY, 'Uncertain significance', 'Not recorded',
+            'AIP, Excluded, Known gene for phenotype',
+        ]
+        self.assertListEqual(self._get_variant_fields(), expected_fields)
+
+        SavedVariant.objects.filter(family__guid=KEY_VARIANT_FAMILY_GUID).update(selected_main_transcript_id=None)
+        expected_fields[2] = 'ENST00000262738.3:c.3955G\\>A'
+        expected_fields[3] = 'ENST00000505820.2:c.1586-17C\\>G'
+        self.assertListEqual(self._get_variant_fields(), expected_fields)
 
 
 EXPECTED_RESEARCHER_REPORT = '''# Family analysis summary: 1

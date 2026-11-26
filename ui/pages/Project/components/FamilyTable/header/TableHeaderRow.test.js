@@ -4,7 +4,9 @@ import Adapter from '@wojtekmaj/enzyme-adapter-react-17'
 import configureMockStore from 'redux-mock-store'
 import thunk from 'redux-thunk'
 import { Provider } from 'react-redux'
-import { FAMILY_FIELD_ID, FAMILY_FIELD_ANALYSIS_STATUS, FAMILY_FIELD_SAVED_VARIANTS } from 'shared/utils/constants'
+import {
+  FAMILY_FIELD_ID, FAMILY_FIELD_ANALYSIS_STATUS, FAMILY_FIELD_SAVED_VARIANTS, FAMILY_FIELD_FIRST_SAMPLE,
+} from 'shared/utils/constants'
 import TableHeaderRow from './TableHeaderRow'
 import { CASE_REVIEW_TABLE_NAME } from '../../../constants'
 
@@ -270,4 +272,60 @@ test('filters visible families by required metadata presence/absence', () => {
   }
   const wrapperRequiredFields = renderHeaderRow({}, requiredFieldsState)
   expect(headerText(wrapperRequiredFields)).toEqual('Showing 1 out of 2 families')
+})
+
+describe('data loaded date filters', () => {
+  const filterState = firstSample => ({
+    ...STATE_WITH_2_FAMILIES,
+    familyTableFilterState: { R0237_1000_genomes_demo: { firstSample } },
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  test('groups the data loaded filter options by data type, loaded date and metadata', () => {
+    const wrapper = renderHeaderRow({ fields: [{ id: FAMILY_FIELD_FIRST_SAMPLE }] })
+
+    const options = wrapper.find('BaseFamilyTableFilter').prop('options')
+    expect(options.map(({ category }) => category)).toEqual([
+      ...Array(5).fill('Data Type'), ...Array(3).fill('Loaded Date'), ...Array(2).fill('Metadata'),
+    ])
+    expect(options.filter(({ category }) => category === 'Loaded Date').map(({ value, name }) => [value, name])).toEqual([
+      ['SHOW_DATA_LOADED_PAST_WEEK', 'Data Loaded Within Past Week'],
+      ['SHOW_DATA_LOADED_PAST_MONTH', 'Data Loaded Within Past Month'],
+      ['SHOW_DATA_LOADED_PAST_3_MONTHS', 'Data Loaded Within Past 3 Months'],
+    ])
+  })
+
+  test('filters visible families by how recently their data was loaded', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2018-03-15T12:00:00.000Z'))
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED_PAST_WEEK'])))).toEqual(
+      'Showing 1 out of 2 families',
+    )
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED', 'SHOW_DATA_LOADED_PAST_WEEK'])))).toEqual(
+      'Showing 1 out of 2 families',
+    )
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED_SV', 'SHOW_DATA_LOADED_PAST_WEEK'])))).toEqual(
+      'Showing 0 out of 2 families',
+    )
+
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2018-04-01T12:00:00.000Z'))
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED_PAST_WEEK'])))).toEqual(
+      'Showing 0 out of 2 families',
+    )
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED_PAST_MONTH'])))).toEqual(
+      'Showing 1 out of 2 families',
+    )
+    expect(headerText(renderHeaderRow({}, filterState(['SHOW_DATA_LOADED'])))).toEqual(
+      'Showing 1 out of 2 families',
+    )
+  })
+
+  test('keeps the metadata filters as alternatives to the loaded date filters', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2018-04-01T12:00:00.000Z'))
+    expect(headerText(renderHeaderRow(
+      {}, filterState(['SHOW_DATA_LOADED_PAST_WEEK', 'SHOW_NO_PHENOTYPES_ENTERED']),
+    ))).toEqual('Showing all 2 families')
+  })
 })

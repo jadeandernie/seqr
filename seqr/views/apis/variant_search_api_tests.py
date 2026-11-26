@@ -166,7 +166,10 @@ class VariantSearchAPITest(object):
         })
         self.assertDictEqual(response_json['familiesByGuid']['F000001_1'], {
             'projectGuid': PROJECT_GUID, 'familyGuid': 'F000001_1', 'displayName': '1', 'analysisStatus': 'Q',
-            'assignedAnalyst': None, 'sampleTypes': [{'datasetType': 'SNV_INDEL', 'sampleType': 'WES', 'isActive': True}],
+            'assignedAnalyst': None, 'sampleTypes': [
+                {'datasetType': 'SNV_INDEL', 'sampleType': 'WES', 'isActive': True, 'loadedDate': loaded_date}
+                for loaded_date in ['2017-02-05T06:12:55.397+00:00', '2017-02-05T06:13:55.397+00:00']
+            ],
             'analysedBy': [{'createdBy': 'Test No Access User', 'dataType': 'SNP', 'lastModifiedDate': '2022-07-22T19:27:08.563+00:00'}],
         })
 

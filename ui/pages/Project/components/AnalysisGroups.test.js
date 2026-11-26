@@ -82,3 +82,27 @@ test('renders a sync icon and criteria fields for a dynamic analysis group', () 
   const popupContent = wrapper.find('Popup').prop('content')
   expect(shallow(popupContent[0]).prop('field')).toEqual('analysisStatus')
 })
+
+test('renders the data loaded date criteria of a dynamic analysis group', () => {
+  const store = configureStore([thunk])({
+    ...STATE_WITH_2_FAMILIES,
+    analysisGroupsByGuid: {
+      AG0000183_test_group: {
+        ...STATE_WITH_2_FAMILIES.analysisGroupsByGuid.AG0000183_test_group,
+        criteria: { firstSample: ['SHOW_DATA_LOADED_SV', 'SHOW_DATA_LOADED_PAST_MONTH'] },
+      },
+    },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <BrowserRouter>
+        <AnalysisGroups />
+      </BrowserRouter>
+    </Provider>
+  )
+
+  const popupContent = wrapper.find('Popup').prop('content')
+  const criteria = mount(<Provider store={store}>{popupContent[0]}</Provider>)
+  expect(criteria.text()).toContain('Data Loaded - SV')
+  expect(criteria.text()).toContain('Data Loaded Within Past Month')
+})

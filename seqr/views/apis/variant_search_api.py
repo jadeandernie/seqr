@@ -434,7 +434,10 @@ def search_context_handler(request):
         familyGuid=F('guid'),
         analysisStatus=F('analysis_status'),
         sampleTypes=ArrayAgg(
-            JSONObject(sampleType='individual__active_datasets__sample_type', datasetType='individual__active_datasets__dataset_type', isActive=Value(True)),
+            JSONObject(
+                sampleType='individual__active_datasets__sample_type', datasetType='individual__active_datasets__dataset_type',
+                loadedDate='individual__active_datasets__loaded_date', isActive=Value(True),
+            ),
             distinct=True, filter=Q(individual__active_datasets__dataset_type__isnull=False),
         ),
         **FAMILY_ADDITIONAL_VALUES,

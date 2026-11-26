@@ -14,6 +14,7 @@ import {
 } from '../components/form/Inputs'
 
 import { stripMarkdown, snakecaseToTitlecase, camelcaseToTitlecase } from './stringUtils'
+import { getPastDateString, isOnOrAfterDate } from './dateUtils'
 import { ColoredIcon } from '../components/StyledComponents'
 import HpoPanel from '../components/panel/HpoPanel'
 
@@ -390,10 +391,14 @@ const SHOW_ANALYSED_BY_ME = 'SHOW_ANALYSED_BY_ME'
 const SHOW_ANALYSED = 'SHOW_ANALYSED'
 const SHOW_NOT_ANALYSED = 'SHOW_NOT_ANALYSED'
 
-const hasMatchingDatasetFilter = isMatchingDataset => (family, user, activeDatasetsByFamily) => (
-  (family.sampleTypes || activeDatasetsByFamily[family.familyGuid] || []).some(
-    sample => isMatchingDataset(sample),
-  ))
+const DATA_TYPE_CATEGORY = 'Data Type'
+const LOADED_DATE_CATEGORY = 'Loaded Date'
+
+const LOADED_DATE_CUTOFFS = [
+  ['WEEK', 'Week', { days: 7 }],
+  ['MONTH', 'Month', { months: 1 }],
+  ['3_MONTHS', '3 Months', { months: 3 }],
+]
 
 export const ASSIGNED_TO_ME_FILTER = {
   value: SHOW_ASSIGNED_TO_ME,
@@ -447,25 +452,33 @@ export const CATEGORY_FAMILY_FILTERS = {
     {
       value: SHOW_DATA_LOADED,
       name: 'Data Loaded',
-      createFilter: hasMatchingDatasetFilter(() => true),
+      category: DATA_TYPE_CATEGORY,
+      datasetFilter: () => true,
     },
     {
       value: `${SHOW_DATA_LOADED}_RNA`,
       name: 'Data Loaded - RNA',
+      category: DATA_TYPE_CATEGORY,
       createFilter: family => family.hasRna,
     },
     ...[DATASET_TYPE_SV_CALLS, DATASET_TYPE_MITO_CALLS].map(dataType => ({
       value: `${SHOW_DATA_LOADED}_${dataType}`,
       name: `Data Loaded -${DATASET_TITLE_LOOKUP[dataType]}`,
-      createFilter: hasMatchingDatasetFilter(
-        ({ datasetType }) => datasetType === dataType,
-      ),
+      category: DATA_TYPE_CATEGORY,
+      datasetFilter: ({ datasetType }) => datasetType === dataType,
     })),
     {
       value: `${SHOW_DATA_LOADED}_PHENO`,
       name: 'Data Loaded - Phenotype Prioritization',
+      category: DATA_TYPE_CATEGORY,
       createFilter: family => family.hasPhenotypePrioritization,
     },
+    ...LOADED_DATE_CUTOFFS.map(([key, title, offset]) => ({
+      value: `${SHOW_DATA_LOADED}_PAST_${key}`,
+      name: `Data Loaded Within Past ${title}`,
+      category: LOADED_DATE_CATEGORY,
+      datasetFilter: ({ loadedDate }, now) => isOnOrAfterDate(loadedDate, getPastDateString(now, offset)),
+    })),
   ],
 }
 

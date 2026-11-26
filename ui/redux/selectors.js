@@ -508,6 +508,10 @@ const isAnalysedBy = (family, analysedByFilter, user, analysedByOptions) => {
   return requireNoAnalysedBy ? filteredAnalysedBy.length === 0 : filteredAnalysedBy.length > 0
 }
 
+const groupDatasetFilters = options => Object.values(options.filter(opt => opt.datasetFilter).reduce(
+  (acc, { category, datasetFilter }) => ({ ...acc, [category]: [...(acc[category] || []), datasetFilter] }), {},
+))
+
 export const familyPassesFilters = createSelector(
   getUser,
   getActiveDatasetsByFamily,
@@ -517,11 +521,17 @@ export const familyPassesFilters = createSelector(
     if (groupedFilters.analysedBy && !isAnalysedBy(family, groupedFilters.analysedBy, user, analysedByOptions)) {
       return false
     }
+    const now = new Date(Date.now())
+    const datasets = family.sampleTypes || activeDatasetsByFamily[family.familyGuid] || []
     return Object.entries(groupedFilters).every(([key, groupVals]) => {
-      const filters = categoryFilters[key]?.filter(
-        opt => groupVals.includes(opt.value) && opt.createFilter,
-      ).map(opt => opt.createFilter)
-      return !filters?.length || filters.some(filter => filter(family, user, activeDatasetsByFamily))
+      const options = categoryFilters[key]?.filter(opt => groupVals.includes(opt.value)) || []
+      const filters = options.filter(opt => opt.createFilter).map(opt => opt.createFilter)
+      const datasetFilterGroups = groupDatasetFilters(options)
+      return (!filters.length && !datasetFilterGroups.length) ||
+        filters.some(filter => filter(family, user)) ||
+        datasets.some(dataset => datasetFilterGroups.length && datasetFilterGroups.every(
+          filterGroup => filterGroup.some(filter => filter(dataset, now)),
+        ))
     })
   },
 )

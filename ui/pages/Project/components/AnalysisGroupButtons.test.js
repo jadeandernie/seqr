@@ -153,6 +153,33 @@ test('renders the criteria fields with a required first criteria for a dynamic a
   expect(wrapper.find('ForwardRef(Field)[name="familyGuids"]').exists()).toBe(false)
 })
 
+test('offers the data loaded date cutoffs as dynamic analysis group criteria', () => {
+  const store = configureStore([thunk])({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'createDynamicAnalysisGroup-R0237_1000_genomes_demo': { open: true } },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <MemoryRouter>
+        <UpdateAnalysisGroupButton createDynamic />
+      </MemoryRouter>
+    </Provider>,
+  )
+
+  const criteriaField = wrapper.find('ForwardRef(Field)[name="criteria.firstSample"]')
+  expect(criteriaField.prop('includeCategories')).toBe(true)
+  expect(criteriaField.prop('options').map(({ value, category }) => [value, category])).toEqual([
+    ['SHOW_DATA_LOADED', 'Data Type'],
+    ['SHOW_DATA_LOADED_RNA', 'Data Type'],
+    ['SHOW_DATA_LOADED_SV', 'Data Type'],
+    ['SHOW_DATA_LOADED_MITO', 'Data Type'],
+    ['SHOW_DATA_LOADED_PHENO', 'Data Type'],
+    ['SHOW_DATA_LOADED_PAST_WEEK', 'Loaded Date'],
+    ['SHOW_DATA_LOADED_PAST_MONTH', 'Loaded Date'],
+    ['SHOW_DATA_LOADED_PAST_3_MONTHS', 'Loaded Date'],
+  ])
+})
+
 test('renders an icon-only create button with no button text', () => {
   const wrapper = renderWithStore(UpdateAnalysisGroupButton, { iconOnly: true })
 

@@ -232,11 +232,18 @@ export const updateVariantMainTranscript = (variantGuid, transcript) => dispatch
   },
 ).post(transcript)
 
+const LOCUS_LIST_REQUEST_FIELDS = [
+  'name', 'description', 'isPublic', 'rawItems', 'intervalGenomeVersion', 'ignoreInvalidItems',
+]
+
 export const updateLocusList = values => (dispatch) => {
   let action = 'create'
   if (values.locusListGuid) {
     action = `${values.locusListGuid}/${values.delete ? 'delete' : 'update'}`
   }
+  const requestBody = values.delete ? {} : LOCUS_LIST_REQUEST_FIELDS.reduce(
+    (acc, field) => (values[field] === undefined ? acc : { ...acc, [field]: values[field] }), {},
+  )
 
   return new HttpRequestHelper(`/api/locus_lists/${action}`,
     (responseJson) => {
@@ -248,7 +255,7 @@ export const updateLocusList = values => (dispatch) => {
         error = `${error} Invalid genes/ intervals: ${e.body.invalidLocusListItems.join(', ')}`
       }
       throw new Error(error)
-    }).post(values)
+    }).post(requestBody)
 }
 
 // root reducer

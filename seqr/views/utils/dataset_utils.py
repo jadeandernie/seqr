@@ -403,7 +403,9 @@ def _load_rna_seq(data_type, file_path, user, sample_metadata_mapping=None, proj
         )
 
     if sample_guid_ids_to_load:
-        persist_temp_file(file_name_prefix, user, src_suffix='/*.json.gz')
+        persist_temp_file(file_name_prefix, dir_file_names=[
+            os.path.basename(_get_sample_file_path(file_dir, sample_guid)) for sample_guid in sorted(sample_guid_ids_to_load)
+        ])
 
     return sorted(sample_guid_ids_to_load.keys()), file_name_prefix, info, warnings
 

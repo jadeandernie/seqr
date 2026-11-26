@@ -107,4 +107,4 @@ def write_multiple_files(files, file_path, gzip_file=False, **kwargs):
             with open_func(current_file, open_mode) as f:
                 f.write(content)
             if is_gs_path:
-                mv_file_to_gs(current_file, f'{file_path}/{filename}')
+                mv_file_to_gs(current_file, f'{file_path.rstrip("/")}/{os.path.basename(current_file)}')

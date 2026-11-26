@@ -1,15 +1,15 @@
 import json
 import mock
 import responses
-import subprocess # nosec
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from google.api_core.exceptions import Forbidden
+from google.auth.exceptions import RefreshError
 from django.urls.base import reverse
 from seqr.models import IgvSample
 from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, update_individual_igv_sample, \
     receive_bulk_igv_table_handler
-from seqr.views.apis.igv_api import GS_STORAGE_ACCESS_CACHE_KEY
-from seqr.views.utils.test_utils import AnvilAuthenticationTestCase
+from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, MockGoogleStorage
 
 STREAMING_READS_CONTENT = [b'CRAM\x03\x83', b'\\\t\xfb\xa3\xf7%\x01', b'[\xfc\xc9\t\xae']
 PROJECT_GUID = 'R0001_1kg'
@@ -19,66 +19,60 @@ OTHER_GS_SAMPLE_GUID = 'S000147_na20870'
 
 
 @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
-@mock.patch('seqr.utils.file_utils.subprocess.Popen')
 class IgvAPITest(AnvilAuthenticationTestCase):
     fixtures = ['users', 'social_auth', '1kg_project']
 
+    def setUp(self):
+        super().setUp()
+        self.mock_gcs = MockGoogleStorage().start(self)
+
     @responses.activate
-    @mock.patch('seqr.utils.file_utils.logger')
-    @mock.patch('seqr.views.apis.igv_api.safe_redis_get_json')
-    @mock.patch('seqr.views.apis.igv_api.safe_redis_set_json')
-    def test_proxy_google_to_igv(self, mock_set_redis, mock_get_redis, mock_file_logger, mock_subprocess):
-        mock_ls_subprocess = mock.MagicMock()
-        mock_access_token_subprocess = mock.MagicMock()
-        mock_subprocess.side_effect = [mock_ls_subprocess, mock_access_token_subprocess]
-        mock_ls_subprocess.stdout = iter([b'CommandException: One or more URLs matched no objects.'])
-        mock_ls_subprocess.wait.return_value = 1
-        mock_access_token_subprocess.stdout = iter([b'token1\n', b'token2\n'])
-        mock_access_token_subprocess.wait.return_value = 0
-        mock_get_redis.return_value = None
+    @mock.patch('seqr.utils.google_storage_utils._READ_CREDENTIALS', None)
+    @mock.patch('seqr.utils.google_storage_utils.google.auth.transport.requests.Request')
+    @mock.patch('seqr.utils.google_storage_utils.google.auth.default')
+    def test_proxy_google_to_igv(self, mock_auth_default, mock_auth_request):
+        mock_credentials = mock.Mock(valid=False, token=None)
+
+        def _refresh(request):
+            mock_credentials.valid = True
+            mock_credentials.token = 'token1' if mock_credentials.token is None else 'token3'
+        mock_credentials.refresh.side_effect = _refresh
+        mock_auth_default.return_value = (mock_credentials, 'seqr-project')
 
         responses.add(responses.GET, 'https://storage.googleapis.com/readviz/NA20870.cram.bai',
                       stream=True,
                       body=b'\n'.join(STREAMING_READS_CONTENT), status=206)
-        responses.add(responses.POST, 'https://www.googleapis.com/oauth2/v1/tokeninfo',
-                      body=b'{"expires_in": 3599}', status=200)
 
         url = reverse(fetch_igv_track, args=[GS_SAMPLE_GUID, 'gs://readviz/NA20870.cram.bam.bai'])
         self.check_require_login(url)
         response = self.client.get(url, HTTP_RANGE='bytes=100-200')
         self.assertEqual(response.status_code, 206)
         self.assertEqual(next(response.streaming_content), b'\n'.join(STREAMING_READS_CONTENT))
-        self.assertEqual(responses.calls[1].request.headers.get('Range'), 'bytes=100-200')
-        self.assertEqual(responses.calls[1].request.headers.get('Authorization'), 'Bearer token1')
-        self.assertIsNone(responses.calls[1].request.headers.get('x-goog-user-project'))
-        mock_get_redis.assert_called_with(GS_STORAGE_ACCESS_CACHE_KEY)
-        mock_set_redis.assert_called_with(GS_STORAGE_ACCESS_CACHE_KEY, 'token1', expire=3594)
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://readviz/NA20870.cram.bam.bai', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True),  # nosec
-            mock.call('gcloud auth print-access-token', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True),  # nosec
+        self.assertEqual(responses.calls[0].request.headers.get('Range'), 'bytes=100-200')
+        self.assertEqual(responses.calls[0].request.headers.get('Authorization'), 'Bearer token1')
+        self.assertIsNone(responses.calls[0].request.headers.get('x-goog-user-project'))
+        mock_auth_default.assert_called_once_with(scopes=['https://www.googleapis.com/auth/devstorage.read_only'])
+        mock_credentials.refresh.assert_called_once_with(mock_auth_request.return_value)
+        self.mock_gcs.assert_calls(self, [
+            mock.call.exists('gs://readviz/NA20870.cram.bam.bai'),
+            mock.call.list_blobs('gs://readviz', prefix='NA20870.cram.bam.bai/', max_results=1),
         ])
-        mock_ls_subprocess.wait.assert_called_once()
-        mock_access_token_subprocess.wait.assert_called_once()
-        mock_file_logger.warning.assert_any_call(
-            'CommandException: One or more URLs matched no objects.', self.no_access_user)
 
-        mock_subprocess.reset_mock()
         response = self.client.get(url + ' | some command')
         self.assertEqual(response.status_code, 403)
-        mock_subprocess.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
         response = self.client.get(url + '.$ext!')
         self.assertEqual(response.status_code, 403)
-        mock_subprocess.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
         url = reverse(fetch_igv_track, args=[GS_SAMPLE_GUID, 'gs://some/other/path.bam'])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
-        mock_subprocess.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
-        mock_get_redis.reset_mock()
-        mock_get_redis.return_value = 'token3'
-        mock_set_redis.reset_mock()
+        # Expired credentials are refreshed
+        mock_credentials.valid = False
         sample = IgvSample.objects.get(guid=OTHER_GS_SAMPLE_GUID)
         sample.file_path = sample.file_path.replace('datasets-gcnv', 'fc-secure-datasets-gcnv')
         sample.individual_id = 4
@@ -93,12 +87,12 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         self.login_collaborator()
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(responses.calls[2].request.headers.get('Range'))
-        self.assertEqual(responses.calls[2].request.headers.get('Authorization'), 'Bearer token3')
-        self.assertEqual(responses.calls[2].request.headers.get('x-goog-user-project'), 'anvil-datastorage')
-        mock_get_redis.assert_called_with(GS_STORAGE_ACCESS_CACHE_KEY)
-        mock_set_redis.assert_not_called()
-        mock_subprocess.assert_not_called()
+        self.assertIsNone(responses.calls[1].request.headers.get('Range'))
+        self.assertEqual(responses.calls[1].request.headers.get('Authorization'), 'Bearer token3')
+        self.assertEqual(responses.calls[1].request.headers.get('x-goog-user-project'), 'anvil-datastorage')
+        mock_auth_default.assert_called_once()
+        self.assertEqual(mock_credentials.refresh.call_count, 2)
+        self.mock_gcs.assert_calls(self, [])
 
         sample = IgvSample.objects.get(guid=GS_SAMPLE_GUID)
         sample.individual_id = 19
@@ -107,7 +101,7 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         url = reverse(fetch_igv_track, args=[GS_SAMPLE_GUID, 'gs://readviz/NA20870.cram'])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
-        mock_subprocess.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
         sample.file_path = 'gs://test_bucket/NA21987.cram'
         sample.save()
@@ -117,38 +111,54 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(next(response.streaming_content), b'\n'.join(STREAMING_READS_CONTENT))
+        self.assertEqual(responses.calls[2].request.headers.get('Authorization'), 'Bearer token3')
+        self.assertEqual(mock_credentials.refresh.call_count, 2)
+
+        # Clear error when the server has no google credentials
+        mock_credentials.valid = False
+        mock_credentials.refresh.side_effect = RefreshError('Unable to acquire impersonated credentials')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json()['error'],
+            'Unable to authenticate to Google Storage: Unable to acquire impersonated credentials')
+        self.assertEqual(len(responses.calls), 3)
 
     @mock.patch('seqr.utils.file_utils.os.path.isfile')
     @mock.patch('seqr.utils.file_utils.open')
-    def test_proxy_local_to_igv(self, mock_open, mock_isfile, mock_subprocess):
+    def test_proxy_local_to_igv(self, mock_open, mock_isfile):
         mock_isfile.side_effect = [False, True, False, True]
-        mock_subprocess.return_value.stdout = STREAMING_READS_CONTENT
-        mock_open.return_value.__enter__.return_value.__iter__.return_value = STREAMING_READS_CONTENT
+        content = b'\n'.join(STREAMING_READS_CONTENT)
+        mock_file = mock_open.return_value.__enter__.return_value
+        mock_file.read.return_value = content[:151]
 
         url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, '/readviz/NA19675.cram.bam.bai'])
         self.check_require_login(url)
         response = self.client.get(url, HTTP_RANGE='bytes=100-250')
         self.assertEqual(response.status_code, 206)
-        self.assertListEqual([val for val in response.streaming_content], STREAMING_READS_CONTENT)
-        mock_subprocess.assert_called_with(
-            'dd skip=100 count=151 bs=1 if=/readviz/NA19675.cram.bai status="none"',
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)  # nosec
-        mock_open.assert_not_called()
+        self.assertEqual(response['Content-Range'], 'bytes 100-250')
+        self.assertEqual(response['Content-Length'], '151')
+        self.assertListEqual([val for val in response.streaming_content], [content[:151]])
+        mock_open.assert_called_with('/readviz/NA19675.cram.bai', 'rb')
+        mock_file.seek.assert_called_with(100)
+        mock_file.read.assert_called_with(151)
 
         # test no byte range
+        mock_file.read.side_effect = STREAMING_READS_CONTENT + [b'']
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertListEqual([val for val in response.streaming_content], STREAMING_READS_CONTENT)
         mock_open.assert_called_with('/readviz/NA19675.cram.bai', 'rb')
+        mock_file.read.assert_called_with(65536)
 
-        mock_subprocess.reset_mock()
+        mock_open.reset_mock()
         url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, '/some/local/path.bam'])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
-        mock_subprocess.assert_not_called()
+        mock_open.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
-    def test_receive_alignment_table_handler(self, mock_subprocess):
-        mock_subprocess.return_value.wait.return_value = 0
+    def test_receive_alignment_table_handler(self):
         url = reverse(receive_igv_table_handler, args=[PROJECT_GUID])
         self.check_pm_login(url)
 
@@ -185,8 +195,7 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.status_code, 200)
 
     @mock.patch('seqr.views.apis.igv_api.load_uploaded_file')
-    def test_receive_bulk_alignment_table_handler(self, mock_load_uploaded_file, mock_subprocess):
-        mock_subprocess.return_value.wait.return_value = 0
+    def test_receive_bulk_alignment_table_handler(self, mock_load_uploaded_file):
         url = reverse(receive_bulk_igv_table_handler)
         self.check_pm_login(url)
 
@@ -253,7 +262,7 @@ class IgvAPITest(AnvilAuthenticationTestCase):
 
 
     @mock.patch('seqr.utils.file_utils.os.path.isfile')
-    def test_add_alignment_sample(self, mock_local_file_exists, mock_subprocess):
+    def test_add_alignment_sample(self, mock_local_file_exists):
         url = reverse(update_individual_igv_sample, args=['I000001_na19675'])
         self.check_pm_login(url)
 
@@ -271,7 +280,6 @@ class IgvAPITest(AnvilAuthenticationTestCase):
             'Invalid file extension for "invalid_path.txt" - valid extensions are bam, cram, bigWig, junctions.bed.gz, bed.gz')
 
         mock_local_file_exists.return_value = False
-        mock_subprocess.return_value.wait.return_value = 1
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             'filePath': '/readviz/NA19675_new.cram', 'indexFilePath': None,
         }))
@@ -283,6 +291,18 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         }))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.reason_phrase, 'Error accessing "gs://readviz/NA19675_new.cram"')
+        self.mock_gcs.assert_calls(self, [
+            mock.call.exists('gs://readviz/NA19675_new.cram'),
+            mock.call.list_blobs('gs://readviz', prefix='NA19675_new.cram/', max_results=1),
+        ])
+
+        # Inaccessible buckets are reported as access errors
+        self.mock_gcs.bucket_errors['fc-secure-private'] = Forbidden('does not have storage.objects.get access')
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'filePath': 'gs://fc-secure-private/NA19675_new.cram', 'indexFilePath': None,
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.reason_phrase, 'Error accessing "gs://fc-secure-private/NA19675_new.cram"')
 
         mock_local_file_exists.return_value = True
         response = self.client.post(url, content_type='application/json', data=json.dumps({
@@ -292,7 +312,9 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.reason_phrase, 'Error accessing "gs://readviz/NA19675_new.crai"')
 
         # Send valid request
-        mock_subprocess.return_value.wait.return_value = 0
+        for path in ['gs://readviz/batch_10.dcr.bed.gz', 'gs://readviz/batch_10.junctions.bed.gz']:
+            self.mock_gcs.add_file(path, '')
+        self.mock_gcs.calls.reset_mock()
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             'filePath': '/readviz/NA19675.new.cram', 'indexFilePath': '/readviz-index/NA19675.cram.crai',
         }))
@@ -322,7 +344,7 @@ class IgvAPITest(AnvilAuthenticationTestCase):
             set(response_json['individualsByGuid']['I000001_na19675']['igvSampleGuids']),
             {'S000145_na19675', sample_guid}
         )
-        mock_subprocess.assert_called_with('gsutil ls gs://readviz/batch_10.dcr.bed.gz', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)  # nosec
+        self.mock_gcs.assert_calls(self, [mock.call.exists('gs://readviz/batch_10.dcr.bed.gz')])
 
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             'filePath': 'gs://readviz/batch_10.junctions.bed.gz', 'sampleId': 'NA19675',

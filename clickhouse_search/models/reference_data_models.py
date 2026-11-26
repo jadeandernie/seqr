@@ -1,6 +1,5 @@
 from clickhouse_backend import models
 from django.db.models import ForeignKey, PROTECT
-import requests
 
 from clickhouse_search.backend.engines import Join
 from clickhouse_search.backend.fields import Enum8Field, NestedField, UInt32FieldDeltaCodecField, DictKeyForeignKey
@@ -8,19 +7,6 @@ from clickhouse_search.backend.table_models import FixtureLoadableClickhouseMode
     RefreshableMaterializedView, RefreshableMaterializedViewMeta
 from clickhouse_search.constants import CLINVAR_ASSERTIONS, CLINVAR_PATHOGENICITIES
 from seqr.utils.xpos_utils import CHROMOSOME_CHOICES
-from settings import DATABASES, PIPELINE_RUNNER_SERVER
-
-
-def conditionally_refresh_reference_dataset(reference_dataset: str):
-    def inner(apps, schema_editor):
-        if DATABASES['default']['NAME'].startswith('test_'):
-            return
-        requests.post( # pragma: no cover
-            f"{PIPELINE_RUNNER_SERVER}/refresh_clickhouse_reference_dataset_enqueue",
-            json={"reference_dataset": reference_dataset},
-            timeout=60,
-        )
-    return inner
 
 
 def _all_variants_to_seqr_source_sql(reference_genome, dataset_type):
@@ -1812,6 +1798,59 @@ class PromoterAIDict(Dictionary):
         db_table = 'GRCh38/SNV_INDEL/reference_data/promoterAI'
         source_table = 'PromoterAISeqrVariants'
         clickhouse_query_template = 'SELECT key, max(score) from {table} GROUP BY key'
+
+class AlphagenomeAllVariants(models.ClickhouseModel):
+    variant_id = models.StringField(db_column='variantId', primary_key=True)
+    score = models.DecimalField(max_digits=9, decimal_places=5)
+
+    class Meta:
+        db_table = 'GRCh38/SNV_INDEL/reference_data/alphagenome/all_variants'
+        engine = models.MergeTree(
+            primary_key=('variant_id'),
+            order_by=('variant_id'),
+        )
+
+class AlphagenomeSeqrVariants(models.ClickhouseModel):
+    key = UInt32FieldDeltaCodecField(primary_key=True)
+    score = models.DecimalField(max_digits=9, decimal_places=5)
+
+    class Meta:
+        db_table = 'GRCh38/SNV_INDEL/reference_data/alphagenome/seqr_variants'
+        engine = models.MergeTree(
+            primary_key=('key'),
+            order_by=('key'),
+        )
+
+class AlphagenomeAllMv(RefreshableMaterializedView):
+    variant_id = models.StringField(db_column='variantId', primary_key=True)
+    score = models.StringField(null=True, blank=True)
+
+    class Meta(RefreshableMaterializedViewMeta):
+        db_table = 'GRCh38/SNV_INDEL/reference_data/alphagenome/all_variants_mv'
+        to_table = 'AlphagenomeAllVariants'
+        # Converted from DeepMind's alphagenome_variant_impact_score_snvs.tsv.gz: chrom, pos, ref, alt, and PHRED as score
+        source_url = 'https://storage.googleapis.com/seqr-reference-data/clickhouse/GRCh38/alphagenome/alphagenome.parquet/*.parquet'
+        column_selects = {
+            'variantId': "assumeNotNull(concat(replaceOne(replaceOne(chrom, 'chr', ''), 'MT', 'M'), '-', pos, '-', ref, '-', alt))",
+        }
+        create_empty = True
+
+class AlphagenomeMv(RefreshableMaterializedView):
+    key = models.UInt32Field(primary_key=True)
+    score = models.DecimalField(max_digits=9, decimal_places=5)
+
+    class Meta(ReferenceDataMvMeta):
+        db_table = 'GRCh38/SNV_INDEL/reference_data/alphagenome/all_variants_to_seqr_variants_mv'
+        to_table = 'AlphagenomeSeqrVariants'
+        source_table = 'AlphagenomeAllVariants'
+
+class AlphagenomeDict(Dictionary):
+    key = DictKeyForeignKey('EntriesSnvIndel', related_name='alphagenome')
+    score = models.DecimalField(max_digits=9, decimal_places=5)
+
+    class Meta(ReferenceDataDictMeta):
+        db_table = 'GRCh38/SNV_INDEL/reference_data/alphagenome'
+        source_table = 'AlphagenomeSeqrVariants'
 
 class BaseEigen(models.ClickhouseModel):
     score = models.DecimalField(max_digits=9, decimal_places=5)

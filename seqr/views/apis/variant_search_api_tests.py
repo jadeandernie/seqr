@@ -1,3 +1,5 @@
+from fnmatch import fnmatch
+import hashlib
 import json
 import mock
 import responses
@@ -6,9 +8,10 @@ from copy import deepcopy
 from django.db import transaction
 from django.urls.base import reverse
 
-from seqr.models import LocusList, Project, VariantSearch
+from seqr.models import Family, LocusList, Project, VariantSearch, VariantSearchResults
 from seqr.views.apis.variant_search_api import vlm_lookup_handler, search_context_handler, get_saved_search_handler, \
-    create_saved_search_handler, update_saved_search_handler, delete_saved_search_handler
+    create_saved_search_handler, update_saved_search_handler, delete_saved_search_handler, query_variants_handler, \
+    get_variant_gene_breakdown, export_variants_handler
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, LOCUS_LIST_FIELDS, PA_LOCUS_LIST_FIELDS, \
     ANALYSIS_GROUP_FIELDS, DYNAMIC_ANALYSIS_GROUP_FIELDS
 
@@ -17,6 +20,18 @@ PROJECT_GUID = 'R0001_1kg'
 SEARCH_HASH = 'd380ed0fd28c3127d07a64ea2ba907d7'
 SEARCH = {'filters': {}, 'inheritance': None}
 PROJECT_FAMILIES = [{'projectGuid': PROJECT_GUID, 'familyGuids': ['F000001_1', 'F000002_2']}]
+ALL_PROJECT_SEARCH_HASH = '0f1e2d3c4b5a69788796a5b4c3d2e1f0'
+UNSOLVED_SEARCH_HASH = '9a8b7c6d5e4f30211203f4e5d6c7b8a9'
+ALL_PROJECT_SEARCH_CONTEXT = {'allGenomeProjectFamilies': '38', 'search': SEARCH}
+COLLABORATOR_FAMILY_GUIDS = [
+    'F000001_1', 'F000002_2', 'F000003_3', 'F000004_4', 'F000005_5', 'F000006_6', 'F000007_7', 'F000008_8',
+    'F000009_9', 'F000010_10', 'F000013_13',
+]
+MANAGER_ONLY_FAMILY_GUIDS = ['F000014_14']
+COLLABORATOR_PROJECT_FAMILIES = [{'projectGuid': PROJECT_GUID, 'familyGuids': COLLABORATOR_FAMILY_GUIDS}]
+MANAGER_PROJECT_FAMILIES = [
+    *COLLABORATOR_PROJECT_FAMILIES, {'projectGuid': 'R0004_non_analyst_project', 'familyGuids': MANAGER_ONLY_FAMILY_GUIDS},
+]
 
 PROJECT_CONTEXT_FIELDS = {'locusListGuids', 'datasetTypes', 'analysisGroupsLoaded', 'projectGuid', 'name'}
 
@@ -250,6 +265,194 @@ class VariantSearchAPITest(object):
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
         self._assert_expected_search_context(response_json)
+
+
+    def _set_up_search_mocks(self):
+        self.mock_cache = {}
+        patcher = mock.patch('seqr.utils.redis_utils.redis.StrictRedis')
+        mock_redis = patcher.start().return_value
+        mock_redis.get.side_effect = self.mock_cache.get
+        mock_redis.set.side_effect = lambda key, val, **kwargs: self.mock_cache.update({key: val})
+        mock_redis.keys.side_effect = lambda pattern: [key for key in self.mock_cache if fnmatch(key, pattern)]
+        self.addCleanup(patcher.stop)
+
+        patcher = mock.patch('seqr.views.apis.variant_search_api.get_clickhouse_variants')
+        self.mock_get_variants = patcher.start()
+        self.mock_get_variants.return_value = []
+        self.addCleanup(patcher.stop)
+
+        Project.objects.update(genome_version='38')
+
+    def _assert_expected_search_families(self, search_hash, project_families, num_queries, request_body=None, query='', search=None):
+        previous_num_queries = self.mock_get_variants.call_count
+        url = reverse(query_variants_handler, args=[search_hash])
+        response = self.client.post(f'{url}{query}', content_type='application/json', data=json.dumps(request_body or {}))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {
+            'searchedVariantIds': [], 'variantsById': {},
+            'search': {'search': search or SEARCH, 'projectFamilies': project_families, 'totalResults': 0},
+        })
+        self.assertEqual(self.mock_get_variants.call_count, num_queries)
+        if num_queries > previous_num_queries:
+            searched_families = self.mock_get_variants.call_args.args[0]
+            self.assertListEqual(
+                sorted(searched_families.values_list('guid', flat=True)),
+                sorted([guid for pf in project_families for guid in pf['familyGuids']]),
+            )
+
+    def _search_cache_keys(self):
+        return {key for key in self.mock_cache if key.startswith('search_results__')}
+
+    @staticmethod
+    def _all_project_cache_key(results_model, family_guids, sort='xpos'):
+        digest = hashlib.sha256(','.join(sorted(family_guids)).encode()).hexdigest()
+        return f'search_results__{results_model.guid}__{digest}__{sort}'
+
+    def test_all_project_search_per_user_families(self):
+        self._set_up_search_mocks()
+        manager_family_guids = COLLABORATOR_FAMILY_GUIDS + MANAGER_ONLY_FAMILY_GUIDS
+
+        # A user with less access than the first requester searches their own families instead of being denied
+        self.login_manager()
+        self._assert_expected_search_families(
+            ALL_PROJECT_SEARCH_HASH, MANAGER_PROJECT_FAMILIES, request_body=ALL_PROJECT_SEARCH_CONTEXT, num_queries=1)
+        self.login_collaborator()
+        self._assert_expected_search_families(
+            ALL_PROJECT_SEARCH_HASH, COLLABORATOR_PROJECT_FAMILIES, request_body=ALL_PROJECT_SEARCH_CONTEXT, num_queries=2)
+
+        results_model = VariantSearchResults.objects.get(search_hash=ALL_PROJECT_SEARCH_HASH)
+        self.assertEqual(results_model.families.count(), 0)
+        self.assertSetEqual(self._search_cache_keys(), {
+            self._all_project_cache_key(results_model, manager_family_guids),
+            self._all_project_cache_key(results_model, COLLABORATOR_FAMILY_GUIDS),
+        })
+
+        # Pagination and sorting reuse the cached results for users with the same access
+        self._assert_expected_search_families(
+            ALL_PROJECT_SEARCH_HASH, COLLABORATOR_PROJECT_FAMILIES, num_queries=2, query='?page=2&per_page=1')
+        collaborator_cache_key = self._all_project_cache_key(results_model, COLLABORATOR_FAMILY_GUIDS)
+        self.mock_cache[collaborator_cache_key] = json.dumps([{'key': 1}])
+        with mock.patch('seqr.views.apis.variant_search_api.get_sorted_search_results') as mock_sort:
+            mock_sort.return_value = []
+            self._assert_expected_search_families(
+                ALL_PROJECT_SEARCH_HASH, COLLABORATOR_PROJECT_FAMILIES, num_queries=2, query='?sort=cadd')
+        mock_sort.assert_called_once_with([{'key': 1}], 'cadd', mock.ANY)
+        self.mock_cache[collaborator_cache_key] = '[]'
+        self.assertIn(self._all_project_cache_key(results_model, COLLABORATOR_FAMILY_GUIDS, sort='cadd'), self.mock_cache)
+        self.assertEqual(len(self._search_cache_keys()), 3)
+
+        response = self.client.get(reverse(get_variant_gene_breakdown, args=[ALL_PROJECT_SEARCH_HASH]))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'searchGeneBreakdown': {ALL_PROJECT_SEARCH_HASH: {}}, 'genesById': {}})
+        response = self.client.get(reverse(export_variants_handler, args=[ALL_PROJECT_SEARCH_HASH]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.mock_get_variants.call_count, 2)
+
+        response = self.client.post(reverse(search_context_handler), content_type='application/json', data=json.dumps(
+            {'searchHash': ALL_PROJECT_SEARCH_HASH}))
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(set(response.json()['familiesByGuid'].keys()), set(COLLABORATOR_FAMILY_GUIDS))
+
+        # A user with more access than the first requester searches all their families
+        self.login_manager()
+        self._assert_expected_search_families(ALL_PROJECT_SEARCH_HASH, MANAGER_PROJECT_FAMILIES, num_queries=2)
+
+        # Family filters are applied to the families of the current user, and identical families share cached results
+        request_body = {**ALL_PROJECT_SEARCH_CONTEXT, 'unsolvedFamiliesOnly': True}
+        unsolved_family_guids = [guid for guid in COLLABORATOR_FAMILY_GUIDS if guid not in {'F000007_7', 'F000010_10'}]
+        unsolved_project_families = [{'projectGuid': PROJECT_GUID, 'familyGuids': unsolved_family_guids}]
+        self.login_collaborator()
+        self._assert_expected_search_families(
+            UNSOLVED_SEARCH_HASH, unsolved_project_families, request_body=request_body, num_queries=3)
+        self.login_manager()
+        self._assert_expected_search_families(UNSOLVED_SEARCH_HASH, unsolved_project_families, num_queries=3)
+        Family.objects.filter(guid='F000014_14').update(analysis_status='Q')
+        self._assert_expected_search_families(
+            UNSOLVED_SEARCH_HASH, [*unsolved_project_families, MANAGER_PROJECT_FAMILIES[1]], num_queries=4)
+        self.assertEqual(VariantSearchResults.objects.get(search_hash=UNSOLVED_SEARCH_HASH).families.count(), 0)
+
+        # Families added after the first search are included
+        new_family_guid = 'F999999_new_family'
+        Family.objects.filter(id=Family.objects.create(project_id=1, family_id='new_family').id).update(guid=new_family_guid)
+        self.login_collaborator()
+        new_project_families = [
+            {'projectGuid': PROJECT_GUID, 'familyGuids': [*COLLABORATOR_FAMILY_GUIDS, new_family_guid]},
+        ]
+        self._assert_expected_search_families(ALL_PROJECT_SEARCH_HASH, new_project_families, num_queries=5)
+        self._assert_expected_search_families(UNSOLVED_SEARCH_HASH, [
+            {'projectGuid': PROJECT_GUID, 'familyGuids': [*unsolved_family_guids, new_family_guid]},
+        ], num_queries=6)
+
+        # Previous all project searches are excluded using the cached results for the current user
+        exclude_search = {**SEARCH, 'exclude': {'previousSearch': True}}
+        self._assert_expected_search_families(SEARCH_HASH, PROJECT_FAMILIES, request_body={
+            'projectFamilies': PROJECT_FAMILIES, 'previousSearchHash': ALL_PROJECT_SEARCH_HASH, 'search': exclude_search,
+        }, search={**exclude_search, 'exclude_keys': {}, 'exclude_key_pairs': {}}, num_queries=7)
+
+        Project.objects.update(genome_version='37')
+        response = self.client.post(
+            reverse(query_variants_handler, args=[ALL_PROJECT_SEARCH_HASH]), content_type='application/json', data='{}')
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'error': 'No data available for genome version "GRCh38"'})
+        response = self.client.post(reverse(search_context_handler), content_type='application/json', data=json.dumps(
+            {'searchHash': ALL_PROJECT_SEARCH_HASH}))
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'error': 'No data available for genome version "GRCh38"'})
+        self.assertEqual(self.mock_get_variants.call_count, 7)
+
+    def test_project_family_search_families(self):
+        self._set_up_search_mocks()
+        self.login_collaborator()
+
+        # The all project search marker can not be set by the client
+        search = {**SEARCH, 'all_project_families_context': {'allGenomeProjectFamilies': '38'}}
+        self._assert_expected_search_families(
+            SEARCH_HASH, PROJECT_FAMILIES, request_body={'projectFamilies': PROJECT_FAMILIES, 'search': search}, num_queries=1)
+        results_model = VariantSearchResults.objects.get(search_hash=SEARCH_HASH)
+        self.assertEqual(results_model.families.count(), 2)
+        self.assertDictEqual(results_model.variant_search.search, SEARCH)
+        self.assertSetEqual(self._search_cache_keys(), {f'search_results__{results_model.guid}__xpos'})
+
+        # Explicitly selected families are not changed by the searching user or by later requests
+        Family.objects.create(project_id=1, family_id='new_family')
+        self.login_manager()
+        self._assert_expected_search_families(
+            SEARCH_HASH, PROJECT_FAMILIES, num_queries=1, query='?page=2')
+        self.assertEqual(results_model.families.count(), 2)
+
+        self.client.force_login(self.no_access_user)
+        url = reverse(query_variants_handler, args=[SEARCH_HASH])
+        response = self.client.post(url, content_type='application/json', data='{}')
+        self.assertEqual(response.status_code, 403)
+        response = self.client.get(reverse(get_variant_gene_breakdown, args=[SEARCH_HASH]))
+        self.assertEqual(response.status_code, 403)
+        response = self.client.get(reverse(export_variants_handler, args=[SEARCH_HASH]))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.mock_get_variants.call_count, 1)
+
+    def test_legacy_all_project_search(self):
+        self._set_up_search_mocks()
+        # All project searches run before families were resolved per request stored the first requester's families
+        variant_search = VariantSearch.objects.create(search=SEARCH, created_by=self.manager_user)
+        results_model = VariantSearchResults.objects.create(search_hash=ALL_PROJECT_SEARCH_HASH, variant_search=variant_search)
+        results_model.families.set(Family.objects.filter(guid__in=COLLABORATOR_FAMILY_GUIDS + MANAGER_ONLY_FAMILY_GUIDS))
+
+        self.login_collaborator()
+        url = reverse(query_variants_handler, args=[ALL_PROJECT_SEARCH_HASH])
+        response = self.client.post(url, content_type='application/json', data='{}')
+        self.assertEqual(response.status_code, 403)
+        response = self.client.post(url, content_type='application/json', data=json.dumps(
+            {**ALL_PROJECT_SEARCH_CONTEXT, 'search': {'filters': {'different': 'search'}}}))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(results_model.families.count(), 12)
+
+        self._assert_expected_search_families(
+            ALL_PROJECT_SEARCH_HASH, COLLABORATOR_PROJECT_FAMILIES, request_body=ALL_PROJECT_SEARCH_CONTEXT, num_queries=1)
+        self.assertEqual(results_model.families.count(), 0)
+        variant_search.refresh_from_db()
+        self.assertDictEqual(variant_search.search, SEARCH)
+        self.login_manager()
+        self._assert_expected_search_families(ALL_PROJECT_SEARCH_HASH, MANAGER_PROJECT_FAMILIES, num_queries=2)
 
 
     @mock.patch('seqr.views.utils.vlm_utils.VLM_CLIENT_SECRET', 'abc123')

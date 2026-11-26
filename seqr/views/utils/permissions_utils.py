@@ -286,7 +286,7 @@ def check_families_view_permission(families, user):
     if analysis_group_guids:
         access_q |= Q(analysisgroup__guid__in=analysis_group_guids)
     no_access_families = families.exclude(access_q)
-    if no_access_families:
+    if no_access_families.exists():
         raise PermissionDenied(f"{user} does not have sufficient permissions for {','.join(no_access_families.values_list('guid', flat=True))}")
 
 

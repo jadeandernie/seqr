@@ -1,3 +1,4 @@
+import hashlib
 import json
 import jmespath
 from collections import defaultdict
@@ -31,7 +32,8 @@ from seqr.views.utils.orm_to_json_utils import get_json_for_saved_variants_with_
 from seqr.views.utils.permissions_utils import check_family_view_permission, get_project_analysis_group_guids_user_can_view, \
     login_and_policies_required, check_user_created_object_permissions, check_families_view_permission, user_is_analyst
 from seqr.views.utils.project_context_utils import get_project_analysis_groups, get_project_locus_lists
-from seqr.views.utils.variant_utils import get_variants_response, variant_dataset_type
+from seqr.views.utils.variant_utils import get_variants_response, variant_dataset_type, ALL_PROJECT_CONTEXT_SEARCH_FIELD, \
+    ALL_PROJECT_FAMILIES_FIELD
 from seqr.views.utils.vlm_utils import vlm_lookup
 
 logger = SeqrLogger(__name__)
@@ -51,16 +53,16 @@ def query_variants_handler(request, search_hash):
     except Exception as e:
         return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
-    _check_results_permission(results_model, request.user)
+    families = _get_results_families(results_model, request.user)
 
     all_variants = _get_variants_with_cache(
-        _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
+        _get_search_cache_key, _query_variants, results_model, request.user, families, sort=sort,
     )
     variants = all_variants[(page-1)*per_page:page*per_page]
 
-    response = _process_variants(variants or [], results_model.families.all(), request,
+    response = _process_variants(variants or [], families, request,
                                  genome_version=results_model.variant_search.search.get('no_access_project_genome_version'))
-    response['search'] = _get_search_context(results_model)
+    response['search'] = _get_search_context(results_model, families)
     response['search']['totalResults'] = len(all_variants)
 
     return create_json_response(response)
@@ -75,13 +77,17 @@ def _get_variants_with_cache(get_cache_key, get_variants, *args, **kwargs):
     return variants
 
 
-def _get_search_cache_key(results_model, user, sort=XPOS_SORT_KEY):
-    return 'search_results__{}__{}'.format(results_model.guid, sort)
+def _get_search_cache_key(results_model, user, families, sort=XPOS_SORT_KEY):
+    cache_fields = ['search_results', results_model.guid]
+    if _all_project_context(results_model):
+        # Families depend on the access of the requesting user
+        family_guids = ','.join(sorted(families.values_list('guid', flat=True)))
+        cache_fields.append(hashlib.sha256(family_guids.encode()).hexdigest())
+    return '__'.join([*cache_fields, sort])
 
 
-def _query_variants(results_model, user, sort=XPOS_SORT_KEY):
-    families = results_model.families.all()
-    wildcard_cache_key = _get_search_cache_key(results_model, user, sort='*')
+def _query_variants(results_model, user, families, sort=XPOS_SORT_KEY):
+    wildcard_cache_key = _get_search_cache_key(results_model, user, families, sort='*')
     unsorted_variants = safe_redis_get_wildcard_json(wildcard_cache_key)
     if unsorted_variants:
         return get_sorted_search_results(unsorted_variants, sort, families)
@@ -89,8 +95,20 @@ def _query_variants(results_model, user, sort=XPOS_SORT_KEY):
     return get_clickhouse_variants(families, user, sort=sort, **results_model.variant_search.search)
 
 
+UNSOLVED_FAMILIES_FIELD = 'unsolvedFamiliesOnly'
+TRIO_FAMILIES_FIELD = 'trioFamiliesOnly'
+ALL_PROJECT_CONTEXT_FIELDS = [ALL_PROJECT_FAMILIES_FIELD, UNSOLVED_FAMILIES_FIELD, TRIO_FAMILIES_FIELD]
+SERVER_SEARCH_FIELDS = {
+    ALL_PROJECT_CONTEXT_SEARCH_FIELD, 'no_access_project_genome_version', 'exclude_keys', 'exclude_key_pairs',
+}
+
+
 def _all_project_family_search_genome(search_context):
-    return (search_context or {}).get('allGenomeProjectFamilies')
+    return (search_context or {}).get(ALL_PROJECT_FAMILIES_FIELD)
+
+
+def _all_project_context(results_model):
+    return results_model.variant_search.search.get(ALL_PROJECT_CONTEXT_SEARCH_FIELD)
 
 
 def _all_genome_version_families(genome_version, user):
@@ -99,6 +117,27 @@ def _all_genome_version_families(genome_version, user):
     if analysis_group_guids:
         access_filter |= Q(analysisgroup__guid__in=analysis_group_guids)
     return Family.objects.filter(project__genome_version=genome_version).filter(access_filter).exclude(project__is_demo=True)
+
+
+def _filter_family_types(families, search_context):
+    if search_context.get(UNSOLVED_FAMILIES_FIELD):
+        families = families.exclude(analysis_status__in=Family.SOLVED_ANALYSIS_STATUSES)
+    if search_context.get(TRIO_FAMILIES_FIELD):
+        trio_families = families.annotate(search_sample_count=Count('individual__id', filter=Q(
+            individual__active_datasets__dataset_type=Dataset.DATASET_TYPE_VARIANT_CALLS,
+        ))).filter(
+            search_sample_count__gte=3, individual__mother__isnull=False, individual__father__isnull=False,
+        )
+        families = Family.objects.filter(id__in=trio_families.values('id'))
+    return families
+
+
+def _get_or_create_search_model(search_dict, user):
+    search_model = VariantSearch.objects.filter(search=search_dict).filter(
+        Q(created_by=user) | Q(name__isnull=False)).first()
+    if not search_model:
+        search_model = create_model_from_json(VariantSearch, {'search': search_dict}, user)
+    return search_model
 
 
 def _get_or_create_results_model(search_hash, search_context, user):
@@ -110,35 +149,25 @@ def _get_or_create_results_model(search_hash, search_context, user):
         all_project_genome_version = _all_project_family_search_genome(search_context)
         include_no_access_projects = search_context.get('includeNoAccessProjects')
         if all_project_genome_version:
-            families = _all_genome_version_families(all_project_genome_version, user)
-            if not (families or include_no_access_projects):
-                raise Exception(f'No data available for genome version "{GENOME_VERSION_LOOKUP[all_project_genome_version]}"')
+            # Families are resolved per request for the requesting user
+            families = None
         elif search_context.get('projectFamilies'):
             all_families = set()
             for project_family in search_context['projectFamilies']:
                 all_families.update(project_family['familyGuids'])
-            families = Family.objects.filter(guid__in=all_families)
+            families = _filter_family_types(Family.objects.filter(guid__in=all_families), search_context)
         else:
             raise Exception('Invalid search: no projects/ families specified')
-
-        if search_context.get('unsolvedFamiliesOnly'):
-            families = families.exclude(analysis_status__in=Family.SOLVED_ANALYSIS_STATUSES)
-        if search_context.get('trioFamiliesOnly'):
-            families = families.annotate(search_sample_count=Count('individual__id', filter=Q(
-                individual__active_datasets__dataset_type=Dataset.DATASET_TYPE_VARIANT_CALLS,
-            ))).filter(
-                search_sample_count__gte=3, individual__mother__isnull=False, individual__father__isnull=False,
-            ).distinct()
 
         search_dict = search_context.get('search', {})
         if search_context.get('previousSearchHash') and (search_dict.get('exclude') or {}).get('previousSearch'):
             search_dict.update(_get_exclude_keys(search_context['previousSearchHash'], user))
         if include_no_access_projects:
             search_dict['no_access_project_genome_version'] = all_project_genome_version
-        search_model = VariantSearch.objects.filter(search=search_dict).filter(
-            Q(created_by=user) | Q(name__isnull=False)).first()
-        if not search_model:
-            search_model = create_model_from_json(VariantSearch, {'search': search_dict}, user)
+        search_dict.pop(ALL_PROJECT_CONTEXT_SEARCH_FIELD, None)
+        if all_project_genome_version:
+            search_dict[ALL_PROJECT_CONTEXT_SEARCH_FIELD] = _parse_all_project_context(search_context)
+        search_model = _get_or_create_search_model(search_dict, user)
 
         # If a search_context request and results request are dispatched at the same time, its possible the other
         # request already created the model
@@ -147,13 +176,41 @@ def _get_or_create_results_model(search_hash, search_context, user):
             results_model = create_model_from_json(
                 VariantSearchResults, {'search_hash': search_hash, 'variant_search': search_model}, user)
 
-        results_model.families.set(families)
+        if families is not None:
+            results_model.families.set(families)
+    elif _is_legacy_all_project_search(results_model, search_context):
+        _update_legacy_all_project_search(results_model, search_context, user)
     return results_model
+
+
+def _parse_all_project_context(search_context):
+    return {field: search_context[field] for field in ALL_PROJECT_CONTEXT_FIELDS if search_context.get(field)}
+
+
+def _client_search(search):
+    return {k: v for k, v in (search or {}).items() if k not in SERVER_SEARCH_FIELDS}
+
+
+def _is_legacy_all_project_search(results_model, search_context):
+    # All project searches used to store the families of the first user to run them
+    return bool(_all_project_family_search_genome(search_context)) and not _all_project_context(results_model) and \
+        _client_search(search_context.get('search')) == _client_search(results_model.variant_search.search)
+
+
+def _update_legacy_all_project_search(results_model, search_context, user):
+    search_dict = {
+        **results_model.variant_search.search, ALL_PROJECT_CONTEXT_SEARCH_FIELD: _parse_all_project_context(search_context),
+    }
+    update_model_from_json(results_model, {'variant_search': _get_or_create_search_model(search_dict, user)}, user)
+    results_model.families.clear()
 
 
 def _get_exclude_keys(search_hash, user):
     previous_results_model = VariantSearchResults.objects.get(search_hash=search_hash)
-    results = _get_variants_with_cache(_get_search_cache_key, _query_variants, previous_results_model, user)
+    results = _get_variants_with_cache(
+        _get_search_cache_key, _query_variants, previous_results_model, user,
+        _get_search_families(previous_results_model, user),
+    )
     exclude_keys = defaultdict(list)
     exclude_key_pairs = defaultdict(list)
     for variant in results:
@@ -275,9 +332,11 @@ MAX_FAMILIES_PER_ROW = 1000
 @login_and_policies_required
 def get_variant_gene_breakdown(request, search_hash):
     results_model = VariantSearchResults.objects.get(search_hash=search_hash)
-    genome_version = _check_results_permission(results_model, request.user)
+    families = _get_results_families(results_model, request.user)
+    family = families.first()
+    genome_version = family.project.genome_version if family else None
 
-    results = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
+    results = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user, families)
     flat_variants = [
         v for variants in results for v in (variants if isinstance(variants, list) else [variants])
     ]
@@ -299,13 +358,11 @@ def get_variant_gene_breakdown(request, search_hash):
 def export_variants_handler(request, search_hash):
     results_model = VariantSearchResults.objects.get(search_hash=search_hash)
 
-    _check_results_permission(
+    families = _get_results_families(
         results_model, request.user, project_perm_check=lambda project: (not project.is_demo) or project.all_user_demo)
-
-    families = results_model.families.all()
     family_ids_by_guid = {family.guid: family.family_id for family in families}
 
-    variants = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
+    variants = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user, families)
     total_variants = len(variants)
     if total_variants > MAX_EXPORT_VARIANTS:
         raise InvalidSearchException(f'Unable to export more than {MAX_EXPORT_VARIANTS} variants ({total_variants} requested)')
@@ -406,7 +463,7 @@ def search_context_handler(request):
             results_model = _get_or_create_results_model(context['searchHash'], search_context, request.user)
         except Exception as e:
             return create_json_response({'error': str(e)}, status=400, reason=str(e))
-        families = results_model.families.all()
+        families = _get_search_families(results_model, request.user)
 
     if not families:
         error = 'Invalid context params: {}'.format(json.dumps(context))
@@ -552,24 +609,35 @@ def delete_saved_search_handler(request, saved_search_guid):
     return create_json_response({'savedSearchesByGuid': {saved_search_guid: None}})
 
 
-def _check_results_permission(results_model, user, project_perm_check=None):
-    families = Family.objects.filter(variantsearchresults=results_model)
+def _get_search_families(results_model, user):
+    all_project_context = _all_project_context(results_model)
+    if not all_project_context:
+        return Family.objects.filter(variantsearchresults=results_model)
+
+    genome_version = all_project_context[ALL_PROJECT_FAMILIES_FIELD]
+    families = _all_genome_version_families(genome_version, user)
+    if not (results_model.variant_search.search.get('no_access_project_genome_version') or families.exists()):
+        raise InvalidSearchException(f'No data available for genome version "{GENOME_VERSION_LOOKUP[genome_version]}"')
+    return _filter_family_types(families, all_project_context)
+
+
+def _get_results_families(results_model, user, project_perm_check=None):
+    families = _get_search_families(results_model, user)
     check_families_view_permission(families, user)
     if project_perm_check:
         for project in {f.project for f in families.prefetch_related('project')}:
             if not project_perm_check(project):
                 raise PermissionDenied()
-    family = families.first()
-    return family.project.genome_version if family else None
+    return families
 
 
-def _get_search_context(results_model):
+def _get_search_context(results_model, families):
     project_families = defaultdict(list)
-    for family_guid, project_guid in results_model.families.values_list('guid', 'project__guid').order_by('guid'):
+    for family_guid, project_guid in families.values_list('guid', 'project__guid').order_by('guid'):
         project_families[project_guid].append(family_guid)
 
     return {
-        'search': results_model.variant_search.search,
+        'search': {k: v for k, v in results_model.variant_search.search.items() if k != ALL_PROJECT_CONTEXT_SEARCH_FIELD},
         'projectFamilies': [
             {'projectGuid': project_guid, 'familyGuids': family_guids}
             for project_guid, family_guids in project_families.items()

@@ -13,35 +13,28 @@ import tempfile
 from typing import Optional, Union
 
 from clickhouse_backend import models
-from clickhouse_search.models.reference_data_models import ClinvarAllVariantsGRCh37SnvIndel, ClinvarAllVariantsSnvIndel, ClinvarAllVariantsMito, \
-    ClinvarMvGRCh37SnvIndel, ClinvarMvSnvIndel, ClinvarMvMito, ClinvarSearchMvGRCh37SnvIndel, ClinvarSearchMvSnvIndel, ClinvarSearchMvMito
+from clickhouse_search.constants import \
+    CLINVAR_ASSERTIONS as CORE_CLINVAR_ASSERTIONS, CLINVAR_PATHOGENICITIES as CORE_CLINVAR_PATHOGENICITIES, CLINVAR_DEFAULT_PATHOGENICITY as CORE_CLINVAR_DEFAULT_PATHOGENICITY, \
+    CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY as CORE_CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY
 from reference_data.models import DataVersions
 from seqr.utils.communication_utils import safe_post_to_slack
 
 logger = logging.getLogger(__name__)
 
-def replace_underscores_with_spaces(value: Union[str, list[str]]) -> Union[str, list[str]]:
-    if isinstance(value, str):
-        return value.replace('_', ' ')
-    elif isinstance(value, list):
-        return [s.replace('_', ' ') for s in value]
-    raise TypeError("Expected str or list[str]")
+def replace_underscores_with_spaces(value: list[str]) -> list[str]:
+    return [s.replace('_', ' ') for s in value]
 
-def replace_spaces_with_underscores(value: Union[str, list[str], list[tuple[str, int]]]) -> Union[str, list[str]]:
-    if isinstance(value, str):
-        return value.replace(' ', '_')
-    elif isinstance(value, list):
-        if len(value) > 0 and isinstance(value[0], tuple):
-            return [(t[0].replace(' ', '_'), t[1]) for t in value]
-        return [s.replace(' ', '_') for s in value]
-    raise TypeError("Expected str or list[str]")
+def replace_spaces_with_underscores(value: Union[list[str], list[tuple[str, int]]]) -> list[str]:
+    if len(value) > 0 and isinstance(value[0], tuple):
+        return [(t[0].replace(' ', '_'), t[1]) for t in value]
+    return [s.replace(' ', '_') for s in value]
 
 BATCH_SIZE = 1000
-CLINVAR_ASSERTIONS = replace_underscores_with_spaces(ClinvarAllVariantsSnvIndel.CLINVAR_ASSERTIONS)
-CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY = replace_underscores_with_spaces(ClinvarAllVariantsSnvIndel.CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY)
+CLINVAR_ASSERTIONS = replace_underscores_with_spaces(CORE_CLINVAR_ASSERTIONS)
+CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY = replace_underscores_with_spaces([CORE_CLINVAR_CONFLICTING_CLASSICATIONS_OF_PATHOGENICITY])[0]
 CLINVAR_CONFLICTING_DATA_FROM_SUBMITTERS = 'conflicting data from submitters'
-CLINVAR_DEFAULT_PATHOGENICITY = replace_underscores_with_spaces(ClinvarAllVariantsSnvIndel.CLINVAR_DEFAULT_PATHOGENICITY)
-CLINVAR_PATHOGENICITIES = replace_underscores_with_spaces(ClinvarAllVariantsSnvIndel.CLINVAR_PATHOGENICITIES)
+CLINVAR_DEFAULT_PATHOGENICITY = replace_underscores_with_spaces([CORE_CLINVAR_DEFAULT_PATHOGENICITY])[0]
+CLINVAR_PATHOGENICITIES = replace_underscores_with_spaces(CORE_CLINVAR_PATHOGENICITIES)
 CLINVAR_GOLD_STARS_LOOKUP = {
     'no classification for the single variant': 0,
     'no classification provided': 0,
@@ -205,6 +198,8 @@ def parse_submitters_and_conditions(classified_record_node: xml) -> [list[str], 
     return submitters, conditions
 
 def extract_variant_info(elem: xml.etree.ElementTree.Element, new_version: str, unenumerated_value_alerts: Optional[list] = None) -> tuple[models.ClickhouseModel, models.ClickhouseModel, models.ClickhouseModel]:
+    from clickhouse_search.models.reference_data_models import ClinvarAllVariantsGRCh37SnvIndel, ClinvarAllVariantsSnvIndel, ClinvarAllVariantsMito
+
     # Cannot use regular bool-falseyness here, as:
     # "An element with no child elements (even if it exists and has text) will be falsey."
     classified_record_node = elem.find('ClassifiedRecord')
@@ -228,7 +223,7 @@ def extract_variant_info(elem: xml.etree.ElementTree.Element, new_version: str, 
     props = {
         'version': new_version,
         'allele_id': allele_id,
-        'pathogenicity': replace_spaces_with_underscores(pathogenicity),
+        'pathogenicity': replace_spaces_with_underscores([pathogenicity])[0],
         'assertions': replace_spaces_with_underscores(assertions),
         'conflicting_pathogenicities': replace_spaces_with_underscores(conflicting_pathogenicities),
         'gold_stars': gold_stars,
@@ -254,6 +249,8 @@ def extract_variant_info(elem: xml.etree.ElementTree.Element, new_version: str, 
         )
 
 def parse_clinvar_file(gzipped_file, existing_version_obj, model_to_batch, unenumerated_value_alerts):
+    from clickhouse_search.models.reference_data_models import ClinvarAllVariantsSnvIndel
+
     for event, elem in ET.iterparse(gzipped_file, events=('start', 'end')):
         # Handle parsing the current date.
         if event == 'start' and elem.tag == 'ClinVarVariationRelease':
@@ -261,7 +258,7 @@ def parse_clinvar_file(gzipped_file, existing_version_obj, model_to_batch, unenu
             if existing_version_obj:
                 if existing_version_obj.version == new_version:
                     logger.info(f'Clinvar ClickHouse tables already successfully updated to {new_version}, gracefully exiting.')
-                    return new_version
+                    return None
             logger.info( f'Updating Clinvar ClickHouse tables to {new_version} from {existing_version_obj and existing_version_obj.version}.')
             # Drop any currently existing variants in the table that may exist due to a
             # previously failed partial run.  Note that we validate that the Postgresql existing version
@@ -291,6 +288,8 @@ class Command(BaseCommand):
     help = 'Reload all clinvar variants from weekly NCBI xml release'
 
     def handle(self, *args, **options):
+        from clickhouse_search.models.reference_data_models import ClinvarAllVariantsGRCh37SnvIndel, ClinvarAllVariantsSnvIndel, ClinvarAllVariantsMito, \
+        ClinvarMvGRCh37SnvIndel, ClinvarMvSnvIndel, ClinvarMvMito, ClinvarSearchMvGRCh37SnvIndel, ClinvarSearchMvSnvIndel, ClinvarSearchMvMito
         model_to_batch = {
             ClinvarAllVariantsGRCh37SnvIndel: [],
             ClinvarAllVariantsSnvIndel: [],
@@ -305,6 +304,9 @@ class Command(BaseCommand):
                 shutil.copyfileobj(r.raw, tmpfile)
             with gzip.open(tmpfile.name, 'rb') as gzipped_file:
                 new_version = parse_clinvar_file(gzipped_file, existing_version_obj, model_to_batch, unenumerated_value_alerts)
+
+        if not new_version:
+            return
 
         for model, batch in model_to_batch.items():
             if batch:

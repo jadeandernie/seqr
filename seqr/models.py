@@ -12,6 +12,9 @@ from django.utils.text import slugify as __slugify
 
 from guardian.shortcuts import assign_perm
 
+from seqr.utils.constants import SEX_MALE, SEX_FEMALE, SEX_UNKNOWN, FEMALE_ANEUPLOIDIES, MALE_ANEUPLOIDIES, \
+    FEMALE_SEXES, MALE_SEXES, AFFECTED_STATUS_AFFECTED, AFFECTED_STATUS_UNAFFECTED, AFFECTED_STATUS_UNKNOWN, \
+    SAMPLE_TYPE_WES, SAMPLE_TYPE_WGS, DATASET_TYPE_VARIANT_CALLS, DATASET_TYPE_SV_CALLS, DATASET_TYPE_MITO_CALLS
 from seqr.utils.logging_utils import log_model_update, log_model_bulk_update, SeqrLogger
 from seqr.utils.xpos_utils import get_chrom_pos
 from seqr.views.utils.json_utils import DjangoJSONEncoderWithSets
@@ -434,13 +437,13 @@ class YearField(models.PositiveSmallIntegerField):
 
 
 class Individual(ModelWithGUID):
-    SEX_MALE = 'M'
-    SEX_FEMALE = 'F'
-    SEX_UNKNOWN = 'U'
-    FEMALE_ANEUPLOIDIES = ['XXX', 'X0']
-    MALE_ANEUPLOIDIES = ['XXY', 'XYY']
-    FEMALE_SEXES = [SEX_FEMALE] + FEMALE_ANEUPLOIDIES
-    MALE_SEXES = [SEX_MALE] + MALE_ANEUPLOIDIES
+    SEX_MALE = SEX_MALE
+    SEX_FEMALE = SEX_FEMALE
+    SEX_UNKNOWN = SEX_UNKNOWN
+    FEMALE_ANEUPLOIDIES = FEMALE_ANEUPLOIDIES
+    MALE_ANEUPLOIDIES = MALE_ANEUPLOIDIES
+    FEMALE_SEXES = FEMALE_SEXES
+    MALE_SEXES = MALE_SEXES
     SEX_CHOICES = (
         (SEX_MALE, 'Male'),
         ('F', 'Female'),
@@ -449,9 +452,9 @@ class Individual(ModelWithGUID):
         *[(sex, sex) for sex in FEMALE_ANEUPLOIDIES],
     )
 
-    AFFECTED_STATUS_AFFECTED = 'A'
-    AFFECTED_STATUS_UNAFFECTED = 'N'
-    AFFECTED_STATUS_UNKNOWN = 'U'
+    AFFECTED_STATUS_AFFECTED = AFFECTED_STATUS_AFFECTED
+    AFFECTED_STATUS_UNAFFECTED = AFFECTED_STATUS_UNAFFECTED
+    AFFECTED_STATUS_UNKNOWN = AFFECTED_STATUS_UNKNOWN
     AFFECTED_STATUS_CHOICES = (
         (AFFECTED_STATUS_AFFECTED, 'Affected'),
         (AFFECTED_STATUS_UNAFFECTED, 'Unaffected'),
@@ -681,17 +684,17 @@ class Individual(ModelWithGUID):
 
 
 class Dataset(ModelWithGUID):
-    SAMPLE_TYPE_WES = 'WES'
-    SAMPLE_TYPE_WGS = 'WGS'
+    SAMPLE_TYPE_WES = SAMPLE_TYPE_WES
+    SAMPLE_TYPE_WGS = SAMPLE_TYPE_WGS
     SAMPLE_TYPE_CHOICES = (
         (SAMPLE_TYPE_WES, 'Exome'),
         (SAMPLE_TYPE_WGS, 'Whole Genome'),
     )
     SAMPLE_TYPE_LOOKUP = dict(SAMPLE_TYPE_CHOICES)
 
-    DATASET_TYPE_VARIANT_CALLS = 'SNV_INDEL'
-    DATASET_TYPE_SV_CALLS = 'SV'
-    DATASET_TYPE_MITO_CALLS = 'MITO'
+    DATASET_TYPE_VARIANT_CALLS = DATASET_TYPE_VARIANT_CALLS
+    DATASET_TYPE_SV_CALLS = DATASET_TYPE_SV_CALLS
+    DATASET_TYPE_MITO_CALLS = DATASET_TYPE_MITO_CALLS
     DATASET_TYPE_CHOICES = (
         (DATASET_TYPE_VARIANT_CALLS, 'Variant Calls'),
         (DATASET_TYPE_SV_CALLS, 'SV Calls'),
@@ -817,7 +820,6 @@ class SavedVariant(ModelWithGUID):
     key = models.PositiveBigIntegerField(null=True, blank=True)
 
     selected_main_transcript_id = models.CharField(max_length=20, null=True)
-    saved_variant_json = models.JSONField(default=dict)
     genotypes = models.JSONField(default=dict)
     main_transcript = models.JSONField(default=dict, encoder=DjangoJSONEncoderWithSets)
     gene_ids = ArrayField(models.CharField(max_length=20), null=True, blank=True)
@@ -1072,6 +1074,9 @@ class AnalysisGroup(ModelWithGUID):
     project = models.ForeignKey('Project', on_delete=models.CASCADE)
     families = models.ManyToManyField(Family)
 
+    workspace_namespace = models.TextField(null=True, blank=True)
+    workspace_name = models.TextField(null=True, blank=True)
+
     def __unicode__(self):
         return self.name.strip()
 
@@ -1080,7 +1085,7 @@ class AnalysisGroup(ModelWithGUID):
     class Meta:
         unique_together = ('project', 'name')
 
-        json_fields = ['guid', 'name', 'description']
+        json_fields = ['guid', 'name', 'description', 'workspace_namespace', 'workspace_name']
 
 
 class DynamicAnalysisGroup(ModelWithGUID):
@@ -1150,9 +1155,7 @@ class BulkOperationBase(models.Model):
         return models
 
     @classmethod
-    def bulk_delete(cls, user, queryset=None, **filter_kwargs):
-        if queryset is None:
-            queryset = cls.objects.filter(**filter_kwargs)
+    def bulk_delete(cls, user, queryset):
         cls.log_model_no_guid_bulk_update(queryset, user, 'delete')
         return queryset.delete()
 

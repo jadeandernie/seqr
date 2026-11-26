@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from clickhouse_search.models.postgres_dicts import AffectedDict, SexDict
+from clickhouse_search.models.postgres_dicts import AffectedDict, SexDict, IndividualMetadataDict
 from matchmaker.models import MatchmakerSubmission, MatchmakerResult
 from seqr.models import Dataset, IgvSample, RnaSample, Individual, Family, FamilyNote
 from seqr.utils.middleware import ErrorsWarningsException
@@ -20,11 +20,12 @@ def _get_record_individual_id(record):
     return record.get(JsonConstants.PREVIOUS_INDIVIDUAL_ID_COLUMN) or record[JsonConstants.INDIVIDUAL_ID_COLUMN]
 
 
-def add_or_update_individuals_and_families(project, individual_records, user, get_update_json=True, get_updated_individual_db_ids=False, get_created_counts=False, allow_features_update=False, skip_gt_stats_rebuild=False):
+def add_or_update_individuals_and_families(project, individual_records, user, get_update_json=True, get_individual_db_ids=False, get_created_counts=False, allow_features_update=False, skip_gt_stats_rebuild=False):
     updated_family_ids = set()
     updated_individuals = set()
     updated_affected = set()
     updated_sex = set()
+    updated_metadata = set()
     updated_note_ids = []
     parent_updates = []
     num_created_families = 0
@@ -54,11 +55,14 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
                 individual_id__in=[_get_record_individual_id(record) for record in individual_records]):
             individual_lookup[i.individual_id][i.family] = i
 
+    all_individuals = set()
     for record in individual_records:
-        created_individual = _update_from_record(
-            record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, parent_updates, updated_note_ids, allow_features_update)
+        created_individual, individual_db_id = _update_from_record(
+            record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update)
         if created_individual:
             num_created_individuals += 1
+        if get_individual_db_ids:
+            all_individuals.add(individual_db_id)
 
     for update in parent_updates:
         individual = update.pop('individual')
@@ -70,19 +74,21 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
 
     updated_family_models = Family.objects.filter(id__in=updated_family_ids)
     _remove_pedigree_images(updated_family_models, user)
-    if updated_affected:
+    if updated_affected or num_created_individuals > 0:
         AffectedDict.reload(user)
-        if not skip_gt_stats_rebuild:
+        if updated_affected and not skip_gt_stats_rebuild:
             trigger_rebuild_gt_stats(project, user)
-    if updated_sex:
+    if updated_sex or num_created_individuals > 0:
         SexDict.reload(user)
+    if updated_metadata or num_created_families > 0 or num_created_individuals > 0:
+        IndividualMetadataDict.reload(user)
 
     pedigree_json = None
     if get_update_json:
         pedigree_json = _get_updated_pedigree_json(updated_individuals, updated_family_models, updated_note_ids, user)
 
-    if get_updated_individual_db_ids:
-        return pedigree_json, {i.id for i in updated_individuals}
+    if get_individual_db_ids:
+        return pedigree_json, all_individuals
 
     if get_created_counts:
         return pedigree_json, num_created_families, num_created_individuals
@@ -90,7 +96,7 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
     return pedigree_json
 
 
-def _update_from_record(record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, parent_updates, updated_note_ids, allow_features_update):
+def _update_from_record(record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update):
     family_id = _get_record_family_id(record)
     family = families_by_id.get(family_id)
     created_individual = False
@@ -126,17 +132,11 @@ def _update_from_record(record, user, families_by_id, individual_lookup, updated
         record['displayName'] = ''
 
     # Update the parent ids last, so if they are referencing updated individuals they will check for the correct ID
-    if 'father' in record or 'mother' in record:
+    if record.get(JsonConstants.MATERNAL_ID_COLUMN) is not None or record.get(JsonConstants.PATERNAL_ID_COLUMN) is not None:
         parent_updates.append({
             'individual': individual,
-            'mother': record.pop('mother', None),
-            'father': record.pop('father', None),
-        })
-    elif record.get('maternalId') is not None or record.get('paternalId') is not None:
-        parent_updates.append({
-            'individual': individual,
-            'maternalId': record.pop('maternalId', None),
-            'paternalId': record.pop('paternalId', None),
+            JsonConstants.MATERNAL_ID_COLUMN: record.pop(JsonConstants.MATERNAL_ID_COLUMN, None),
+            JsonConstants.PATERNAL_ID_COLUMN: record.pop(JsonConstants.PATERNAL_ID_COLUMN, None),
         })
 
     family_notes = record.pop(JsonConstants.FAMILY_NOTES_COLUMN, None)
@@ -159,10 +159,12 @@ def _update_from_record(record, user, families_by_id, individual_lookup, updated
             updated_affected.add(individual)
         if 'sex' in updated_fields:
             updated_sex.add(individual)
+        if 'features' in updated_fields:
+            updated_metadata.add(individual)
         if family.pedigree_image:
             updated_family_ids.add(family.id)
 
-    return created_individual
+    return created_individual, individual.id
 
 
 def delete_individuals(project, individual_guids, user):

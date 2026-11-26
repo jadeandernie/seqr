@@ -27,8 +27,6 @@ PROJECT_GUID = 'R0001_1kg'
 EMPTY_PROJECT_GUID = 'R0002_empty'
 DEMO_PROJECT_GUID = 'R0003_test'
 
-PROJECT_PAGE_RESPONSE_KEYS = {'projectsByGuid'}
-
 BASE_CREATE_PROJECT_JSON = {
     'name': 'new_project', 'description': 'new project description', 'genomeVersion': '38', 'isDemo': True,
     'disableMme': True, 'consentCode': 'H',
@@ -57,14 +55,14 @@ RNA_DATA_TYPE_PARAMS = {
         'parsed_file_data': RNA_OUTLIER_SAMPLE_DATA,
         'required_columns': RNA_OUTLIER_REQUIRED_COLUMNS,
         'rows': [
-            'sampleID\tgeneID\tFDR set\tpValue\tpadjust\tzScore',
-            'NA19675_1\tENSG00000240361\tdetail1\t0.01\t0.13\t-3.1',
-            'NA19675_1\tENSG00000240361\tdetail2\t0.01\t0.13\t-3.1',
-            'NA19675_1\tENSG00000233750\tdetail1\t0.064\t0.0000057\t7.8',
-            'NA21234\tENSG00000233750\tdetail1\t0.064\t0.0000057\t7.8',
-            'HG00731\tENSG00000240361\t\t0.04\t0.112\t1.9',
-            'NA21234\tNOT_A_GENE_ID1\tdetail1\t0.064\t0.0000057\t7.8',
-            'NA21234\t\tdetail1\t0.064\t0.0000057\t7.8',
+            'sampleID,geneID,FDR set,pValue,padjust,zScore',
+            'NA19675_1,ENSG00000240361,detail1,0.01,0.13,-3.1',
+            'NA19675_1,ENSG00000240361,detail2,0.01,0.13,-3.1',
+            'NA19675_1,ENSG00000233750,detail1,0.064,0.0000057,7.8',
+            'NA21234,ENSG00000233750,detail1,0.064,0.0000057,7.8',
+            'HG00731,ENSG00000240361,,0.04,0.112,1.9',
+            'NA21234,NOT_A_GENE_ID1,detail1,0.064,0.0000057,7.8',
+            'NA21234,,detail1,0.064,0.0000057,7.8',
         ],
         'message_data_type': 'Expression Outlier',
     },
@@ -75,11 +73,11 @@ RNA_DATA_TYPE_PARAMS = {
         'required_columns': RNA_TPM_REQUIRED_COLUMNS,
         'mismatch_field': 'tpm',
         'rows': [
-            'Name\tDescription\tNA19675_1',
-            'ENSG00000240361\tsome gene of interest\t7.8',
-            'ENSG00000233750\t\t0.0',
-            'NOT_A_GENE_ID1\t\t0.064',
-            '\t\t0.064',
+            'Name,Description,NA19675_1',
+            'ENSG00000240361,some gene of interest,7.8',
+            'ENSG00000233750,,0.0',
+            'NOT_A_GENE_ID1,,0.064',
+            ',,0.064',
         ],
         'message_data_type': 'Expression',
     },
@@ -94,13 +92,13 @@ RNA_DATA_TYPE_PARAMS = {
         'row_id': 'ENSG00000233750-2-167254166-167258349-*-psi3',
         'invalid_format_field': 'p_value',
         'rows': [
-            'hgncSymbol\tseqnames\tstart\tend\tstrand\tsampleID\ttype\tpValue\tpadjust\tdeltaPsi\tcounts\tmeanCounts\ttotalCounts\tmeanTotalCounts\tnonsplitCounts',
-            'ENSG00000233750;ENSG00000240361\tchr2\t167254166\t167258349\t*\tNA19675_1\tpsi3\t1.56E-25\t-4.9\t-0.46\t166\t16.6\t1660\t1.66\t1',
-            'ENSG00000240361\tchr7\t132885746\t132975168\t*\tNA19675_1\tpsi5\t1.08E-56\t-6.53\t-0.85\t231\t0.231\t2313\t231.3\t1',
-            'ENSG00000233750\tchr2\t167258096\t167258349\t*\tNA21234\tpsi3\t1.56E-25\t6.33\t0.45\t143\t14.3\t1433\t143.3\t1',
-            '\tchr2\t167258096\t167258349\t*\tHG00731\tpsi3\t1.56E-25\t6.33\t0.45\t143\t14.3\t1433\t143.3\t1',
-            'NOT_A_GENE_ID1\tchr2\t167258096\t167258349\t*\tNA21234\tpsi3\t1.56E-25\t6.33\t0.45\t143\t14.3\t1433\t143.3\t1',
-            '\tchr2\t167258096\t167258349\t*\tNA19675_1\tpsi3\t1.56E-25\t6.33\t0.45\t143\t14.3\t1433\t143.3\t1',
+            'hgncSymbol,seqnames,start,end,strand,sampleID,type,pValue,padjust,deltaPsi,counts,meanCounts,totalCounts,meanTotalCounts,nonsplitCounts',
+            'ENSG00000233750;ENSG00000240361,chr2,167254166,167258349,*,NA19675_1,psi3,1.56E-25,-4.9,-0.46,166,16.6,1660,1.66,1',
+            'ENSG00000240361,chr7,132885746,132975168,*,NA19675_1,psi5,1.08E-56,-6.53,-0.85,231,0.231,2313,231.3,1',
+            'ENSG00000233750,chr2,167258096,167258349,*,NA21234,psi3,1.56E-25,6.33,0.45,143,14.3,1433,143.3,1',
+            ',chr2,167258096,167258349,*,HG00731,psi3,1.56E-25,6.33,0.45,143,14.3,1433,143.3,1',
+            'NOT_A_GENE_ID1,chr2,167258096,167258349,*,NA21234,psi3,1.56E-25,6.33,0.45,143,14.3,1433,143.3,1',
+            ',chr2,167258096,167258349,*,NA19675_1,psi3,1.56E-25,6.33,0.45,143,14.3,1433,143.3,1',
         ],
         'message_data_type': 'Splice Outlier',
     }
@@ -204,6 +202,7 @@ class ProjectAPITest(object):
         self.assertEqual(project.genome_version, '37')
         self.assertEqual(project.consent_code, 'H')
 
+        self.reset_logs()
         response = self.client.post(update_project_url, content_type='application/json', data=json.dumps(
             {'description': 'updated project description', 'restrictSharing': True, 'genomeVersion': '38', 'workspaceName': 'test update name'}
         ))
@@ -218,6 +217,14 @@ class ProjectAPITest(object):
         self.assertEqual(updated_project.description, 'updated project description')
         self.assertEqual(updated_project.genome_version, '37')
         self.assertEqual(updated_project.workspace_name, expected_workspace_name)
+        self.assert_json_logs(self.manager_user, [
+            ('update Project R0001_1kg', {'dbUpdate': {
+                'dbEntity': 'Project', 'entityId': 'R0001_1kg', 'updateType': 'update',
+                'updateFields': ['description', 'restrict_sharing'],
+            }}),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+            (None, {'httpRequest': mock.ANY, 'requestBody': mock.ANY}),
+        ])
 
         # test consent code
         response = self.client.post(update_project_url, content_type='application/json', data=json.dumps(
@@ -225,12 +232,19 @@ class ProjectAPITest(object):
         ))
         self.assertEqual(response.status_code, 403)
         self.login_pm_user()
+        self.reset_logs()
         response = self.client.post(update_project_url, content_type='application/json', data=json.dumps(
             {'consentCode': 'G'}
         ))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['projectsByGuid'][PROJECT_GUID]['consentCode'], 'G')
         self.assertEqual(Project.objects.get(guid=PROJECT_GUID).consent_code, 'G')
+        self.assert_json_logs(self.pm_user, [
+            ('update Project R0001_1kg', {'dbUpdate': {
+                'dbEntity': 'Project', 'entityId': 'R0001_1kg', 'updateType': 'update', 'updateFields': ['consent_code'],
+            }}),
+            (None, {'httpRequest': mock.ANY, 'requestBody': mock.ANY}),
+        ])
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', None)
     def test_create_project_no_pm(self):
@@ -285,21 +299,24 @@ class ProjectAPITest(object):
 
     def test_project_page_data(self):
         url = reverse(project_page_data, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+
+        project_fields = {*PROJECT_FIELDS, 'partialAccess'}
+        project_fields.remove('projectCategoryGuids')
+        self.check_partial_access_login(url, {
+            'projectsByGuid': {PROJECT_GUID: {**{k: mock.ANY for k in project_fields}, 'partialAccess': True}},
+        })
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
 
         response_json = response.json()
-        self.assertSetEqual(set(response_json.keys()), PROJECT_PAGE_RESPONSE_KEYS)
-        project_fields = set()
-        project_fields.update(PROJECT_FIELDS)
-        project_fields.remove('projectCategoryGuids')
+        self.assertSetEqual(set(response_json.keys()), {'projectsByGuid'})
         self.assertSetEqual(set(response_json['projectsByGuid'][PROJECT_GUID].keys()), project_fields)
         self.assertEqual(
             response_json['projectsByGuid'][PROJECT_GUID]['lastAccessedDate'][:10],
             datetime.today().strftime('%Y-%m-%d')
         )
+        self.assertFalse(response_json['projectsByGuid'][PROJECT_GUID]['partialAccess'])
 
         # Test invalid project guid
         invalid_url = reverse(project_page_data, args=['FAKE_GUID'])
@@ -316,7 +333,7 @@ class ProjectAPITest(object):
         self.assertEqual(response.status_code, 200)
 
         response_json = response.json()
-        self.assertSetEqual(set(response_json.keys()), PROJECT_PAGE_RESPONSE_KEYS)
+        self.assertSetEqual(set(response_json.keys()), {'projectsByGuid'})
         self.assertListEqual(list(response_json['projectsByGuid'].keys()), [DEMO_PROJECT_GUID])
         self.assertFalse(response_json['projectsByGuid'][DEMO_PROJECT_GUID]['canEdit'])
 
@@ -333,38 +350,22 @@ class ProjectAPITest(object):
 
     def test_project_overview(self):
         url = reverse(project_overview, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
 
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, 200)
-
-        response_json = response.json()
-        response_keys = {
-            'projectsByGuid', 'datasetsByGuid', 'familyTagTypeCounts',
+        rna_sample_counts = {
+            'S': [{'familyCounts': {'F000001_1': 2}, 'loadedDate': '2017-02-05'}],
+            'T': [{'familyCounts': {'F000001_1': 2}, 'loadedDate': '2017-02-05'}],
+            'E': [{'familyCounts': {'F000001_1': 1}, 'loadedDate': '2017-02-05'}],
         }
-        self.assertSetEqual(set(response_json.keys()), response_keys)
-
-        project_fields = {
-            'variantTagTypes', 'variantFunctionalTagTypes', 'rnaSampleCounts',
-            'projectGuid', 'mmeDeletedSubmissionCount', 'mmeSubmissionCount',
-        }
-        project_response = response_json['projectsByGuid'][PROJECT_GUID]
-        self.assertSetEqual(set(project_response.keys()), project_fields)
-        tag_type_fields = {'numTags'}
-        tag_type_fields.update(TAG_TYPE_FIELDS)
-        self.assertSetEqual(set(project_response['variantTagTypes'][0].keys()), tag_type_fields)
-        note_tag_type = project_response['variantTagTypes'][-1]
-        self.assertDictEqual(note_tag_type, {
+        expected_note_tag = {
             'variantTagTypeGuid': 'notes',
             'name': 'Has Notes',
             'category': 'Notes',
             'description': '',
             'color': 'grey',
             'order': 100,
-            'numTags': 1,
-        })
-        mme_tag_type = project_response['variantTagTypes'][-2]
-        self.assertDictEqual(mme_tag_type, {
+            'numTags': 0,
+        }
+        expected_mme_tag = {
             'variantTagTypeGuid': 'mmeSubmissionVariants',
             'name': 'MME Submission',
             'category': 'Matchmaker',
@@ -372,13 +373,54 @@ class ProjectAPITest(object):
             'color': '#6435c9',
             'order': 99,
             'numTags': 1,
+        }
+        self.check_partial_access_login(url, {
+            'projectsByGuid': {PROJECT_GUID: {
+                'projectGuid': PROJECT_GUID,
+                'mmeDeletedSubmissionCount': 0,
+                'mmeSubmissionCount': 1,
+                'rnaSampleCounts': rna_sample_counts,
+                'variantFunctionalTagTypes': mock.ANY,
+                'variantTagTypes': [
+                    {**{k: mock.ANY for k in TAG_TYPE_FIELDS}, 'numTags': num_tags} for num_tags in [1, 1, 0, 0, 0, 0]
+                ] + [expected_mme_tag, expected_note_tag],
+            }},
+            'datasetsByGuid': {
+                guid: {k: mock.ANY for k in DATASET_FIELDS} for guid in ['S000129_na19675', 'S000130_na19678']
+            },
+            'familyTagTypeCounts': {
+                'F000001_1': {'Review': 1, 'Tier 1 - Novel gene and phenotype': 1, 'MME Submission': 1},
+            },
         })
-        self.assertDictEqual(project_response['rnaSampleCounts'], {
-            'S': [{'familyCounts': {'F000001_1': 2}, 'loadedDate': '2017-02-05'}],
-            'T': [{'familyCounts': {'F000001_1': 2}, 'loadedDate': '2017-02-05'}],
-            'E': [{'familyCounts': {'F000001_1': 1}, 'loadedDate': '2017-02-05'}],
-        })
-        self.assertEqual(project_response['mmeSubmissionCount'], 1)
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        project_fields = {
+            'variantTagTypes', 'variantFunctionalTagTypes', 'rnaSampleCounts',
+            'projectGuid', 'mmeDeletedSubmissionCount', 'mmeSubmissionCount',
+        }
+        response_json = response.json()
+        response_keys = {
+            'projectsByGuid', 'datasetsByGuid', 'familyTagTypeCounts',
+        }
+        self.assertSetEqual(set(response_json.keys()), response_keys)
+
+        project_response = response_json['projectsByGuid'][PROJECT_GUID]
+        self.assertSetEqual(set(project_response.keys()), project_fields)
+        tag_type_fields = {'numTags'}
+        tag_type_fields.update(TAG_TYPE_FIELDS)
+        self.assertSetEqual(set(project_response['variantTagTypes'][0].keys()), tag_type_fields)
+        for i, num_tags in enumerate([1, 1, 1, 1, 0, 1]):
+            self.assertEqual(project_response['variantTagTypes'][i]['numTags'], num_tags)
+        note_tag_type = project_response['variantTagTypes'][-1]
+        expected_note_tag['numTags'] = 1
+        self.assertDictEqual(note_tag_type, expected_note_tag)
+        mme_tag_type = project_response['variantTagTypes'][-2]
+        self.assertDictEqual(mme_tag_type, expected_mme_tag)
+        rna_sample_counts['T'].append({'familyCounts': {'F000004_4': 1}, 'loadedDate': '2025-06-03'})
+        self.assertDictEqual(project_response['rnaSampleCounts'], rna_sample_counts)
+        self.assertEqual(project_response['mmeSubmissionCount'], 2)
         self.assertEqual(project_response['mmeDeletedSubmissionCount'], 0)
 
         self.assertEqual(len(response_json['datasetsByGuid']), 5)
@@ -430,7 +472,22 @@ class ProjectAPITest(object):
 
     def test_project_families(self):
         url = reverse(project_families, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+
+        family_fields = {
+            'individualGuids', 'discoveryGeneIds', 'caseReviewStatuses', 'caseReviewStatusLastModified',
+            'hasRequiredMetadata', 'parents', 'hasPhenotypePrioritization', 'hasRna', 'externalData',
+        }
+        family_fields.update(SUMMARY_FAMILY_FIELDS)
+        expected_family = {k: mock.ANY for k in family_fields}
+        expected_family['discoveryGeneIds'] = []
+        self.check_partial_access_login(url, {
+            'familiesByGuid': {
+                'F000001_1': {**expected_family, 'discoveryGeneIds': ['ENSG00000135953']},
+                'F000003_3': expected_family,
+                'F000005_5': expected_family,
+            },
+            'genesById': {'ENSG00000135953': mock.ANY},
+        })
 
         response_keys = {'familiesByGuid', 'genesById'}
 
@@ -443,14 +500,10 @@ class ProjectAPITest(object):
         response_json = response.json()
         self.assertSetEqual(set(response_json.keys()), response_keys)
 
+        self.assertEqual(len(response_json['familiesByGuid']), 11)
         family_1 = response_json['familiesByGuid']['F000001_1']
         family_3 = response_json['familiesByGuid']['F000003_3']
         empty_family = response_json['familiesByGuid']['F000013_13']
-        family_fields = {
-            'individualGuids', 'discoveryGeneIds', 'caseReviewStatuses', 'caseReviewStatusLastModified', 'hasRequiredMetadata',
-            'parents', 'hasPhenotypePrioritization', 'hasRna', 'externalData',
-        }
-        family_fields.update(SUMMARY_FAMILY_FIELDS)
         self.assertSetEqual(set(family_1.keys()), family_fields)
         self.assertSetEqual(set(empty_family.keys()), family_fields)
 
@@ -493,7 +546,9 @@ class ProjectAPITest(object):
 
     def test_project_individuals(self):
         url = reverse(project_individuals, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url, {'individualsByGuid': {guid: mock.ANY for guid in [
+            'I000001_na19675', 'I000002_na19678', 'I000003_na19679', 'I000007_na20870', 'I000009_na20874',
+        ]}})
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -501,6 +556,7 @@ class ProjectAPITest(object):
         response_json = response.json()
         response_keys = {'individualsByGuid'}
         self.assertSetEqual(set(response_json.keys()), response_keys)
+        self.assertEqual(len(response_json['individualsByGuid']), 14)
 
         self.assertSetEqual(set(next(iter(response_json['individualsByGuid'].values())).keys()), INDIVIDUAL_FIELDS)
         self.assertSetEqual(
@@ -535,7 +591,10 @@ class ProjectAPITest(object):
 
     def test_project_analysis_groups(self):
         url = reverse(project_analysis_groups, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url, {'analysisGroupsByGuid': {
+            'AG0000183_test_group': {k: mock.ANY for k in ANALYSIS_GROUP_FIELDS},
+            'DAG0000001_unsolved': {k: mock.ANY for k in DYNAMIC_ANALYSIS_GROUP_FIELDS},
+        }})
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -560,7 +619,7 @@ class ProjectAPITest(object):
 
     def test_project_locus_lists(self):
         url = reverse(project_locus_lists, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url)
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -579,7 +638,9 @@ class ProjectAPITest(object):
 
     def test_project_family_notes(self):
         url = reverse(project_family_notes, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+
+        note_guids = {'FAN000001_1', 'FAN000001_2', 'FAN000001_3'}
+        self.check_partial_access_login(url, {'familyNotesByGuid': {guid: mock.ANY for guid in note_guids}})
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -587,7 +648,8 @@ class ProjectAPITest(object):
         response_json = response.json()
         response_keys = {'familyNotesByGuid'}
         self.assertSetEqual(set(response_json.keys()), response_keys)
-        self.assertEqual(len(response_json['familyNotesByGuid']), 3)
+        note_guids.add('FAN000007_1')
+        self.assertSetEqual(set(response_json['familyNotesByGuid']), note_guids)
         self.assertSetEqual(
             set(next(iter(response_json['familyNotesByGuid'].values())).keys()), FAMILY_NOTE_FIELDS
         )
@@ -598,24 +660,29 @@ class ProjectAPITest(object):
 
     def test_project_mme_submisssions(self):
         url = reverse(project_mme_submisssions, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+
+        expected_response = {
+            'mmeSubmissionsByGuid': {
+                'MS000001_na19675': {
+                    **{k: mock.ANY for k in MATCHMAKER_SUBMISSION_FIELDS},
+                    'geneIds': ['ENSG00000135953'],
+                },
+            },
+            'familyNotesByGuid': {
+                guid: {k: mock.ANY for k in FAMILY_NOTE_FIELDS} for guid in ['FAN000001_1', 'FAN000001_2', 'FAN000001_3']
+            },
+        }
+        self.check_partial_access_login(url, expected_response)
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-
-        response_json = response.json()
-        response_keys = {'mmeSubmissionsByGuid', 'familyNotesByGuid'}
-        self.assertSetEqual(set(response_json.keys()), response_keys)
-        self.assertSetEqual(set(response_json['mmeSubmissionsByGuid'].keys()), {'MS000001_na19675'})
-        submission_fields = {'geneIds'}
-        submission_fields.update(MATCHMAKER_SUBMISSION_FIELDS)
-        self.assertSetEqual(set(response_json['mmeSubmissionsByGuid']['MS000001_na19675'].keys()), submission_fields)
-        self.assertListEqual(response_json['mmeSubmissionsByGuid']['MS000001_na19675']['geneIds'], ['ENSG00000135953'])
-        self.assertSetEqual(set(next(iter(response_json['familyNotesByGuid'].values())).keys()), FAMILY_NOTE_FIELDS)
+        expected_response['mmeSubmissionsByGuid']['MS000005_na20875'] = mock.ANY
+        expected_response['familyNotesByGuid']['FAN000007_1'] = mock.ANY
+        self.assertDictEqual(response.json(), expected_response)
 
         # Test empty project
         empty_url = reverse(project_mme_submisssions, args=[EMPTY_PROJECT_GUID])
-        self._check_empty_project(empty_url, response_keys)
+        self._check_empty_project(empty_url, {'mmeSubmissionsByGuid', 'familyNotesByGuid'})
 
     @mock.patch('django.contrib.humanize.templatetags.humanize.datetime')
     def test_project_notifications(self, mock_datetime):
@@ -729,7 +796,7 @@ class ProjectAPITest(object):
         self.login_manager()
 
         # Test errors
-        file = f'{self.TEMP_DIR}/new_samples.tsv.gz'
+        file = f'{self.TEMP_DIR}/new_samples.csv.gz'
         body = {'dataType': data_type, 'file': file, 'tissue': tissue, 'sequencingType': sequencing_type}
         self._set_file_not_found(file, mock_subprocess, mock_does_file_exist, mock_open)
         self.reset_logs()
@@ -739,7 +806,7 @@ class ProjectAPITest(object):
 
         mock_subprocess.return_value.wait.return_value = 0
         self._set_local_file_iter([], mock_does_file_exist, mock_open)
-        invalid_file_ext = file.replace('tsv.gz', 'xlsx')
+        invalid_file_ext = file.replace('csv.gz', 'xlsx')
         invalid_body = {**body, 'file': invalid_file_ext}
         response = self.client.post(url, content_type='application/json', data=json.dumps(invalid_body))
         self.assertEqual(response.status_code, 400)
@@ -785,7 +852,7 @@ class ProjectAPITest(object):
         # test database models are correct
         self.assertEqual(model_cls.objects.count(), initial_model_count - initial_sample_model_count)
         rna_samples = RnaSample.objects.filter(
-            tissue_type=tissue, data_type=data_type, data_source='new_samples.tsv.gz', is_active=False, sequencing_type=sequencing_type,
+            tissue_type=tissue, data_type=data_type, data_source='new_samples.csv.gz', is_active=False, sequencing_type=sequencing_type,
         )
         self.assertEqual(rna_samples.count(), 1 if single_sample_file else 2)
         guid_map = {'NA19675_1': rna_samples.get(individual_id=1).guid}
@@ -795,7 +862,7 @@ class ProjectAPITest(object):
 
         # test notifications
         subprocess_logs = self._get_expected_read_file_subprocess_calls([
-            f'gsutil cp gs://seqr-scratch-temp/new_samples.tsv.gz tmp/temp_uploads/{file_path}',
+            f'gsutil cp gs://seqr-scratch-temp/new_samples.csv.gz tmp/temp_uploads/{file_path}',
             f'gsutil mv tmp/temp_uploads/{file_path}/*.json.gz gs://seqr-scratch-temp/{file_path}',
         ], mock_subprocess, wait_command=True)
         self.assert_json_logs(self.manager_user, subprocess_logs[:1] + [
@@ -1068,6 +1135,7 @@ class LocalProjectAPITest(AuthenticationTestCase, ProjectAPITest):
         self.assertSetEqual(set(project.can_edit_group.user_set.all()), {self.pm_user})
         self.assertSetEqual(set(project.can_view_group.user_set.all()), {self.pm_user})
 
+    @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     def test_update_project_workspace(self):
         url = reverse(update_project_workspace, args=[PROJECT_GUID])
         # For non-AnVIL seqr, updating workspace should always fail
@@ -1148,7 +1216,7 @@ class AnvilProjectAPITest(AnvilAuthenticationTestCase, ProjectAPITest):
         self.mock_list_workspaces.assert_not_called()
         self.assert_no_extra_anvil_calls()
         self.mock_get_ws_access_level.assert_called_with(self.collaborator_user, 'ext-data', 'empty')
-        self.assertEqual(self.mock_get_ws_access_level.call_count, 4)
+        self.assertEqual(self.mock_get_ws_access_level.call_count, 5)
 
     def test_project_collaborators(self):
         super(AnvilProjectAPITest, self).test_project_collaborators()

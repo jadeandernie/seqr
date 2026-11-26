@@ -4,8 +4,8 @@ import mock
 import responses
 from settings import AIRTABLE_URL
 
-from seqr.models import Project, SavedVariant, RnaSample
-from seqr.views.apis.report_api import seqr_stats, anvil_export, gregor_export, family_metadata, variant_metadata
+from seqr.models import Project, RnaSample
+from seqr.views.apis.report_api import seqr_stats, sample_stats_download, anvil_export, gregor_export, family_metadata, variant_metadata
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, AirtableTest
 
 
@@ -683,11 +683,30 @@ class ReportAPITest(AirtableTest):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
-        self.assertSetEqual(set(response_json.keys()), {'projectsCount', 'individualsCount', 'familiesCount', 'sampleCountsByType'})
+        self.assertSetEqual(set(response_json.keys()), {'projectsCount', 'individualsCount', 'familiesCount', 'sampleCountsByType', 'usersCounts'})
         self.assertDictEqual(response_json['projectsCount'], self.STATS_DATA['projectsCount'])
         self.assertDictEqual(response_json['individualsCount'], self.STATS_DATA['individualsCount'])
         self.assertDictEqual(response_json['familiesCount'], self.STATS_DATA['familiesCount'])
         self.assertDictEqual(response_json['sampleCountsByType'], self.STATS_DATA['sampleCountsByType'])
+        self.assertDictEqual(response_json['usersCounts'], {
+            'total': 10, 'multipleLogins': 7, 'lastMonth': 5, 'lastYear': 5, 'thisYear': 5,
+        })
+
+        self.check_no_analyst_no_access(url, has_override=self.HAS_PM_OVERRIDE)
+
+    def test_sample_stats_download(self):
+        no_access_project = Project.objects.get(id=3)
+        no_access_project.workspace_namespace = None
+        no_access_project.save()
+
+        url = reverse(sample_stats_download)
+        self.check_analyst_login(url)
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(
+            [line.split('\t') for line in response.content.decode().strip('\n').split('\n')], self.EXPORT_DATA,
+        )
 
         self.check_no_analyst_no_access(url, has_override=self.HAS_PM_OVERRIDE)
 
@@ -824,7 +843,7 @@ class ReportAPITest(AirtableTest):
             match=[responses.matchers.query_param_matcher({'fields[]': 'SMID'}, strict_match=False)]
         )
         responses.add(
-            responses.GET, '{}/app3Y97xtbbaOopVR/GREGoR Data Model'.format(AIRTABLE_URL), json=AIRTABLE_GREGOR_RECORDS,
+            responses.GET, '{}/app3Y97xtbbaOopVR/GREGoR Data Model'.format(AIRTABLE_URL), json={'records': AIRTABLE_GREGOR_RECORDS['records'][:2]+AIRTABLE_GREGOR_RECORDS['records'][3:]},
             status=200)
 
         responses.add(responses.GET, MOCK_DATA_MODEL_URL, status=404)
@@ -856,7 +875,7 @@ class ReportAPITest(AirtableTest):
 
         recommended_warnings = [
             'The following entries are missing RNA airtable data: NA19675',
-            'The following entries are missing WES airtable data: NA19675, NA19679',
+            'The following entries are missing WES airtable data: NA19675',
             'The following entries have WGS airtable data but do not have equivalent loaded data in seqr, so airtable data is omitted: NA19675, NA20888, VCGS_FAM203_621',
             'The following entries are missing recommended "recontactable" in the "participant" table: Broad_HG00731, Broad_HG00732, Broad_HG00733, Broad_NA19678, Broad_NA20870, Broad_NA20872, Broad_NA20874, Broad_NA20875, Broad_NA20876, Broad_NA20881',
             'The following entries are missing recommended "reported_race" in the "participant" table: Broad_HG00733, Broad_NA19678, Broad_NA19679, Broad_NA20870, Broad_NA20872, Broad_NA20874, Broad_NA20875, Broad_NA20876, Broad_NA20881, Broad_NA20888',
@@ -875,6 +894,7 @@ class ReportAPITest(AirtableTest):
             f'No data model found for "{file}" table' for file in reversed(EXPECTED_GREGOR_FILES) if file not in INVALID_MODEL_TABLES
         ] + [
             missing_participant_error,
+            'The following entries are missing airtable metadata: NA19679',
             'The following tables are required in the data model but absent from the reports: subject, dna_read_data_set',
         ] + [
             'The following entries are missing required "prior_testing" in the "participant" table: Broad_HG00731, Broad_HG00732',
@@ -885,17 +905,23 @@ class ReportAPITest(AirtableTest):
             'The following entries are missing required "mean_coverage" (from Airtable) in the "aligned_dna_short_read" table: Broad_exome_VCGS_FAM203_621_D2_1',
             'The following entries have non-unique values for "alignment_software" (from Airtable) in the "aligned_dna_short_read" table: BWA-MEM-2.3 (Broad_exome_NA20888_1, Broad_exome_VCGS_FAM203_621_D2_1)',
             'The following entries have invalid values for "analysis_details" (from Airtable) in the "aligned_dna_short_read" table. Allowed values are a google bucket path starting with gs://. Invalid values: Broad_exome_VCGS_FAM203_621_D2_1 (DOI:10.5281/zenodo.4469317)',
-            'The following entries have invalid values for "date_data_generation" (from Airtable) in the "experiment_rna_short_read" table. Allowed values have data type float. Invalid values: NA19679 (2023-02-11)',
             'The following entries are missing required "experiment_id" (from Airtable) in the "genetic_findings" table: Broad_NA19675_1_21_3343353',
             'The following entries have non-unique values for "experiment_id" (from Airtable) in the "genetic_findings" table: Broad_exome_VCGS_FAM203_621_D2 (Broad_HG00731_19_1912632, Broad_HG00731_1_248367227)',
         ]
         self.assertListEqual(response.json()['errors'], validation_errors)
 
+        responses.replace(
+            responses.GET, '{}/app3Y97xtbbaOopVR/GREGoR Data Model'.format(AIRTABLE_URL), json=AIRTABLE_GREGOR_RECORDS,
+        )
         mock_open.reset_mock()
         response = self.client.post(
             url, content_type='application/json', data=json.dumps({**body, 'overrideValidation': True})
         )
         self.assertEqual(response.status_code, 200)
+        validation_errors.pop(8)
+        validation_errors.insert(17, 'The following entries have invalid values for "date_data_generation" (from Airtable) in the "experiment_rna_short_read" table. Allowed values have data type float. Invalid values: NA19679 (2023-02-11)')
+        recommended_warnings[1] += ', NA19679'
+        validation_warnings[4] = recommended_warnings[1]
         expected_response = {
             'info': ['Successfully validated and uploaded Gregor Report for 9 families'],
             'warnings': validation_errors + validation_warnings,
@@ -962,11 +988,6 @@ class ReportAPITest(AirtableTest):
         project = Project.objects.get(id=3)
         project.consent_code = 'H'
         project.save()
-
-        # For SV variant, test reports in gene associated with OMIM condition even if not annotated
-        variant = SavedVariant.objects.get(id=7)
-        variant.saved_variant_json['transcripts'] = {'ENSG00000135953': []}
-        variant.save()
 
         responses.calls.reset()
         responses.add(responses.GET, 'https://monarchinitiative.org/v3/api/entity/MONDO:0008788', status=200, json={
@@ -1329,9 +1350,17 @@ class ReportAPITest(AirtableTest):
             self.assertListEqual(
                 sorted([r['familyGuid'] for r in response.json()['rows']]), expected_families + self.ADDITIONAL_FAMILIES)
 
+    @responses.activate
     def test_variant_metadata(self):
         url = reverse(variant_metadata, args=[PROJECT_GUID])
         self.check_analyst_login(url)
+
+        responses.add(responses.GET, 'https://monarchinitiative.org/v3/api/entity/MONDO:0044970', status=200, json={
+            'id': 'MONDO:0044970',
+            'category': 'biolink:Disease',
+            'name': 'mitochondrial disease',
+            'inheritance': {},
+        })
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -1543,10 +1572,22 @@ class LocalReportAPITest(AuthenticationTestCase, ReportAPITest):
             'WES__SV': {'non_demo': 3},
             'WGS__SV': {'non_demo': 3},
             'RNA__S': {'non_demo': 3},
-            'RNA__T': {'non_demo': 2},
+            'RNA__T': {'non_demo': 3},
             'RNA__E': {'non_demo': 1},
         },
     }
+    EXPORT_DATA = [
+        ['date_loaded', 'num_samples', 'sample_type', 'dataset_type', 'is_demo'],
+        ['2017-02-05', '7', 'WES', 'Variant', 'False'],
+        ['2017-02-05', '3', 'RNA', 'Splice Outlier', 'False'],
+        ['2017-02-05', '2', 'RNA', 'TPM', 'False'],
+        ['2017-02-05', '1', 'RNA', 'Expression Outlier', 'False'],
+        ['2018-02-05', '3', 'WES', 'SV', 'False'],
+        ['2018-02-05', '3', 'WGS', 'SV', 'False'],
+        ['2020-02-05', '1', 'WGS', 'Variant', 'True'],
+        ['2022-02-05', '1', 'WES', 'Mitochondria', 'False'],
+        ['2025-06-03', '1', 'RNA', 'TPM', 'False'],
+    ]
 
     def _check_anvil_export_response(self, response, *args):
         self.assertEqual(response.status_code, 403)
@@ -1570,7 +1611,20 @@ class AnvilReportAPITest(AnvilAuthenticationTestCase, ReportAPITest):
             'WES__SV': {'internal': 3},
             'WGS__SV': {'external': 3},
             'RNA__S': {'internal': 2, 'external': 1},
-            'RNA__T': {'internal': 2},
+            'RNA__T': {'internal': 3},
             'RNA__E': {'internal': 1},
         },
     }
+    EXPORT_DATA = [
+        ['date_loaded', 'num_samples', 'sample_type', 'dataset_type', 'is_demo', 'anvil_status'],
+        ['2017-02-05', '7', 'WES', 'Variant', 'False', 'Internal'],
+        ['2017-02-05', '2', 'RNA', 'Splice Outlier', 'False', 'Internal'],
+        ['2017-02-05', '2', 'RNA', 'TPM', 'False', 'Internal'],
+        ['2017-02-05', '1', 'RNA', 'Expression Outlier', 'False', 'Internal'],
+        ['2017-02-05', '1', 'RNA', 'Splice Outlier', 'False', 'External'],
+        ['2018-02-05', '3', 'WES', 'SV', 'False', 'Internal'],
+        ['2018-02-05', '3', 'WGS', 'SV', 'False', 'External'],
+        ['2020-02-05', '1', 'WGS', 'Variant', 'True', 'No AnVIL'],
+        ['2022-02-05', '1', 'WES', 'Mitochondria', 'False', 'Internal'],
+        ['2025-06-03', '1', 'RNA', 'TPM', 'False', 'Internal'],
+    ]

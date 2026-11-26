@@ -750,27 +750,27 @@ export const INDIVIDUAL_FIELD_LOOKUP = {
 
 // CLINVAR
 
-const CLINVAR_DEFAULT_PATHOGENICITY = 'no_pathogenic_assertion'
-const CLINVAR_MAX_RISK_PATHOGENICITY = 'established_risk_allele'
-const CLINVAR_MIN_RISK_PATHOGENICITY = 'likely_risk_allele'
+const CLINVAR_DEFAULT_PATHOGENICITY = 'No_pathogenic_assertion'
+const CLINVAR_MAX_RISK_PATHOGENICITY = 'Established_risk_allele'
+const CLINVAR_MIN_RISK_PATHOGENICITY = 'Likely_risk_allele'
 const CLINVAR_PATHOGENICITIES = [
-  'pathogenic',
-  'pathogenic/likely_pathogenic',
-  'pathogenic/likely_pathogenic/established_risk_allele',
-  'pathogenic/likely_pathogenic/likely_risk_allele',
-  'pathogenic/likely_risk_allele',
-  'likely_pathogenic',
-  'likely_pathogenic/likely_risk_allele',
+  'Pathogenic',
+  'Pathogenic/Likely_pathogenic',
+  'Pathogenic/Likely_pathogenic/Established_risk_allele',
+  'Pathogenic/Likely_pathogenic/Likely_risk_allele',
+  'Pathogenic/Likely_risk_allele',
+  'Likely_pathogenic',
+  'Likely_pathogenic/Likely_risk_allele',
   CLINVAR_MAX_RISK_PATHOGENICITY,
   CLINVAR_MIN_RISK_PATHOGENICITY,
-  'conflicting_interpretations_of_pathogenicity',
-  'uncertain_risk_allele',
-  'uncertain_significance/uncertain_risk_allele',
-  'uncertain_significance',
+  'Conflicting_classifications_of_pathogenicity',
+  'Uncertain_risk_allele',
+  'Uncertain_significance/Uncertain_risk_allele',
+  'Uncertain_significance',
   CLINVAR_DEFAULT_PATHOGENICITY,
-  'likely_benign',
-  'benign/likely_benign',
-  'benign',
+  'Likely_benign',
+  'Benign/Likely_benign',
+  'Benign',
 ].reverse().reduce((acc, path, i) => ({ ...acc, [path]: i }), {})
 
 const HGMD_SEVERITY = {
@@ -874,7 +874,6 @@ export const VEP_GROUP_SYNONYMOUS = 'synonymous'
 export const VEP_GROUP_OTHER = 'other'
 export const VEP_GROUP_SV = 'structural'
 export const VEP_GROUP_SV_CONSEQUENCES = 'structural_consequence'
-export const VEP_GROUP_SV_NEW = 'new_structural_variants'
 
 export const SV_TYPES = [
   {
@@ -997,14 +996,6 @@ const VEP_SV_CONSEQUENCES = [
     description: 'An SV is predicted to duplicate the transcription start site',
     text: 'Transcription Start Site Duplication',
     value: 'TSS_DUP',
-  },
-]
-
-const SV_NEW_OPTIONS = [
-  {
-    description: 'An SV with no overlap in a previous callset',
-    text: 'New Calls Only',
-    value: 'NEW',
   },
 ]
 
@@ -1225,7 +1216,7 @@ export const GROUPED_VEP_CONSEQUENCES = ORDERED_VEP_CONSEQUENCES.reduce((acc, co
   const group = consequence.group || VEP_GROUP_OTHER
   acc[group] = [...(acc[group] || []), consequence]
   return acc
-}, { [VEP_GROUP_SV_NEW]: SV_NEW_OPTIONS })
+}, {})
 
 export const VEP_CONSEQUENCE_ORDER_LOOKUP = ORDERED_VEP_CONSEQUENCES.reduce(
   (acc, consequence, i) => ({ ...acc, [consequence.value]: i }), {},
@@ -1281,7 +1272,7 @@ const SORT_BY_PRIORITIZED_GENE = 'PRIORITIZED_GENE'
 const SORT_BY_PROTEIN_CONSQ = 'PROTEIN_CONSEQUENCE'
 const SORT_BY_GNOMAD_GENOMES = 'GNOMAD'
 const SORT_BY_GNOMAD_EXOMES = 'GNOMAD_EXOMES'
-const SORT_BY_CALLSET_AF = 'CALLSET_AF'
+const SORT_BY_SEQR_AC = 'SEQR_AC'
 const SORT_BY_CONSTRAINT = 'CONSTRAINT'
 const SORT_BY_CADD = 'CADD'
 const SORT_BY_REVEL = 'REVEL'
@@ -1298,27 +1289,8 @@ export const getPermissionedHgmdClass = (variant, user, familiesByGuid, projectB
     familyGuid => projectByGuid[familiesByGuid[familyGuid].projectGuid].enableHgmd,
   )) && variant.hgmd && variant.hgmd.class
 
-export const clinvarSignificance = (clinvar) => {
-  let { pathogenicity, assertions } = clinvar || {}
-  const { clinicalSignificance } = clinvar || {}
-  if (clinicalSignificance && !pathogenicity) {
-    [pathogenicity, ...assertions] = clinicalSignificance.split(/[,|]/)
-    if (pathogenicity === 'Pathogenic/Likely_pathogenic/Pathogenic') {
-      pathogenicity = 'Pathogenic/Likely_pathogenic'
-    } else if (pathogenicity === 'Pathogenic/Pathogenic') {
-      pathogenicity = 'Pathogenic'
-    }
-    if (!(pathogenicity.replace(' ', '_').toLowerCase() in CLINVAR_PATHOGENICITIES)) {
-      assertions = [pathogenicity, ...assertions]
-      pathogenicity = CLINVAR_DEFAULT_PATHOGENICITY
-    }
-    assertions = assertions.map(a => a.replace(/^_/, ''))
-  }
-
-  return { pathogenicity, assertions, severity: CLINVAR_PATHOGENICITIES[pathogenicity?.replace(' ', '_').toLowerCase()] }
-}
-
-export const clinvarColor = (severity, pathColor, riskColor, benignColor) => {
+export const clinvarColor = (clinvar, pathColor, riskColor, benignColor) => {
+  const severity = CLINVAR_PATHOGENICITIES[clinvar?.pathogenicity]
   if (severity > CLINVAR_PATHOGENICITIES[CLINVAR_MAX_RISK_PATHOGENICITY]) {
     return pathColor
   }
@@ -1332,10 +1304,10 @@ export const clinvarColor = (severity, pathColor, riskColor, benignColor) => {
 }
 
 const clinsigSeverity = (variant, user, familiesByGuid, projectByGuid) => {
-  const { pathogenicity, severity } = clinvarSignificance(variant.clinvar)
+  const { pathogenicity } = variant.clinvar || {}
   const hgmdSignificance = getPermissionedHgmdClass(variant, user, familiesByGuid, projectByGuid)
   if (!pathogenicity && !hgmdSignificance) return -10
-  const clinvarSeverity = pathogenicity ? severity + 1 : 0.1
+  const clinvarSeverity = pathogenicity ? CLINVAR_PATHOGENICITIES[pathogenicity] + 1 : 0.1
   const hgmdSeverity = HGMD_SEVERITY[hgmdSignificance] || 0
   return clinvarSeverity + hgmdSeverity
 }
@@ -1409,7 +1381,7 @@ const VARIANT_SORT_OPTONS = [
   },
   { value: SORT_BY_GNOMAD_GENOMES, text: 'gnomAD Genomes Frequency', comparator: populationComparator('gnomad_genomes') },
   { value: SORT_BY_GNOMAD_EXOMES, text: 'gnomAD Exomes Frequency', comparator: populationComparator('gnomad_exomes') },
-  { value: SORT_BY_CALLSET_AF, text: 'Callset AF', comparator: populationComparator('callset') },
+  { value: SORT_BY_SEQR_AC, text: 'seqr AC', comparator: (a, b) => a.populations?.seqr?.ac - b.populations?.seqr?.ac },
   { value: SORT_BY_CADD, text: 'CADD', comparator: predictionComparator('cadd') },
   { value: SORT_BY_REVEL, text: 'REVEL', comparator: predictionComparator('revel') },
   { value: SORT_BY_EIGEN, text: 'Eigen', comparator: predictionComparator('eigen') },
@@ -1554,6 +1526,21 @@ const REVERSE_PRED_COLOR_MAP = [...PRED_COLOR_MAP].reverse()
 export const ORDERED_PREDICTOR_FIELDS = [
   { field: 'cadd', group: CODING_IN_SILICO_GROUP, thresholds: [0.151, 22.8, 25.3, 28.1, undefined], min: 1, max: 99, fieldTitle: 'CADD', citation: CLINGEN_CITATION },
   { field: 'revel', group: MISSENSE_IN_SILICO_GROUP, thresholds: [0.0161, 0.291, 0.644, 0.773, 0.932], fieldTitle: 'REVEL', citation: CLINGEN_CITATION },
+  {
+    field: 'alphagenome',
+    group: CODING_IN_SILICO_GROUP,
+    thresholds: [undefined, 18, 23, 27, undefined],
+    max: 99,
+    fieldTitle: 'AlphaGenome',
+    getHref: ({ chrom, pos, ref, alt }) => (
+      `https://deepmind.google.com/science/alphagenome/atlas?q=chr${chrom}:${pos}:${ref}%3E${alt}&m=variant`
+    ),
+    citation: {
+      name: 'Avsec Ž, Latysheva N, Cheng J, et al. Advancing regulatory variant effect prediction with AlphaGenome. Nature. 2026;649(8099):1206-1218',
+      linkText: 'doi:10.1038/s41586-025-10014-0',
+      href: 'https://doi.org/10.1038/s41586-025-10014-0',
+    },
+  },
   { field: 'alphamissense', fieldTitle: 'AlphaMissense', group: MISSENSE_IN_SILICO_GROUP, thresholds: ALPHAMISSENSE_THRESHHOLDS, citation: { name: '2025 ClinGen SVI recommendations', pmid: '40084623' } },
   { field: 'mpc', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1.36, 1.828, undefined], max: 5, fieldTitle: 'MPC' },
   {
@@ -1582,7 +1569,6 @@ export const ORDERED_PREDICTOR_FIELDS = [
   { field: 'mut_pred', thresholds: [0.0101, 0.392, 0.737, 0.829, 0.932], fieldTitle: 'MutPred', citation: CLINGEN_CITATION },
   { field: 'primate_ai', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.484, 0.79, 0.867, undefined], fieldTitle: 'PrimateAI', citation: CLINGEN_CITATION },
   { field: 'eigen', group: CODING_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1, 2, undefined], max: 99 },
-  { field: 'dann', displayOnly: true, thresholds: [undefined, undefined, 0.93, 0.96, undefined] },
   { field: 'strvctvre', group: SV_IN_SILICO_GROUP, thresholds: [undefined, undefined, 0.5, 0.75, undefined] },
   { field: 'polyphen', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.114, 0.978, 0.999, undefined], fieldTitle: 'PolyPhen', citation: CLINGEN_CITATION },
   { field: 'sift', reverseThresholds: true, thresholds: [undefined, 0, 0.002, 0.081, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'SIFT', citation: CLINGEN_CITATION },
@@ -1594,9 +1580,13 @@ export const ORDERED_PREDICTOR_FIELDS = [
     fieldTitle: 'gnomAD Constraint',
     displayOnly: true,
     thresholds: [undefined, undefined, 2.18, 4, undefined],
-    citation: CLINGEN_CITATION,
+    citation: {
+      name: '2022 recommendations from the gnomAD team',
+      linkText: 'Blog',
+      href: 'https://gnomad.broadinstitute.org/news/2022-10-the-addition-of-a-genomic-constraint-metric-to-gnomad/',
+    },
   },
-  { field: 'haplogroup_defining', indicatorMap: { Y: { color: 'green', value: '' }, true: { color: 'green', value: '' } } },
+  { field: 'haplogroup_defining', indicatorMap: { true: { color: 'green', value: '' } } },
   { field: 'mitotip', indicatorMap: MITOTIP_MAP, fieldTitle: 'MitoTIP' },
   { field: 'hmtvar', thresholds: [undefined, undefined, 0.35, 0.35, undefined], fieldTitle: 'HmtVar' },
   { field: 'mlc', thresholds: [undefined, 0.5, 0.5, 0.75, undefined], fieldTitle: 'MLC' },
@@ -1628,7 +1618,7 @@ export const predictionFieldValue = (
     )
   }
 
-  return indicatorMap && (indicatorMap[value[0]] || indicatorMap[value])
+  return indicatorMap && indicatorMap[value]
 }
 export const predictorColorRanges = (thresholds, { citation, reverseThresholds, thresholdMap, absValue }) => (
   <div>
@@ -1665,8 +1655,10 @@ export const predictorColorRanges = (thresholds, { citation, reverseThresholds, 
     })}
     {citation && (
       <small>
-        {`Based on ${citation.name} (PMID: `}
-        <a href={`https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}`} target="_blank" rel="noreferrer">{citation.pmid}</a>
+        {`Based on ${citation.name} (${citation.pmid ? 'PMID: ' : ''}`}
+        <a href={citation.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}` : citation.href} target="_blank" rel="noreferrer">
+          {citation.pmid || citation.linkText}
+        </a>
         )
       </small>
     )}
@@ -1727,7 +1719,7 @@ export const VARIANT_EXPORT_DATA = [
   { header: 'alt' },
   { header: 'gene', getVal: getVariantGene },
   { header: 'worst_consequence', getVal: variant => getVariantMainTranscript(variant).majorConsequence },
-  { header: 'callset_freq', getVal: variant => getPopAf('callset')(variant) || getPopAf('seqr')(variant) },
+  { header: 'callset_freq', getVal: variant => getPopAf('seqr')(variant) },
   { header: 'exac_freq', getVal: getPopAf('exac') },
   { header: 'gnomad_genomes_freq', getVal: getPopAf('gnomad_genomes') },
   { header: 'gnomad_exomes_freq', getVal: getPopAf('gnomad_exomes') },
@@ -1743,7 +1735,7 @@ export const VARIANT_EXPORT_DATA = [
   { header: 'rsid', getVal: variant => variant.rsid },
   { header: 'hgvsc', getVal: variant => getVariantMainTranscript(variant).hgvsc },
   { header: 'hgvsp', getVal: variant => getVariantMainTranscript(variant).hgvsp },
-  { header: 'clinvar_clinical_significance', getVal: variant => (variant.clinvar || {}).clinicalSignificance || (variant.clinvar || {}).pathogenicity },
+  { header: 'clinvar_clinical_significance', getVal: variant => (variant.clinvar || {}).pathogenicity },
   { header: 'clinvar_gold_stars', getVal: variant => (variant.clinvar || {}).goldStars },
   { header: 'project' },
   { header: 'family' },

@@ -8,13 +8,13 @@ import json
 
 from panelapp.models import PaLocusList
 from reference_data.models import HumanPhenotypeOntology
-from seqr.models import GeneNote, VariantNote, VariantTag, VariantFunctionalData, SavedVariant, Family, CAN_VIEW, CAN_EDIT, \
+from seqr.models import GeneNote, VariantNote, VariantTag, VariantFunctionalData, CAN_VIEW, CAN_EDIT, \
     get_audit_field_names, RnaSeqOutlier, RnaSeqSpliceOutlier, VariantSearchResults
 from seqr.utils.xpos_utils import get_chrom_pos
 from seqr.views.utils.json_utils import _to_camel_case
-from seqr.views.utils.permissions_utils import has_project_permissions, \
+from seqr.views.utils.permissions_utils import has_project_edit_permission, \
     project_has_anvil, get_workspace_collaborator_perms, user_is_analyst, user_is_data_manager, user_is_pm, \
-    is_internal_anvil_project, get_project_guids_user_can_view, get_anvil_analyst_user_emails
+    is_internal_anvil_project, get_anvil_analyst_user_emails
 from seqr.views.utils.terra_api_utils import is_anvil_authenticated, anvil_enabled
 from settings import ANALYST_USER_GROUP, SERVICE_ACCOUNT_FOR_ANVIL, MEDIA_URL
 
@@ -154,7 +154,7 @@ def get_json_for_projects(projects, user=None, is_analyst=None, add_project_cate
             'isAnalystProject': is_internal_anvil_project(project),
         })
         if add_permissions:
-            result['canEdit'] = has_project_permissions(project, user, can_edit=True)
+            result['canEdit'] = has_project_edit_permission(project, user)
         if add_project_category_guids_field:
             result['projectCategoryGuids'] = list(project.projectcategory_set.values_list('guid', flat=True))
 
@@ -366,14 +366,14 @@ def _format_variant_tags(tags):
     return tags
 
 
-def get_json_for_saved_variants_child_entities(tag_cls, saved_variant_id_map, tag_filter=None):
+def get_json_for_saved_variants_child_entities(tag_cls, saved_variant_id_map, tag_filter=None, ):
     variant_tag_id_map = defaultdict(list)
     for savedvariant_id, tag_id in tag_cls.saved_variants.through.objects.filter(
             savedvariant_id__in=saved_variant_id_map.keys()).values_list(
         'savedvariant_id', f'{tag_cls.__name__.lower()}_id',
     ):
         variant_tag_id_map[tag_id].append(savedvariant_id)
-    tag_models = tag_cls.objects.filter(id__in=variant_tag_id_map.keys())
+    tag_models = tag_cls.objects.filter(id__in=variant_tag_id_map.keys()).order_by('id')
     if tag_filter:
         tag_models = tag_models.filter(**tag_filter)
 
@@ -439,49 +439,6 @@ def get_json_for_saved_variants_with_tags(saved_variants, additional_model_field
     }
 
     return response
-
-
-def get_json_for_discovery_tags(variants, user):
-    from seqr.views.utils.variant_utils import get_variant_key
-    response = {}
-    discovery_tags = defaultdict(list)
-
-    saved_variants = SavedVariant.objects.filter(
-        variant_id__in={variant['variantId'] for variant in variants},
-        family__project__guid__in=get_project_guids_user_can_view(user),
-    ).only('id', 'guid', 'ref', 'alt', 'xpos', 'family_id').prefetch_related('family', 'family__project')
-    saved_variants_by_guid = {sv.guid: sv for sv in saved_variants}
-    saved_variant_id_map = {sv.id: guid for guid, sv in saved_variants_by_guid.items()}
-
-    discovery_tag_json, _ = get_json_for_saved_variants_child_entities(
-        VariantTag, saved_variant_id_map, tag_filter={'variant_tag_type__category': 'CMG Discovery Tags'})
-    if discovery_tag_json:
-        existing_families = set()
-        for variant in variants:
-            existing_families.update(variant['familyGuids'])
-
-        family_ids = set()
-        for tag in discovery_tag_json:
-            for variant_guid in tag.pop('variantGuids'):
-                variant = saved_variants_by_guid[variant_guid]
-                if variant.family.guid not in existing_families:
-                    family_ids.add(variant.family_id)
-                tag_json = {'savedVariant': {
-                    'variantGuid': variant.guid,
-                    'familyGuid': variant.family.guid,
-                    'projectGuid': variant.family.project.guid,
-                }}
-                tag_json.update(tag)
-                variant_key = get_variant_key(
-                    genomeVersion=variant.family.project.genome_version,
-                    xpos=variant.xpos, ref=variant.ref, alt=variant.alt,
-                )
-                discovery_tags[variant_key].append(tag_json)
-
-        response['familiesByGuid'] = {
-            f['familyGuid']: f for f in _get_json_for_families(Family.objects.filter(id__in=family_ids))
-        }
-    return discovery_tags, response
 
 
 def get_json_for_variant_note(note):
@@ -567,14 +524,18 @@ def get_json_for_project_collaborator_groups(project):
 def get_json_for_project_collaborator_list(user, project):
     collaborator_list = list(
         get_project_collaborators_by_username(
-            user, project, fields=['username', 'email', 'display_name'], include_permissions=True,
+            user, project, include_permissions=True,
         ).values())
 
+    return sorted_collaborators_json(collaborator_list)
+
+
+def sorted_collaborators_json(collaborator_list):
     return sorted(collaborator_list, key=lambda collaborator: (
         not collaborator['hasEditPermissions'], (collaborator['displayName'] or collaborator['email']).lower()))
 
 
-def get_project_collaborators_by_username(user, project, fields, include_permissions=False, expand_user_groups=False):
+def get_project_collaborators_by_username(user, project, include_permissions=False, expand_user_groups=False):
     collaborators = {}
     if not anvil_enabled():
         if expand_user_groups:
@@ -586,25 +547,36 @@ def get_project_collaborators_by_username(user, project, fields, include_permiss
 
         for collaborator, perms in collaborator_perms.items():
             collaborators[collaborator.username] = _get_collaborator_json(
-                collaborator, fields, include_permissions, can_edit=CAN_EDIT in perms)
+                collaborator, ['username', 'email', 'display_name'], include_permissions, can_edit=CAN_EDIT in perms)
 
     elif project_has_anvil(project):
-        permission_levels = get_workspace_collaborator_perms(user, project.workspace_namespace, project.workspace_name)
-        analyst_email = f'{ANALYST_USER_GROUP}@firecloud.org'.lower()
-        if expand_user_groups and analyst_email in permission_levels:
-            analyst_permission = permission_levels.pop(analyst_email)
-            permission_levels.update({email.lower(): analyst_permission for email in get_anvil_analyst_user_emails(user)})
+        collaborators = get_workspace_collaborators_by_username(
+            user, project.workspace_namespace, project.workspace_name, include_permissions, expand_user_groups,
+        )
 
-        users_by_email = {u.email_lower: u for u in User.objects.annotate(email_lower=Lower('email')).filter(email_lower__in=permission_levels.keys())}
-        for email, permission in permission_levels.items():
-            if email == SERVICE_ACCOUNT_FOR_ANVIL:
-                continue
-            collaborator = users_by_email.get(email)
-            collaborator_json = _get_collaborator_json(
-                collaborator or email, fields, include_permissions, can_edit=permission == CAN_EDIT,
-                get_json_func=get_json_for_user if collaborator else _get_anvil_user_json)
-            username = collaborator.username if collaborator else collaborator_json['username']
-            collaborators[username] = collaborator_json
+    return collaborators
+
+
+def get_workspace_collaborators_by_username(user, workspace_namespace, workspace_name, include_permissions=False, expand_user_groups=False):
+    collaborators = {}
+    permission_levels = get_workspace_collaborator_perms(user, workspace_namespace, workspace_name)
+    analyst_email = f'{ANALYST_USER_GROUP}@firecloud.org'.lower()
+    if expand_user_groups and analyst_email in permission_levels:
+        analyst_permission = permission_levels.pop(analyst_email)
+        permission_levels.update({email.lower(): analyst_permission for email in get_anvil_analyst_user_emails(user)})
+
+    users_by_email = {u.email_lower: u for u in User.objects.annotate(email_lower=Lower('email')).filter(
+        email_lower__in=permission_levels.keys())}
+    for email, permission in permission_levels.items():
+        if email == SERVICE_ACCOUNT_FOR_ANVIL:
+            continue
+        collaborator = users_by_email.get(email)
+        collaborator_json = _get_collaborator_json(
+            collaborator or email, ['username', 'email', 'display_name'], include_permissions,
+            can_edit=permission == CAN_EDIT,
+            get_json_func=get_json_for_user if collaborator else _get_anvil_user_json)
+        username = collaborator.username if collaborator else collaborator_json['username']
+        collaborators[username] = collaborator_json
 
     return collaborators
 

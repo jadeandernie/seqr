@@ -173,53 +173,14 @@
       "vest": null
     }
 }, {
-    "model": "clickhouse_search.keylookupsnvindel",
-    "pk": 100,
-    "fields": {
-      "key": 100,
-      "variant_id": "1-248367227-TC-T"
-    }
-}, {
-    "model": "clickhouse_search.variantdetailssnvindel",
-    "pk": 100,
-    "fields": {
-      "key": 100,
-      "variant_id": "1-248367227-TC-T",
-      "rsid": null,
-      "caid": "CA1501729",
-      "lifted_over_chrom": "1",
-      "lifted_over_pos": null,
-      "transcripts": [],
-      "sorted_motif_feature_consequences": [],
-      "sorted_regulatory_feature_consequences": []
-    }
-}, {
-    "model": "clickhouse_search.entriessnvindel",
-    "pk": 100,
-    "fields": {
-      "key": 100,
-      "project_guid": "R0004_non_analyst_project",
-      "family_guid": "F000014_14",
-      "sample_type": "WGS",
-      "xpos": 1248367227,
-      "is_gnomad_gt_5_percent": false,
-      "is_annotated_in_any_gene": false,
-      "geneId_ids": [],
-      "filters": [],
-      "sign": 1,
-      "calls": [
-        ["NA21234", 2, 99, 0, 49]
-      ]
-    }
-}, {
-    "model": "clickhouse_search.keylookupsv",
+    "model": "clickhouse_search.keylookupgatksv",
     "pk": 101,
     "fields": {
       "key": 101,
       "variant_id": "suffix_19107_DEL_013746"
     }
 }, {
-    "model": "clickhouse_search.variantssv",
+    "model": "clickhouse_search.variantsgatksv",
     "pk": 101,
     "fields": {
       "key": 101,

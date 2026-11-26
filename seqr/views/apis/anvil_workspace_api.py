@@ -24,20 +24,9 @@ from seqr.utils.add_data_utils import get_missing_family_samples, get_loaded_ind
 from seqr.utils.vcf_utils import validate_vcf_and_get_samples, get_vcf_list
 from seqr.utils.logging_utils import SeqrLogger
 from seqr.utils.middleware import ErrorsWarningsException
-from seqr.views.utils.permissions_utils import is_anvil_authenticated, check_workspace_perm, login_and_policies_required
-from settings import BASE_URL, GOOGLE_LOGIN_REQUIRED_URL, POLICY_REQUIRED_URL, API_POLICY_REQUIRED_URL,\
-    SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL
+from seqr.views.utils.permissions_utils import check_workspace_perm, anvil_auth_and_policies_required
+from settings import BASE_URL, GOOGLE_LOGIN_REQUIRED_URL, POLICY_REQUIRED_URL, SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL
 logger = SeqrLogger(__name__)
-
-anvil_auth_required = user_passes_test(is_anvil_authenticated, login_url=GOOGLE_LOGIN_REQUIRED_URL)
-
-
-def anvil_auth_and_policies_required(wrapped_func=None, policy_url=API_POLICY_REQUIRED_URL):
-    def decorator(view_func):
-        return login_and_policies_required(anvil_auth_required(view_func), login_url=GOOGLE_LOGIN_REQUIRED_URL, policy_url=policy_url)
-    if wrapped_func:
-        return decorator(wrapped_func)
-    return decorator
 
 
 def anvil_workspace_access_required(wrapped_func=None, meta_fields=None):
@@ -237,6 +226,9 @@ def _validate_expected_samples(vcf_samples, loaded_sample_types, loaded_individu
         else:
             errors.append('New data cannot be added to this project until the previously requested data is loaded')
 
+    if not record_family_ids:
+        errors.append('No samples found in the pedigree file')
+
     missing_vcf_samples = set(record_family_ids.keys()) - set(vcf_samples)
     if missing_vcf_samples:
         errors.append(
@@ -261,10 +253,10 @@ def _validate_expected_samples(vcf_samples, loaded_sample_types, loaded_individu
 def _trigger_add_workspace_data(project, pedigree_records, user, data_path, sample_type, previous_loaded_ids=None, get_pedigree_json=False):
     # add families and individuals according to the uploaded individual records
     pedigree_json, individual_ids = add_or_update_individuals_and_families(
-        project, individual_records=pedigree_records, user=user, get_update_json=get_pedigree_json, get_updated_individual_db_ids=True,
+        project, individual_records=pedigree_records, user=user, get_update_json=get_pedigree_json, get_individual_db_ids=True,
         allow_features_update=True, skip_gt_stats_rebuild=True,
     )
-    num_updated_individuals = len(individual_ids)
+    num_updated_individuals = len(individual_ids - set(previous_loaded_ids or []))
     individual_ids.update(previous_loaded_ids or [])
 
     # use airflow api to trigger AnVIL dags

@@ -8,6 +8,7 @@ from datetime import datetime
 from django.contrib.auth.models import User
 from django.db.models import prefetch_related_objects
 
+from clickhouse_search.models.postgres_dicts import IndividualMetadataDict, SexDict, AffectedDict
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import Individual, Family, CAN_VIEW
 from seqr.utils.file_utils import file_iter
@@ -23,9 +24,9 @@ from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_fo
     GREGOR_FINDING_TAG_TYPE
 from seqr.views.utils.pedigree_info_utils import parse_pedigree_table, validate_fam_file_records, parse_hpo_terms, \
     get_valid_hpo_terms, JsonConstants, ErrorsWarningsException
-from seqr.views.utils.permissions_utils import get_project_and_check_permissions, check_project_permissions, \
-    get_project_and_check_pm_permissions, login_and_policies_required, has_project_permissions, external_anvil_project_can_edit, \
-    pm_or_data_manager_required, check_workspace_perm
+from seqr.views.utils.permissions_utils import get_project_and_check_edit_permission, check_project_edit_permission, \
+    get_project_and_check_pm_permissions, login_and_policies_required, has_project_edit_permission, external_anvil_project_can_edit, \
+    pm_or_data_manager_required, check_workspace_perm, check_family_view_permission
 from seqr.views.utils.project_context_utils import add_project_tag_type_counts
 from seqr.views.utils.individual_utils import delete_individuals, add_or_update_individuals_and_families
 from seqr.views.utils.variant_utils import bulk_create_tagged_variants, get_saved_variant_annotations
@@ -56,10 +57,10 @@ def update_individual_handler(request, individual_guid):
 
     individual = Individual.objects.get(guid=individual_guid)
 
-    project = individual.family.project
+    family = individual.family
 
-    check_project_permissions(project, request.user)
-    can_edit = has_project_permissions(project, request.user, can_edit=True)
+    check_family_view_permission(family, request.user)
+    can_edit = has_project_edit_permission(family.project, request.user)
 
     request_json = json.loads(request.body)
     update_json = request_json if can_edit else {k: v for k, v in request_json.items() if k in {'notes'}}
@@ -83,7 +84,7 @@ def update_individual_hpo_terms(request, individual_guid):
 
     project = individual.family.project
 
-    check_project_permissions(project, request.user, can_edit=True)
+    check_project_edit_permission(project, request.user)
 
     request_json = json.loads(request.body)
 
@@ -93,6 +94,7 @@ def update_individual_hpo_terms(request, individual_guid):
         for key in feature_fields
     }
     update_individual_from_json(individual, update_json, user=request.user, allow_features_update=True)
+    IndividualMetadataDict.reload(request.user)
 
     individual_json = {k: getattr(individual, _to_snake_case(k)) for k in feature_fields}
     add_individual_hpo_details([individual_json])
@@ -218,6 +220,9 @@ def delete_individuals_handler(request, project_guid):
 
     # delete the individuals
     families_with_deleted_individuals = delete_individuals(project, individual_guids_to_delete, request.user)
+    AffectedDict.reload(request.user)
+    SexDict.reload(request.user)
+    IndividualMetadataDict.reload(request.user)
 
     deleted_individuals_by_guid = {
         individual_guid: None for individual_guid in individual_guids_to_delete
@@ -359,8 +364,6 @@ AR_DEGG_COL = 'ar_donoregg'
 AR_DSPERM_COL = 'ar_donorsperm'
 
 def _bool_value(val):
-    if isinstance(val, bool):
-        return val
     if val.lower() == 'true':
         return True
     elif val.lower() == 'false':
@@ -368,8 +371,6 @@ def _bool_value(val):
     raise ValueError
 
 def _array_value(val):
-    if isinstance(val, list):
-        return val
     return [o.strip() for o in val.split(',')]
 
 def _gene_value(val):
@@ -380,8 +381,6 @@ def _gene_value(val):
     return gene
 
 def _gene_list_value(val):
-    if isinstance(val, list):
-        return val
     seperator_escaped_val = ''.join(m.replace(',', ';') if not m.startswith('(') else m for m in re.split('(\([^)]+\))', val))
     return [_gene_value(o) for o in seperator_escaped_val.split(';')]
 
@@ -410,60 +409,6 @@ INDIVIDUAL_METADATA_FIELDS = {
     CANDIDATE_GENES_COL: _gene_list_value,
 }
 
-def _get_year(val):
-    return datetime.strptime(val, '%Y-%m-%d').year
-
-def _nested_val(nested_key):
-    return lambda val: val.get(nested_key)
-
-def _get_phenotips_features(observed):
-    def get_observed_features(features):
-        return [{'id': feature['id']} for feature in features if feature['observed'] == observed]
-    return get_observed_features
-
-PHENOTIPS_JSON_FIELD_MAP = {
-    'family_id': [(FAMILY_ID_COL, None)],
-    'external_id': [(INDIVIDUAL_ID_COL, None)],
-    'features': [
-        (FEATURES_COL, _get_phenotips_features('yes')),
-        (ABSENT_FEATURES_COL, _get_phenotips_features('no')),
-    ],
-    'date_of_birth': [(BIRTH_COL, _get_year)],
-    'date_of_death': [(DEATH_COL, _get_year)],
-    'global_age_of_onset': [(ONSET_AGE_COL, lambda val: val[0]['label'])],
-    'family_history': [
-        (CONSANGUINITY_COL, _nested_val('consanguinity')),
-        (AFFECTED_REL_COL, _nested_val('affectedRelatives')),
-    ],
-    'global_mode_of_inheritance': [(EXP_INHERITANCE_COL, lambda val: [o['label'] for o in val])],
-    'prenatal_perinatal_history': [
-        (AR_FM_COL, _nested_val('assistedReproduction_fertilityMeds')),
-        (AR_IUI_COL, _nested_val('assistedReproduction_iui')),
-        (AR_IVF_COL, _nested_val('ivf')),
-        (AR_ICSI_COL, _nested_val('icsi')),
-        (AR_SURROGACY_COL, _nested_val('assistedReproduction_surrogacy')),
-        (AR_DEGG_COL, _nested_val('assistedReproduction_donoregg')),
-        (AR_DSPERM_COL, _nested_val('assistedReproduction_donorsperm')),
-    ],
-    'ethnicity': [
-        (MAT_ETHNICITY_COL, _nested_val('maternal_ethnicity')),
-        (PAT_ETHNICITY_COL, _nested_val('paternal_ethnicity')),
-    ],
-    'disorders': [(DISORDERS_COL, lambda val: [int(d['id'].lstrip('MIM:')) for d in val])],
-    'genes': [(CANDIDATE_GENES_COL, None)],
-    'rejectedGenes': [(REJECTED_GENES_COL, None)],
-}
-
-def _parse_phenotips_record(row):
-    record = {}
-    for k, formatters in PHENOTIPS_JSON_FIELD_MAP.items():
-        val = row.get(k)
-        if val:
-            for col, formatter in formatters:
-                field_val = formatter(val) if formatter else val
-                if field_val is not None:
-                    record[col] = field_val
-    return record
 
 @login_and_policies_required
 def receive_individuals_metadata_handler(request, project_guid):
@@ -477,7 +422,7 @@ def receive_individuals_metadata_handler(request, project_guid):
         project_guid (string): project GUID
     """
 
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     def process_records(json_records, filename=''):
         records, errors, warnings = _process_hpo_records(json_records, filename, project, request.user)
@@ -500,64 +445,61 @@ def receive_individuals_metadata_handler(request, project_guid):
 
 
 def _process_hpo_records(records, filename, project, user):
-    if filename.endswith('.json'):
-        row_dicts = [_parse_phenotips_record(record) for record in records]
-    else:
-        column_map = {}
-        for i, field in enumerate(records[0]):
-            key = field.lower()
-            if re.match("hpo.*present", key):
-                column_map[FEATURES_COL] = i
-            elif re.match("hpo.*absent", key):
-                column_map[ABSENT_FEATURES_COL] = i
-            elif re.match("hp.*number*", key):
-                if not HPO_TERM_NUMBER_COL in column_map:
-                    column_map[HPO_TERM_NUMBER_COL] = []
-                column_map[HPO_TERM_NUMBER_COL].append(i)
-            elif 'family' in key or 'pedigree' in key:
-                column_map[FAMILY_ID_COL] = i
+    column_map = {}
+    for i, field in enumerate(records[0]):
+        key = field.lower()
+        if re.match("hpo.*present", key):
+            column_map[FEATURES_COL] = i
+        elif re.match("hpo.*absent", key):
+            column_map[ABSENT_FEATURES_COL] = i
+        elif re.match("hp.*number*", key):
+            if not HPO_TERM_NUMBER_COL in column_map:
+                column_map[HPO_TERM_NUMBER_COL] = []
+            column_map[HPO_TERM_NUMBER_COL].append(i)
+        elif 'family' in key or 'pedigree' in key:
+            column_map[FAMILY_ID_COL] = i
+        else:
+            col_key = next((col for col, text in [
+                (NOTES_COL, 'notes'), (INDIVIDUAL_ID_COL, 'individual'), (AFFECTED_REL_COL, 'affected relative'),
+                (AFFECTED_FEATURE_COL, 'affected'), (BIRTH_COL, 'birth'), (DEATH_COL, 'death'),
+                (ONSET_AGE_COL, 'onset'),  (AR_ICSI_COL, 'relative'),
+                (CONSANGUINITY_COL, 'consanguinity'), (EXP_INHERITANCE_COL, 'inheritance'), (AR_FM_COL, 'fertility'),
+                (AR_IUI_COL, 'intrauterine'), (AR_IVF_COL, 'in vitro'), (AR_ICSI_COL, 'cytoplasmic'),
+                (AR_SURROGACY_COL, 'surrogacy'), (AR_DEGG_COL, 'donor egg'), (AR_DSPERM_COL, 'donor sperm'),
+                (MAT_ETHNICITY_COL, 'maternal ancestry'), (PAT_ETHNICITY_COL, 'paternal ancestry'),
+                (DISORDERS_COL, 'disorders'), (REJECTED_GENES_COL, 'tested genes'),
+                (CANDIDATE_GENES_COL, 'candidate genes'), (ASSIGNED_ANALYST_COL, 'assigned analyst'),
+            ] if text in key), None)
+            if col_key:
+                column_map[col_key] = i
+
+    if INDIVIDUAL_ID_COL not in column_map:
+        raise ValueError('Invalid header, missing individual id column')
+
+    row_dicts = [{column: row[index] if isinstance(index, int) else next((row[i] for i in index if row[i]), None)
+                  for column, index in column_map.items()} for row in records[1:]]
+
+    if FEATURES_COL in column_map or ABSENT_FEATURES_COL in column_map:
+        for row in row_dicts:
+            row[FEATURES_COL] = parse_hpo_terms(row.get(FEATURES_COL))
+            row[ABSENT_FEATURES_COL] = parse_hpo_terms(row.get(ABSENT_FEATURES_COL))
+
+    elif HPO_TERM_NUMBER_COL in column_map:
+        aggregate_rows = defaultdict(lambda: {FEATURES_COL: set(), ABSENT_FEATURES_COL: set()})
+        for row in row_dicts:
+            column = ABSENT_FEATURES_COL if row.pop(AFFECTED_FEATURE_COL) == 'no' else FEATURES_COL
+            aggregate_entry = aggregate_rows[(row.get(FAMILY_ID_COL), row.get(INDIVIDUAL_ID_COL))]
+            term = row.pop(HPO_TERM_NUMBER_COL, None)
+            if term:
+                aggregate_entry[column].add(term.strip())
             else:
-                col_key = next((col for col, text in [
-                    (NOTES_COL, 'notes'), (INDIVIDUAL_ID_COL, 'individual'), (AFFECTED_REL_COL, 'affected relative'),
-                    (AFFECTED_FEATURE_COL, 'affected'), (BIRTH_COL, 'birth'), (DEATH_COL, 'death'),
-                    (ONSET_AGE_COL, 'onset'),  (AR_ICSI_COL, 'relative'),
-                    (CONSANGUINITY_COL, 'consanguinity'), (EXP_INHERITANCE_COL, 'inheritance'), (AR_FM_COL, 'fertility'),
-                    (AR_IUI_COL, 'intrauterine'), (AR_IVF_COL, 'in vitro'), (AR_ICSI_COL, 'cytoplasmic'),
-                    (AR_SURROGACY_COL, 'surrogacy'), (AR_DEGG_COL, 'donor egg'), (AR_DSPERM_COL, 'donor sperm'),
-                    (MAT_ETHNICITY_COL, 'maternal ancestry'), (PAT_ETHNICITY_COL, 'paternal ancestry'),
-                    (DISORDERS_COL, 'disorders'), (REJECTED_GENES_COL, 'tested genes'),
-                    (CANDIDATE_GENES_COL, 'candidate genes'), (ASSIGNED_ANALYST_COL, 'assigned analyst'),
-                ] if text in key), None)
-                if col_key:
-                    column_map[col_key] = i
+                aggregate_entry[column] = set()
+            aggregate_entry.update({k: v for k, v in row.items() if v})
 
-        if INDIVIDUAL_ID_COL not in column_map:
-            raise ValueError('Invalid header, missing individual id column')
-
-        row_dicts = [{column: row[index] if isinstance(index, int) else next((row[i] for i in index if row[i]), None)
-                      for column, index in column_map.items()} for row in records[1:]]
-
-        if FEATURES_COL in column_map or ABSENT_FEATURES_COL in column_map:
-            for row in row_dicts:
-                row[FEATURES_COL] = parse_hpo_terms(row.get(FEATURES_COL))
-                row[ABSENT_FEATURES_COL] = parse_hpo_terms(row.get(ABSENT_FEATURES_COL))
-
-        elif HPO_TERM_NUMBER_COL in column_map:
-            aggregate_rows = defaultdict(lambda: {FEATURES_COL: set(), ABSENT_FEATURES_COL: set()})
-            for row in row_dicts:
-                column = ABSENT_FEATURES_COL if row.pop(AFFECTED_FEATURE_COL) == 'no' else FEATURES_COL
-                aggregate_entry = aggregate_rows[(row.get(FAMILY_ID_COL), row.get(INDIVIDUAL_ID_COL))]
-                term = row.pop(HPO_TERM_NUMBER_COL, None)
-                if term:
-                    aggregate_entry[column].add(term.strip())
-                else:
-                    aggregate_entry[column] = set()
-                aggregate_entry.update({k: v for k, v in row.items() if v})
-
-            row_dicts = [
-                {**entry, **{col: [{'id': feature} for feature in entry[col]] for col in [FEATURES_COL, ABSENT_FEATURES_COL]}}
-                for entry in aggregate_rows.values()
-            ]
+        row_dicts = [
+            {**entry, **{col: [{'id': feature} for feature in entry[col]] for col in [FEATURES_COL, ABSENT_FEATURES_COL]}}
+            for entry in aggregate_rows.values()
+        ]
 
     return _parse_individual_hpo_terms(row_dicts, project, user)
 
@@ -585,7 +527,7 @@ def _parse_individual_hpo_terms(json_records, project, user):
     if any(record.get(ASSIGNED_ANALYST_COL) for record in json_records):
         allowed_assigned_analysts = {
             u['email'] for u in get_project_collaborators_by_username(
-                user, project, fields=['email'], expand_user_groups=True,
+                user, project, expand_user_groups=True,
             ).values()
         }
 
@@ -709,7 +651,7 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
     """
     Handler for 'save' requests to apply HPO terms tables previously uploaded through receive_individuals_metadata_handler
     """
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     json_records, _ = load_uploaded_file(upload_file_id)
 
@@ -727,6 +669,9 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
             individual, {k: record[k] for k in INDIVIDUAL_METADATA_FIELDS.keys() if k in record}, user=request.user, allow_features_update=True)
         if record.get(ASSIGNED_ANALYST_COL):
             family_assigned_analysts[record[ASSIGNED_ANALYST_COL]].append(individual.family.id)
+
+    if any(FEATURES_COL in record for record in json_records):
+        IndividualMetadataDict.reload(request.user)
 
     response = {
         'individualsByGuid': {
@@ -753,7 +698,7 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
 def import_gregor_metadata(request, project_guid):
     request_json = json.loads(request.body)
     sample_type = request_json.get('sampleType', 'genome')
-    project = get_project_and_check_permissions(project_guid, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
     workspace_meta = check_workspace_perm(
         request.user, CAN_VIEW, request_json['workspaceNamespace'], request_json['workspaceName'],
         meta_fields=['workspace.bucketName']
@@ -893,9 +838,7 @@ def _parse_new_aip_saved_variants(new_variant_keys, family_variant_data):
         if variant_id in variants_by_id:
             variant.update(variants_by_id[variant_id])
         else:
-            variant.update({'key': None, 'saved_variant_json': {k: v for k, v in variant.items() if k in {
-                'chrom', 'pos', 'ref', 'alt', 'variantId', 'xpos', 'genomeVersion', 'genotypes', 'transcripts', 'mainTranscriptId',
-            }}})
+            variant.update({'key': None})
         new_variant_data[key] = variant
     return new_variant_data
 
@@ -940,8 +883,8 @@ def _parse_participant_val(column, value, participant_sample_lookup):
 @login_and_policies_required
 def get_individual_rna_seq_data(request, individual_guid):
     individual = Individual.objects.get(guid=individual_guid)
-    project = individual.family.project
-    check_project_permissions(project, request.user)
+    family = individual.family
+    check_family_view_permission(family, request.user)
 
     filters = {'sample__individual': individual}
     outlier_data = get_json_for_rna_seq_outliers(filters, significant_only=False, individual_guid=individual_guid)
@@ -949,7 +892,7 @@ def get_individual_rna_seq_data(request, individual_guid):
     genes_to_show = get_genes({
         gene_id for rna_data in outlier_data.get(individual_guid, {}).values() for gene_id, data in rna_data.items()
         if any([d['isSignificant'] for d in (data if isinstance(data, list) else [data])])
-    }, genome_version=project.genome_version)
+    }, genome_version=family.project.genome_version)
 
     return create_json_response({
         'rnaSeqData': outlier_data,

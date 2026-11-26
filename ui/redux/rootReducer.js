@@ -11,6 +11,7 @@ import {
   createObjectsByIdReducer, loadingReducer, zeroActionsReducer, createSingleObjectReducer, createSingleValueReducer,
 } from './utils/reducerFactories'
 import modalReducers from './utils/modalReducer'
+import externalResourceFlyoutReducers from './utils/externalResourceFlyoutReducer'
 import {
   RECEIVE_DATA,
   REQUEST_PROJECTS,
@@ -294,6 +295,7 @@ const rootReducer = combineReducers({
   userOptionsLoading: loadingReducer(REQUEST_USER_OPTIONS, RECEIVE_USER_OPTIONS),
   meta: zeroActionsReducer,
   ...modalReducers,
+  ...externalResourceFlyoutReducers,
   ...dashboardReducers,
   ...projectReducers,
   ...searchReducers,

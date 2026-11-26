@@ -10,8 +10,8 @@ import random
 import responses
 
 from clickhouse_search.models.gt_stats_models import ProjectGtStatsSnvIndel, \
-    ProjectsToGtStatsGRCh37SnvIndel, ProjectsToGtStatsSnvIndel, ProjectsToGtStatsMito, ProjectsToGtStatsSv, \
-    GtStatsDictGRCh37SnvIndel, GtStatsDictSnvIndel, GtStatsDictMito, GtStatsDictSv
+    ProjectsToGtStatsGRCh37SnvIndel, ProjectsToGtStatsSnvIndel, ProjectsToGtStatsMito, ProjectsToGtStatsGatkSv, \
+    GtStatsDictGRCh37SnvIndel, GtStatsDictSnvIndel, GtStatsDictMito, GtStatsDictGatkSv
 from clickhouse_search.models.postgres_dicts import AffectedDict, SexDict, IndividualMetadataDict, DiscoveryVariantDict, \
     ExcludedVariantDict
 from clickhouse_search.models.reference_data_models import ClinvarMvSnvIndel, ClinvarSearchMvSnvIndel, ClinvarMvMito, \
@@ -23,8 +23,9 @@ from clickhouse_search.models.reference_data_models import ClinvarMvSnvIndel, Cl
     GnomadGenomesGRCh37Mv, GnomadGenomesGRCh37Dict, GnomadExomesGRCh37Mv, GnomadExomesGRCh37Dict, TopmedGRCh37Mv, \
     TopmedGRCh37Dict, GnomadmitoMv, GnomadmitoDict, GnomadmitoheteroplasmyMv, GnomadmitoheteroplasmyDict, HelixmitoMv, \
     HelixmitoDict, HelixmitoheteroplasmyMv, HelixmitoheteroplasmyDict, ScreenDict, MitomapMv, MitomapDict, Absplice2Mv, \
-    Absplice2Dict, PromoterAIMv, PromoterAIDict, PextSnvIndelMv, PextSnvIndelDict, PextMitoMv, PextMitoDict
-from clickhouse_search.models.search_models import EntriesSnvIndel, VariantsSnvIndel, EntriesSv, EntriesGcnv
+    Absplice2Dict, PromoterAIMv, PromoterAIDict, PextSnvIndelMv, PextSnvIndelDict, PextMitoMv, PextMitoDict, AlphagenomeMv, \
+    AlphagenomeDict
+from clickhouse_search.models.search_models import EntriesSnvIndel, VariantsSnvIndel, EntriesGatkSv, EntriesGcnv
 from clickhouse_search.test_utils import VARIANT1, VARIANT2, VARIANT3, VARIANT4, CACHED_CONSEQUENCES_BY_KEY, \
     VARIANT_ID_SEARCH, VARIANT_IDS, LOCATION_SEARCH, GENE_IDS, SELECTED_TRANSCRIPT_MULTI_FAMILY_VARIANT, \
     SELECTED_ANNOTATION_TRANSCRIPT_VARIANT_4, SELECTED_ANNOTATION_TRANSCRIPT_VARIANT_3, COMP_HET_ALL_PASS_FILTERS, \
@@ -32,7 +33,7 @@ from clickhouse_search.test_utils import VARIANT1, VARIANT2, VARIANT3, VARIANT4,
     FAMILY_3_VARIANT, PROJECT_2_VARIANT, PROJECT_2_VARIANT1, MULTI_PROJECT_VARIANT1, MULTI_PROJECT_VARIANT2, GENE_COUNTS, \
     MULTI_PROJECT_BOTH_SAMPLE_TYPE_VARIANTS, VARIANT1_BOTH_SAMPLE_TYPES, VARIANT2_BOTH_SAMPLE_TYPES, \
     VARIANT3_BOTH_SAMPLE_TYPES, VARIANT4_BOTH_SAMPLE_TYPES, GRCH37_VARIANT, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3, \
-    SV_VARIANT1, SV_VARIANT2, SV_VARIANT3, SV_VARIANT4, SV_GENE_COUNTS, NEW_SV_FILTER, GCNV_VARIANT1, GCNV_VARIANT2, \
+    SV_VARIANT1, SV_VARIANT2, SV_VARIANT3, SV_VARIANT4, SV_GENE_COUNTS, GCNV_VARIANT1, GCNV_VARIANT2, \
     GCNV_VARIANT3, GCNV_VARIANT4, GCNV_MULTI_FAMILY_VARIANT1, GCNV_MULTI_FAMILY_VARIANT2, GCNV_GENE_COUNTS, \
     MULTI_DATA_TYPE_COMP_HET_VARIANT2, ALL_SNV_INDEL_PASS_FILTERS, MULTI_PROJECT_GCNV_VARIANT3, DISCOVERY_VARIANT, \
     MITO_GENE_COUNTS, PROJECT_4_COMP_HET_VARIANT, FAMILY_1_VARIANT, EXPORT_DATA, SPLIT_FAMILY_EXPORT_DATA, \
@@ -85,22 +86,22 @@ class ClickhouseSearchTestCase(AnvilAuthenticationTestCase):
         for postgres_dict in [AffectedDict, SexDict, IndividualMetadataDict, DiscoveryVariantDict, ExcludedVariantDict]:
             postgres_dict.reload()
         for view in [
-            ProjectsToGtStatsGRCh37SnvIndel, ProjectsToGtStatsSnvIndel, ProjectsToGtStatsMito, ProjectsToGtStatsSv,
+            ProjectsToGtStatsGRCh37SnvIndel, ProjectsToGtStatsSnvIndel, ProjectsToGtStatsMito, ProjectsToGtStatsGatkSv,
             ClinvarMvSnvIndel, ClinvarSearchMvSnvIndel, ClinvarMvMito, ClinvarSearchMvMito, ClinvarMvGRCh37SnvIndel,
             ClinvarSearchMvGRCh37SnvIndel, HgmdMv, HgmdSearchMv, DbnsfpSnvIndelMv, EigenMv, SpliceAiMv,
             DbnsfpGRCh37SnvIndelMv, EigenGRCh37Mv, SpliceAiGRCh37Mv, DbnsfpMitoMv, MitimpactMv, HmtvarMv, LocalconstraintmitoMv,
             GnomadGenomesMv, GnomadExomesMv, TopmedMv, GnomadGenomesGRCh37Mv, GnomadExomesGRCh37Mv,TopmedGRCh37Mv,
             GnomadmitoMv, GnomadmitoheteroplasmyMv, HelixmitoMv, HelixmitoheteroplasmyMv, MitomapMv, Absplice2Mv,
-            PromoterAIMv, PextSnvIndelMv, PextMitoMv
+            PromoterAIMv, PextSnvIndelMv, PextMitoMv, AlphagenomeMv
         ]:
             view.refresh()
         for dictionary in [
-            GtStatsDictGRCh37SnvIndel, GtStatsDictSnvIndel, GtStatsDictMito, GtStatsDictSv, DbnsfpSnvIndelDict,
+            GtStatsDictGRCh37SnvIndel, GtStatsDictSnvIndel, GtStatsDictMito, GtStatsDictGatkSv, DbnsfpSnvIndelDict,
             EigenDict, SpliceAiDict, GnomadNonCodingConstraintDict, DbnsfpGRCh37SnvIndelDict, EigenGRCh37Dict,
             SpliceAiGRCh37Dict, DbnsfpMitoDict, MitimpactDict, HmtvarDict, LocalconstraintmitoDict, GnomadGenomesDict,
             GnomadExomesDict, TopmedDict, GnomadGenomesGRCh37Dict, GnomadExomesGRCh37Dict, TopmedGRCh37Dict,
             GnomadmitoDict, GnomadmitoheteroplasmyDict, HelixmitoDict, HelixmitoheteroplasmyDict, ScreenDict,
-            MitomapDict, Absplice2Dict, PromoterAIDict, PextSnvIndelDict, PextMitoDict
+            MitomapDict, Absplice2Dict, PromoterAIDict, PextSnvIndelDict, PextMitoDict, AlphagenomeDict
         ]:
             dictionary.reload()
         Project.objects.update(genome_version='38')
@@ -305,12 +306,12 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
             ], project_families=SINGLE_FAMILY_PROJECT_FAMILIES, **VariantSearch.objects.get(name='De Novo/Dominant Permissive').search,
         )
 
-        self._assert_expected_search([VARIANT2, MITO_VARIANT3], cached_variant_fields=[
-            {'selectedTranscript': CACHED_CONSEQUENCES_BY_KEY[2][0]}, {},
+        self._assert_expected_search([VARIANT2, GCNV_VARIANT3, MITO_VARIANT3], cached_variant_fields=[
+            {'selectedTranscript': CACHED_CONSEQUENCES_BY_KEY[2][0]}, {}, {},
         ], project_families=SINGLE_FAMILY_PROJECT_FAMILIES, **VariantSearch.objects.get(name='Recessive Restrictive').search)
 
-        self._assert_expected_search([VARIANT2, MITO_VARIANT3], cached_variant_fields=[
-            {'selectedTranscript': CACHED_CONSEQUENCES_BY_KEY[2][0]}, {},
+        self._assert_expected_search([VARIANT2, GCNV_VARIANT3, MITO_VARIANT3], cached_variant_fields=[
+            {'selectedTranscript': CACHED_CONSEQUENCES_BY_KEY[2][0]}, {}, {},
         ], project_families=SINGLE_FAMILY_PROJECT_FAMILIES, **VariantSearch.objects.get(name='Recessive Permissive').search)
 
     def test_single_project_search(self):
@@ -451,8 +452,8 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         )
 
         self._assert_expected_search(
-            [VARIANT2_BOTH_SAMPLE_TYPES, VARIANT3_BOTH_SAMPLE_TYPES, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT4],
-            inheritance_mode='any_affected', quality_filter={'min_gq': 40, 'min_qs': 20}, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            [VARIANT2_BOTH_SAMPLE_TYPES, VARIANT3_BOTH_SAMPLE_TYPES, GCNV_VARIANT1, GCNV_VARIANT3, GCNV_VARIANT4],
+            inheritance_mode='any_affected', quality_filter={'min_gq': 40, 'min_qs': 30}, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
         )
 
         self._assert_expected_search(
@@ -512,14 +513,6 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         self._assert_expected_search(
             [SV_VARIANT1, SV_VARIANT2, SV_VARIANT3, SV_VARIANT4], inheritance_mode=inheritance_mode,
             project_families=SV_PROJECT_FAMILIES,
-        )
-
-        self._assert_expected_search(
-            [SV_VARIANT2], inheritance_mode=inheritance_mode, annotations=NEW_SV_FILTER, project_families=SV_PROJECT_FAMILIES,
-        )
-
-        self._assert_expected_search(
-            [GCNV_VARIANT3], inheritance_mode=inheritance_mode, annotations=NEW_SV_FILTER,
         )
 
         inheritance_mode = 'de_novo'
@@ -744,27 +737,18 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
             [SV_VARIANT4], quality_filter=quality_filter, project_families=SV_PROJECT_FAMILIES,
         )
 
-        gcnv_quality_filter = {'min_gq': 40, 'min_qs': 20, 'min_hl': 5}
+        gcnv_quality_filter = {'min_gq': 40, 'min_qs': 30, 'min_hl': 5}
         self._assert_expected_search(
-            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT3], quality_filter=gcnv_quality_filter,
-        )
-
-        self._assert_expected_search(
-            [], annotations=NEW_SV_FILTER, quality_filter=gcnv_quality_filter, omit_data_type='SNV_INDEL',
+            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT3], quality_filter=gcnv_quality_filter,
         )
 
         sv_quality_filter = {'min_gq_sv': 40}
         self._assert_expected_search(
-            [SV_VARIANT3, SV_VARIANT4], quality_filter=sv_quality_filter, annotations=None, project_families=SV_PROJECT_FAMILIES,
+            [SV_VARIANT3, SV_VARIANT4], quality_filter=sv_quality_filter, project_families=SV_PROJECT_FAMILIES,
         )
 
         self._assert_expected_search(
-            [], annotations=NEW_SV_FILTER, quality_filter=sv_quality_filter, project_families=SV_PROJECT_FAMILIES,
-        )
-
-        self._assert_expected_search(
-            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, MITO_VARIANT1, MITO_VARIANT2], quality_filter={'min_gq': 40, 'min_qs': 30, 'vcf_filter': 'pass'},
-            annotations=None,
+            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2], quality_filter={'min_gq': 40, 'min_qs': 200, 'vcf_filter': 'pass'},
         )
 
         self._assert_expected_search(
@@ -1018,7 +1002,7 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
     def test_variant_lookup(self, mock_liftover):
         mock_convert_coordinate = mock_liftover.return_value.convert_coordinate
         mock_convert_coordinate.side_effect = lambda chrom, pos: [(chrom, pos + 10000)]
-        EntriesSv.objects.using('clickhouse_write').filter(family_guid='F000002_2_x').delete()
+        EntriesGatkSv.objects.using('clickhouse_write').filter(family_guid='F000002_2_x').delete()
         EntriesGcnv.objects.using('clickhouse_write').filter(family_guid='F000002_2_x').delete()
 
         self.check_require_login(reverse(variant_lookup_handler))
@@ -2146,16 +2130,16 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         )
 
     def test_in_silico_filter(self):
-        main_in_silico = {'eigen': '3.5', 'mut_taster': 'N', 'vest': 0.5}
+        main_in_silico = {'eigen': '3.5', 'mut_taster': 'N', 'vest': 0.5, 'alphagenome': 20}
         self._assert_expected_search(
            [VARIANT1, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3], in_silico=main_in_silico,
             check_login=self.check_collaborator_login,
         )
 
-        in_silico = {**main_in_silico, 'requireScore': True}
+        in_silico = {**main_in_silico, 'alphagenome': 15, 'requireScore': True}
         in_silico.pop('eigen')
         self._assert_expected_search(
-           [VARIANT4, MITO_VARIANT2], in_silico=in_silico,
+           [VARIANT2, VARIANT4, MITO_VARIANT2], in_silico=in_silico,
         )
 
         self._assert_expected_search(

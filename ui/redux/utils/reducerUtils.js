@@ -4,10 +4,13 @@ import { toSnakecase } from 'shared/utils/stringUtils'
 // actions
 export const RECEIVE_DATA = 'RECEIVE_DATA'
 export const REQUEST_PROJECTS = 'REQUEST_PROJECTS'
+export const RECEIVE_PROJECTS = 'RECEIVE_PROJECTS'
 export const REQUEST_PROJECT_DETAILS = 'REQUEST_PROJECT_DETAILS'
+export const RECEIVE_PROJECT_DETAILS = 'RECEIVE_PROJECT_DETAILS'
 export const RECEIVE_PROJECT_CHILD_ENTITES = 'RECEIVE_PROJECT_CHILD_ENTITES'
 export const RECEIVE_SAVED_SEARCHES = 'RECEIVE_SAVED_SEARCHES'
 export const REQUEST_SAVED_VARIANTS = 'REQUEST_SAVED_VARIANTS'
+export const RECEIVE_SAVED_VARIANTS = 'RECEIVE_SAVED_VARIANTS'
 export const REQUEST_ANALYSIS_GROUPS = 'REQUEST_ANALYSIS_GROUPS'
 export const RECEIVE_ANALYSIS_GROUPS = 'RECEIVE_ANALYSIS_GROUPS'
 
@@ -42,40 +45,29 @@ export const loadProjectChildEntities = (
     new HttpRequestHelper(`/api/project/${projectGuid}/get_${toSnakecase(entityType)}`,
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-        if (receiveDispatchType) {
-          dispatch({ type: receiveDispatchType, updatesById: responseJson })
-        }
+        dispatch({ type: receiveDispatchType, updatesById: responseJson })
         dispatch({ type: RECEIVE_PROJECT_CHILD_ENTITES, updatesById: { [projectGuid]: { [entityType]: true } } })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
-        if (receiveDispatchType) {
-          dispatch({ type: receiveDispatchType, updatesById: {} })
-        }
+        dispatch({ type: receiveDispatchType, error: e.message, updatesById: {} })
       }).get()
   }
 }
 
-export const loadFamilyData = (familyGuid, detailField, urlPath, dispatchType, dispatchOnReceive) => (
+export const loadFamilyData = (familyGuid, detailField, urlPath, dispatchType, receiveDispatchType) => (
   dispatch, getState,
 ) => {
   const { familiesByGuid } = getState()
   const family = familiesByGuid[familyGuid]
   if (!family || !family[detailField]) {
+    const onReceive = error => dispatch({ type: receiveDispatchType, updates: { [familyGuid]: false }, error })
     dispatch({ type: dispatchType, updates: { [familyGuid]: true } })
     new HttpRequestHelper(`/api/family/${familyGuid}/${urlPath}`,
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-        if (dispatchOnReceive) {
-          dispatch({ type: dispatchType, updates: { [familyGuid]: false } })
-        }
+        onReceive()
       },
-      (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
-        if (dispatchOnReceive) {
-          dispatch({ type: dispatchType, updates: { [familyGuid]: false } })
-        }
-      }).get()
+      e => onReceive(e.message)).get()
   }
 }
 
@@ -86,9 +78,10 @@ export const loadProjectDetails = projectGuid => (dispatch, getState) => {
     new HttpRequestHelper(`/api/project/${projectGuid}/details`,
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_PROJECT_DETAILS })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+        dispatch({ type: RECEIVE_PROJECT_DETAILS, error: e.message })
       }).get()
   }
 }

@@ -130,7 +130,7 @@ test('dispatches an error action when the RNA-seq data request fails', async () 
   await flushAll()
 
   expect(store.getActions()).toContainEqual(
-    expect.objectContaining({ type: 'RECEIVE_DATA', error: 'rna seq data request failed' }),
+    expect.objectContaining({ type: 'RECEIVE_RNA_SEQ_DATA', error: 'rna seq data request failed' }),
   )
 })
 

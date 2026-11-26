@@ -8,7 +8,7 @@ import { Segment, Header, Grid, Button, List } from 'semantic-ui-react'
 import { getOauthLoginProvider } from 'redux/selectors'
 import { VerticalSpacer } from 'shared/components/Spacers'
 import { SeqrPaperLink } from 'shared/components/page/Footer'
-import { LOCAL_LOGIN_URL } from 'shared/utils/constants'
+import { FAQ_PATH, LOCAL_LOGIN_URL } from 'shared/utils/constants'
 
 const PageSegment = styled(Segment).attrs({ padded: 'very' })`
   padding-left: 20% !important;
@@ -30,7 +30,7 @@ export const SeqrAvailability = ({ hasFootnote }) => (
       <Anchor href="https://anvilproject.org">AnVIL platform</Anchor>
       {hasFootnote && '*'}
       &nbsp; where requests can be placed for loading a joint called vcf into seqr. To learn more, see the&nbsp;
-      <Anchor href="https://www.youtube.com/watch?v=TvYz_VI9vN0&ab_channel=BroadInstitute">video tutorial</Anchor>
+      <Anchor href="https://www.youtube.com/watch?v=hnAI55cqGbk&ab_channel=BroadInstitute">video tutorial</Anchor>
     </List.Item>
     <List.Item>
       As a collaborator providing samples for sequencing within the &nbsp;
@@ -60,6 +60,9 @@ const LandingPage = ({ oauthLoginProvider }) => (
       {oauthLoginProvider ?
         <Button as="a" href={`/login/${oauthLoginProvider}`} {...LOGIN_BUTTON_PROPS} /> :
         <Button as={Link} to={LOCAL_LOGIN_URL} {...LOGIN_BUTTON_PROPS} />}
+      <Segment basic size="big">
+        <Link to={FAQ_PATH}>Trouble accessing seqr? Read our FAQ to resolve common issues</Link>
+      </Segment>
     </PageSegment>
     <Segment padded>
       <Grid columns="equal">

@@ -1,33 +1,32 @@
 from collections import defaultdict
 from datetime import datetime
 from django.core.exceptions import PermissionDenied
-from django.core.mail.message import EmailMessage
 from django.contrib.auth.models import User
-from django.db.models import CharField, F, Value
+from django.db.models import CharField, F, Q, Value
 from django.db.models.functions import Coalesce, Concat, JSONObject, NullIf
 import json
-from random import randint
 
+from clickhouse_search.search import get_clickhouse_genotypes
 from matchmaker.matchmaker_utils import get_mme_gene_phenotype_ids_for_submissions, parse_mme_features, \
     get_mme_metrics, get_hpo_terms_by_id
 from matchmaker.models import MatchmakerSubmission
 from reference_data.models import HumanPhenotypeOntology
-from seqr.models import Project, Family, Individual, VariantTagType, SavedVariant, FamilyAnalysedBy
+from seqr.models import Project, Family, Individual, Dataset, VariantTagType, SavedVariant, FamilyAnalysedBy
 from seqr.views.utils.airtable_utils import AirtableSession
 from seqr.views.utils.file_utils import load_uploaded_file
-from seqr.utils.communication_utils import safe_post_to_slack, set_email_message_stream
+from seqr.utils.communication_utils import safe_post_to_slack
 from seqr.utils.gene_utils import get_genes
 from seqr.utils.middleware import ErrorsWarningsException
-from seqr.utils.search.utils import get_variants_for_variant_ids
 from seqr.views.utils.json_utils import create_json_response
 from seqr.utils.logging_utils import SeqrLogger
 from seqr.views.utils.orm_to_json_utils import get_json_for_matchmaker_submissions, get_json_for_saved_variants,\
     add_individual_hpo_details, INDIVIDUAL_DISPLAY_NAME_EXPR, AIP_TAG_TYPE
 from seqr.views.utils.permissions_utils import analyst_required, user_is_analyst, get_project_guids_user_can_view, \
-    login_and_policies_required, get_project_and_check_permissions, get_internal_projects
+    login_and_policies_required, get_project_analysis_groups_and_check_view_permission, get_internal_projects, \
+    get_project_analysis_group_guids_user_can_view
 from seqr.views.utils.anvil_metadata_utils import parse_anvil_metadata, anvil_export_airtable_fields, FAMILY_ROW_TYPE, SUBJECT_ROW_TYPE, DISCOVERY_ROW_TYPE
-from seqr.views.utils.variant_utils import get_variants_response, bulk_create_tagged_variants, DISCOVERY_CATEGORY
-from settings import SEQR_SLACK_DATA_ALERTS_NOTIFICATION_CHANNEL, VLM_SEND_EMAIL
+from seqr.views.utils.variant_utils import get_variants_response, bulk_create_tagged_variants, get_saved_variant_annotations, DISCOVERY_CATEGORY
+from settings import SEQR_SLACK_DATA_ALERTS_NOTIFICATION_CHANNEL
 
 logger = SeqrLogger(__name__)
 
@@ -36,8 +35,11 @@ MAX_SAVED_VARIANTS = 10000
 
 @login_and_policies_required
 def mme_details(request):
-    submissions = MatchmakerSubmission.objects.filter(deleted_date__isnull=True).filter(
-        individual__family__project__guid__in=get_project_guids_user_can_view(request.user))
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user)
+    access_filter = Q(individual__family__project__guid__in=project_guids)
+    if analysis_group_guids:
+        access_filter |= Q(individual__family__analysisgroup__guid__in=analysis_group_guids)
+    submissions = MatchmakerSubmission.objects.filter(deleted_date__isnull=True).filter(access_filter)
 
     hpo_ids, gene_ids, submission_gene_variants = get_mme_gene_phenotype_ids_for_submissions(
         submissions, get_gene_variants=True)
@@ -58,7 +60,7 @@ def mme_details(request):
 
     saved_variants = get_json_for_saved_variants(
         SavedVariant.objects.filter(matchmakersubmissiongenes__matchmaker_submission__guid__in=submissions_by_guid),
-        add_details=True,
+        additional_values={'genomeVersion': F('family__project__genome_version')},
     )
 
     response = {
@@ -98,7 +100,8 @@ def success_story(request, success_story_types):
 @login_and_policies_required
 def saved_variants_page(request, tag):
     gene = request.GET.get('gene')
-    if tag == 'ALL':
+    is_all_tags = tag == 'ALL'
+    if is_all_tags:
         saved_variant_models = SavedVariant.objects.exclude(varianttag=None)
     else:
         tags = tag.split(';')
@@ -109,10 +112,14 @@ def saved_variants_page(request, tag):
         for tt in tag_types:
             saved_variant_models = saved_variant_models.filter(varianttag__variant_tag_type=tt).distinct()
 
-    saved_variant_models = saved_variant_models.filter(family__project__guid__in=get_project_guids_user_can_view(request.user))
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user)
+    access_filter = Q(family__project__guid__in=project_guids)
+    if analysis_group_guids:
+        access_filter |= Q(family__analysisgroup__guid__in=analysis_group_guids)
+    saved_variant_models = saved_variant_models.filter(access_filter)
 
     if gene:
-        saved_variant_models = saved_variant_models.filter(saved_variant_json__transcripts__has_key=gene)
+        saved_variant_models = saved_variant_models.filter(gene_ids__overlap=[gene])
     elif saved_variant_models.count() > MAX_SAVED_VARIANTS:
         return create_json_response({'error': 'Select a gene to filter variants'}, status=400)
 
@@ -126,8 +133,11 @@ def saved_variants_page(request, tag):
 
 @login_and_policies_required
 def hpo_summary_data(request, hpo_id):
-    data = Individual.objects.filter(
-        family__project__guid__in=get_project_guids_user_can_view(request.user),
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user)
+    access_filter = Q(family__project__guid__in=project_guids)
+    if analysis_group_guids:
+        access_filter |= Q(family__analysisgroup__guid__in=analysis_group_guids)
+    data = Individual.objects.filter(access_filter).filter(
         features__contains=[{'id': hpo_id}],
     ).order_by('id').values(
         'features', individualGuid=F('guid'), displayName=INDIVIDUAL_DISPLAY_NAME_EXPR, familyId=F('family__family_id'),
@@ -214,12 +224,14 @@ def _load_aip_data(data: dict, user: User):
         })
 
     today = datetime.now().strftime('%Y-%m-%d')
-    num_new, num_updated = bulk_create_tagged_variants(
-        family_variant_data, tag_name=AIP_TAG_TYPE, user=user, load_new_variant_data=_search_new_saved_variants,
-        get_metadata=lambda pred:  {category: {'name': category_map[category], 'date': today} for category in pred['categories']},
+    new_keys, update_keys, skipped_keys = bulk_create_tagged_variants(
+        family_variant_data, tag_name=AIP_TAG_TYPE, user=user, parse_new_saved_variants=_search_new_saved_variants,
+        get_metadata=lambda pred: {category: {'name': category_map[category], 'date': today} for category in pred['categories']},
     )
 
-    summary_message = f'Loaded {num_new} new and {num_updated} updated AIP tags for {len(family_id_map)} families'
+    summary_message = f'Loaded {len(new_keys)} new and {len(update_keys)} updated AIP tags for {len(family_id_map)} families'
+    if skipped_keys:
+        summary_message += f' (skipped {len(skipped_keys)} unchanged tags)'
     safe_post_to_slack(
         SEQR_SLACK_DATA_ALERTS_NOTIFICATION_CHANNEL,
         f'{summary_message}:\n```{", ".join(sorted(family_id_map.keys()))}```',
@@ -230,21 +242,21 @@ def _load_aip_data(data: dict, user: User):
     })
 
 
-FamilyVariantKey = tuple[int, str]
-
-
-def _search_new_saved_variants(family_variant_ids: list[FamilyVariantKey], user: User):
+def _search_new_saved_variants(family_variant_ids, *args, **kwargs):
     family_ids = set()
     variant_families = defaultdict(list)
     for family_id, variant_id in family_variant_ids:
         family_ids.add(family_id)
         variant_families[variant_id].append(family_id)
-    families_by_id = {f.id: f for f in Family.objects.filter(id__in=family_ids)}
-
-    search_variants_by_id = {
-        v['variantId']: v for v in get_variants_for_variant_ids(
-            families=families_by_id.values(), variant_ids=variant_families.keys(), user=user,
+    families_by_id = {
+        f['id']: f for f in Family.objects.filter(id__in=family_ids).values(
+            'id', 'guid', 'family_id', 'project__guid', 'project__genome_version',
         )
+    }
+
+    genome_version = next(family['project__genome_version'] for family in families_by_id.values())
+    search_variants_by_id = {
+        v['variantId']: v for v in _get_clickhouse_variants(families_by_id, family_variant_ids, genome_version)
     }
 
     new_variants = {}
@@ -253,43 +265,73 @@ def _search_new_saved_variants(family_variant_ids: list[FamilyVariantKey], user:
         variant = search_variants_by_id.get(variant_id) or {'familyGuids': []}
         for family_id in family_ids:
             family = families_by_id[family_id]
-            if family.guid in variant['familyGuids']:
+            if family['guid'] in variant['familyGuids']:
                 new_variants[(family_id, variant_id)] = variant
             else:
-                missing[family.family_id].append(variant_id)
+                missing[family['family_id']].append(variant_id)
 
     if missing:
         missing_summary = [f'{family} ({", ".join(sorted(variant_ids))})' for family, variant_ids in missing.items()]
         raise ErrorsWarningsException([
-            f"Unable to find the following family's AIP variants in the search backend: {', '.join(missing_summary)}",
+            f"Unable to find the following family's variants in the search backend: {', '.join(missing_summary)}",
         ])
 
     return new_variants
+
+
+def _get_clickhouse_variants(families_by_id: dict[int, dict], family_variant_ids: set[tuple[int, str]], genome_version: str) -> list[dict]:
+    variants_by_key = get_saved_variant_annotations(family_variant_ids, genome_version=genome_version, group_by_field='key')
+    families_by_project = defaultdict(list)
+    for family in families_by_id.values():
+        families_by_project[family['project__guid']].append(family['guid'])
+    for project_guid, family_guids in families_by_project.items():
+        genotype_keys = get_clickhouse_genotypes(
+            project_guid, family_guids, genome_version, Dataset.DATASET_TYPE_VARIANT_CALLS, variants_by_key.keys(),
+            additional_fields=['xpos']
+        )
+        for key, entry_data in genotype_keys.items():
+            variants_by_key[key]['xpos'] = entry_data['xpos']
+            variants_by_key[key]['genotypes'] = {**entry_data['genotypes'], **variants_by_key[key].get('genotypes', {})}
+            variants_by_key[key]['familyGuids'] = sorted([
+                *{g['familyGuid'] for g in entry_data['genotypes'].values()},
+                *(variants_by_key[key].get('familyGuids', [])),
+            ])
+
+    return list(variants_by_key.values())
 
 
 ALL_PROJECTS = 'all'
 GREGOR_CATEGORY = 'gregor'
 
 
-def _get_metadata_projects(request, project_guid):
+def _get_metadata_context(request, project_guid):
     is_analyst = user_is_analyst(request.user)
     is_all_projects = project_guid == ALL_PROJECTS
     include_airtable = 'true' in request.GET.get('includeAirtable', '') and AirtableSession.is_airtable_enabled() and is_analyst and not is_all_projects
     if is_all_projects:
-        projects = get_internal_projects() if is_analyst else Project.objects.filter(
-            guid__in=get_project_guids_user_can_view(request.user))
+        if is_analyst:
+            individual_filter = Q(family__project__in=get_internal_projects())
+        else:
+            project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user)
+            individual_filter = Q(family__project__guid__in=project_guids)
+            if analysis_group_guids:
+                individual_filter |= Q(family__analysisgroup__guid__in=analysis_group_guids)
     elif project_guid == GREGOR_CATEGORY:
         if not is_analyst:
             raise PermissionDenied()
-        projects = Project.objects.filter(projectcategory__name__iexact=GREGOR_CATEGORY)
+        individual_filter = Q(family__project__projectcategory__name__iexact=GREGOR_CATEGORY)
     else:
-        projects = [get_project_and_check_permissions(project_guid, request.user)]
-    return projects, include_airtable
+        project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+        if analysis_groups:
+            individual_filter = Q(family__analysisgroup__in=analysis_groups)
+        else:
+            individual_filter = Q(family__project=project)
+    return individual_filter, include_airtable
 
 
 @login_and_policies_required
 def individual_metadata(request, project_guid):
-    projects, include_airtable = _get_metadata_projects(request, project_guid)
+    individual_filter, include_airtable = _get_metadata_context(request, project_guid)
 
     family_rows_by_id = {}
     rows_by_subject_family_id = defaultdict(dict)
@@ -329,10 +371,11 @@ def individual_metadata(request, project_guid):
             rows_by_subject_family_id[(row['participant_id'], family_id)].update(row)
 
     parse_anvil_metadata(
-        projects, request.user, _add_row, max_loaded_date=request.GET.get('loadedBefore'),
+        None, request.user, _add_row, max_loaded_date=request.GET.get('loadedBefore'),
         include_family_sample_metadata=True,
         omit_airtable=not include_airtable,
         mme_value=Value('Yes'),
+        individual_filter=individual_filter,
         get_additional_individual_fields=lambda individual, airtable_metadata, has_dbgap_submission, maternal_ids, paternal_ids: {
             'Collaborator': (airtable_metadata or {}).get('Collaborator'),
             'individual_guid': individual.guid,
@@ -370,25 +413,3 @@ def _get_airtable_collaborator_names(user, collaborator_ids):
         collaborator_id: collaborator_map.get(collaborator_id, {}).get('CollaboratorID')
         for collaborator_id in collaborator_ids
     }
-
-
-@login_and_policies_required
-def send_vlm_email(request):
-    request_json = json.loads(request.body)
-    email_message = EmailMessage(
-        subject=request_json['subject'],
-        body=request_json['body'],
-        bcc=[s.strip() for s in request_json['to'].split(',')],
-        cc=[request.user.email],
-        reply_to=[request.user.email],
-        to=[VLM_SEND_EMAIL],
-        from_email=VLM_SEND_EMAIL,
-    )
-    set_email_message_stream(email_message, 'vlm')
-
-    try:
-        email_message.send()
-    except Exception as e:
-        logger.error(f'VLM Email Error: {e}', request.user, detail=request_json)
-
-    return create_json_response({'success': True})

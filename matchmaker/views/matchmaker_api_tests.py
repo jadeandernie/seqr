@@ -10,9 +10,9 @@ from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, Matchmak
 from matchmaker.matchmaker_utils import MME_DISCLAIMER
 from matchmaker.views.matchmaker_api import get_individual_mme_matches, search_individual_mme_matches, \
     update_mme_submission, delete_mme_submission, update_mme_result_status, send_mme_contact_email, \
-    get_mme_nodes, search_local_individual_mme_matches, finalize_mme_search, \
+    get_mme_nodes, search_local_individual_mme_matches, finalize_mme_search, send_vlm_email, \
     update_mme_contact_note, update_mme_project_contact
-from seqr.views.utils.test_utils import AuthenticationTestCase
+from seqr.views.utils.test_utils import AuthenticationTestCase, SAVED_VARIANT_FIELDS
 
 INDIVIDUAL_GUID = 'I000001_na19675'
 SUBMISSION_GUID = 'MS000001_na19675'
@@ -22,8 +22,9 @@ RESULT_STATUS_GUID = 'MR0003552_SHE_1006P_1'
 
 SUBMISSION_DATA = {
     'individualGuid': NO_SUBMISSION_INDIVIDUAL_GUID,
-    'contactHref': 'mailto:test@broadinstitute.org',
-    'contactName': 'PI',
+    'contacts': [
+        {'name': 'PI', 'email': 'test@broadinstitute.org'},
+    ],
     'phenotypes': [
         {'id': 'HP:0012469', 'label': 'Infantile spasms', 'observed': 'yes'}
     ],
@@ -156,8 +157,8 @@ MISMATCHED_GENE_NEW_MATCH_JSON['patient']['id'] = '987'
 MOCK_SLACK_TOKEN = 'xoxp-123'  # nosec
 
 MOCK_NODES_BY_NAME = {
-    'Node A': {'name': 'Node A', 'token': 'abc', 'url': 'http://node_a.com/match'},
-    'Node B': {'name': 'Node B', 'token': 'xyz', 'url': 'http://node_b.mme.org/api'},
+    'Node A': {'name': 'Node A', 'token': 'abc', 'url': 'http://node_a.com/match'},  # nosec
+    'Node B': {'name': 'Node B', 'token': 'xyz', 'url': 'http://node_b.mme.org/api'},  # nosec
 }
 
 class EmailException(Exception):
@@ -173,7 +174,6 @@ class EmailException(Exception):
 
 
 class MatchmakerAPITest(AuthenticationTestCase):
-    databases = '__all__'
     fixtures = ['users', '1kg_project', 'reference_data']
 
     def test_get_individual_mme_matches(self):
@@ -191,9 +191,7 @@ class MatchmakerAPITest(AuthenticationTestCase):
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
         self.assertSetEqual(set(response_json.keys()), {
-            'mmeResultsByGuid', 'genesById', 'savedVariantsByGuid', 'variantTagsByGuid',
-            'variantNotesByGuid', 'variantFunctionalDataByGuid', 'mmeContactNotes',
-            'mmeSubmissionsByGuid',
+            'mmeResultsByGuid', 'genesById', 'savedVariantsByGuid', 'mmeContactNotes', 'mmeSubmissionsByGuid',
         })
 
         self.assertSetEqual(
@@ -209,8 +207,10 @@ class MatchmakerAPITest(AuthenticationTestCase):
             'createdDate': '2018-05-23T09:07:49.719Z',
             'lastModifiedDate': '2018-05-23T09:07:49.719Z',
             'deletedDate': None,
-            'contactName': 'Sam Baxter',
-            'contactHref': 'mailto:matchmaker@broadinstitute.org,test_user@broadinstitute.org',
+            'contacts': [
+                {'name': 'Sam Baxter', 'email': 'matchmaker@broadinstitute.org'},
+                {'name': '', 'email': 'test_user@broadinstitute.org'},
+            ],
             'submissionId': 'NA19675_1_01',
             'phenotypes': [
                 {'id': 'HP:0001252', 'label': 'Muscular hypotonia', 'observed': 'yes'},
@@ -229,8 +229,10 @@ class MatchmakerAPITest(AuthenticationTestCase):
         )
         self.assertSetEqual(
             set(response_json['savedVariantsByGuid'].keys()),
-            {'SV0000001_2103343353_r0390_100', 'SV0059957_11562437_f019313_1', 'SV0059956_11560662_f019313_1'}
+            {'SV0000001_2103343353_r0390_100'}
         )
+        saved_variant_fields = {*SAVED_VARIANT_FIELDS, 'selectedMainTranscript', 'end', 'genomeVersion'}
+        self.assertSetEqual(set(response_json['savedVariantsByGuid']['SV0000001_2103343353_r0390_100'].keys()), saved_variant_fields)
         self.assertDictEqual(response_json['mmeContactNotes'], {})
 
         # users should see originating query for results if the have correct project permissions
@@ -575,8 +577,9 @@ class MatchmakerAPITest(AuthenticationTestCase):
             'createdDate': mock.ANY,
             'lastModifiedDate': mock.ANY,
             'deletedDate': None,
-            'contactName': 'PI',
-            'contactHref': 'mailto:test@broadinstitute.org',
+            'contacts': [
+                {'name': 'PI', 'email': 'test@broadinstitute.org'},
+            ],
             'submissionId': NO_SUBMISSION_INDIVIDUAL_GUID,
             'phenotypes': [
                 {'id': 'HP:0012469', 'label': 'Infantile spasms', 'observed': 'yes'}
@@ -607,7 +610,7 @@ class MatchmakerAPITest(AuthenticationTestCase):
         self.assertEqual(submission.individual.guid, NO_SUBMISSION_INDIVIDUAL_GUID)
         self.assertEqual(submission.submission_id, NO_SUBMISSION_INDIVIDUAL_GUID)
         self.assertEqual(submission.label, 'HG00733')
-        self.assertEqual(submission.contact_name, 'PI')
+        self.assertListEqual(submission.contacts, [{'name': 'PI', 'email': 'test@broadinstitute.org'}])
         self.assertIsNone(submission.deleted_date)
         self.assertListEqual(submission.features, SUBMISSION_DATA['phenotypes'])
         submission_genes = submission.matchmakersubmissiongenes_set.all()
@@ -619,8 +622,9 @@ class MatchmakerAPITest(AuthenticationTestCase):
         url = reverse(update_mme_submission, args=[new_submission_guid])
         update_body = {
             'individualGuid': NO_SUBMISSION_INDIVIDUAL_GUID,
-            'contactHref': 'mailto:matchmaker@broadinstitute.org',
-            'contactName': 'Test Name',
+            'contacts': [
+                {'name': 'Test Name', 'email': 'matchmaker@broadinstitute.org'},
+            ],
             'phenotypes': [
                 {'id': 'HP:0012469', 'label': 'Infantile spasms', 'observed': 'no'},
                 {'id': 'HP:0002017', 'label': 'Nausea and vomiting', 'observed': 'yes'},
@@ -637,8 +641,9 @@ class MatchmakerAPITest(AuthenticationTestCase):
             'createdDate': mock.ANY,
             'lastModifiedDate': mock.ANY,
             'deletedDate': None,
-            'contactName': 'Test Name',
-            'contactHref': 'mailto:matchmaker@broadinstitute.org',
+            'contacts': [
+                {'name': 'Test Name', 'email': 'matchmaker@broadinstitute.org'},
+            ],
             'submissionId': NO_SUBMISSION_INDIVIDUAL_GUID,
             'phenotypes': [
                 {'id': 'HP:0012469', 'label': 'Infantile spasms', 'observed': 'no'},
@@ -661,8 +666,7 @@ class MatchmakerAPITest(AuthenticationTestCase):
 
         # test model update
         submission = MatchmakerSubmission.objects.get(guid=new_submission_guid)
-        self.assertEqual(submission.contact_name, 'Test Name')
-        self.assertEqual(submission.contact_href, 'mailto:matchmaker@broadinstitute.org')
+        self.assertEqual(submission.contacts, [{'name': 'Test Name', 'email': 'matchmaker@broadinstitute.org'}])
         self.assertEqual(submission.label, 'HG00733')
         self.assertIsNone(submission.deleted_date)
         self.assertListEqual(submission.features, update_body['phenotypes'])
@@ -703,8 +707,10 @@ class MatchmakerAPITest(AuthenticationTestCase):
             'createdDate': '2018-05-23T09:07:49.719Z',
             'lastModifiedDate': mock.ANY,
             'deletedDate': None,
-            'contactName': 'Sam Baxter',
-            'contactHref': 'mailto:matchmaker@broadinstitute.org,test_user@broadinstitute.org',
+            'contacts': [
+                {'name': 'Sam Baxter', 'email': 'matchmaker@broadinstitute.org'},
+                {'name': '', 'email': 'test_user@broadinstitute.org'},
+            ],
             'submissionId': 'NA19675_1_01',
             'phenotypes': [],
             'geneVariants': [{'geneId': 'ENSG00000235249', 'variantGuid': 'SV0000001_2103343353_r0390_100'}],
@@ -854,8 +860,59 @@ class MatchmakerAPITest(AuthenticationTestCase):
         self.assertDictEqual(response_json, {'mmeSubmissionsByGuid': {'MS000015_na20885': mock.ANY}})
 
         updated_submission = MatchmakerSubmission.objects.get(guid='MS000015_na20885')
-        self.assertEqual(updated_submission.contact_href, 'mailto:matchmaker@broadinstitute.org,UDNCC@hms.harvard.edu')
+        self.assertListEqual(updated_submission.contacts, [
+            {'name': 'Sam Baxter', 'email': 'matchmaker@broadinstitute.org'},
+            {'name': '', 'email': 'UDNCC@hms.harvard.edu'},
+        ])
 
         # test submission already with contact not updated
         existing_submission = MatchmakerSubmission.objects.get(guid='MS000016_P0004515')
-        self.assertEqual(existing_submission.contact_href, 'mailto:UDNCC@hms.harvard.edu,matchmaker@phenomecentral.org')
+        self.assertListEqual(existing_submission.contacts, [
+            {'name': 'Baylor UDN Clinical Site', 'email': 'UDNCC@hms.harvard.edu'},
+            {'name': '', 'email': 'matchmaker@phenomecentral.org'},
+        ])
+
+
+    @mock.patch('matchmaker.views.matchmaker_api.EmailMessage')
+    def test_send_vlm_email(self, mock_email):
+        url = reverse(send_vlm_email)
+        self.check_require_login(url)
+
+        self.reset_logs()
+        body = {
+            'to': 'test@test.com , other_test@gmail.com',
+            'body': 'some email content',
+            'subject': 'some email subject'
+        }
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
+        self._assert_expected_vlm_email(response, mock_email)
+
+        self.reset_logs()
+        mock_email.return_value.send.side_effect = Exception('Send failed')
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
+        self._assert_expected_vlm_email(response, mock_email, additional_logs=[
+            ('VLM Email Error: Send failed', {
+                'severity': 'ERROR',
+                '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
+                'detail': body,
+            }),
+        ])
+
+    def _assert_expected_vlm_email(self, response, mock_email, additional_logs=None):
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'success': True})
+
+        mock_email.assert_called_with(
+            subject='some email subject',
+            body='some email content',
+            bcc=['test@test.com', 'other_test@gmail.com'],
+            cc=['test_user_no_access@test.com'],
+            reply_to=['test_user_no_access@test.com'],
+            to=['vlm-noreply@broadinstitute.org'],
+            from_email='vlm-noreply@broadinstitute.org')
+        self.assertDictEqual(mock_email.return_value.esp_extra, {'MessageStream': 'vlm'})
+        mock_email.return_value.send.assert_called()
+
+        self.assert_json_logs(self.no_access_user, (additional_logs or []) + [
+            (None, {'httpRequest': mock.ANY, 'requestBody': mock.ANY})
+        ])

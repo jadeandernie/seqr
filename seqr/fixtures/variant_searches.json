@@ -16,16 +16,14 @@
                     "af": 1
                 },
                 "callset": {
-                    "ac": null,
-                    "af": 0.01
+                    "ac": 1000
                 },
                 "gnomad_svs": {
                     "ac": null,
                     "af": 0.001
                 },
                 "sv_callset": {
-                    "ac": null,
-                    "af": 0.001
+                    "ac": 10
                 },
                 "gnomad_exomes": {
                     "ac": null,
@@ -82,7 +80,8 @@
                 ],
                 "clinvar": [
                     "pathogenic",
-                    "likely_pathogenic"
+                    "likely_pathogenic",
+                    "conflicting_p_lp"
                 ]
             },
             "qualityFilter": {
@@ -112,16 +111,14 @@
                     "af": 1
                 },
                 "callset": {
-                    "ac": null,
-                    "af": 0.03
+                    "ac": 3000
                 },
                 "gnomad_svs": {
                     "ac": null,
                     "af": 0.01
                 },
                 "sv_callset": {
-                    "ac": null,
-                    "af": 0.01
+                    "ac": 100
                 },
                 "gnomad_exomes": {
                     "ac": null,
@@ -179,7 +176,8 @@
                 ],
                 "clinvar": [
                     "pathogenic",
-                    "likely_pathogenic"
+                    "likely_pathogenic",
+                    "conflicting_p_lp"
                 ]
             },
             "qualityFilter": {
@@ -237,16 +235,14 @@
                     "af": 1
                 },
                 "callset": {
-                    "ac": null,
-                    "af": 0.01
+                    "ac": 1000
                 },
                 "gnomad_svs": {
                     "ac": null,
                     "af": 0.001
                 },
                 "sv_callset": {
-                    "ac": null,
-                    "af": 0.001
+                    "ac": 10
                 },
                 "gnomad_exomes": {
                     "ac": null,
@@ -262,16 +258,6 @@
                     "transcript_ablation",
                     "5_prime_UTR_variant",
                     "3_prime_UTR_variant"
-                ],
-                "motif_feature": [
-                    "TFBS_ablation",
-                    "TFBS_amplification",
-                    "TF_binding_site_variant"
-                ],
-                "regulatory_feature": [
-                    "regulatory_region_variant",
-                    "regulatory_region_ablation",
-                    "regulatory_region_amplification"
                 ],
                 "in_frame": [
                     "inframe_insertion",
@@ -332,6 +318,9 @@
                 "clinvar": [
                     "pathogenic",
                     "likely_pathogenic",
+                    "conflicting_p_lp",
+                    "conflicting_no_p",
+                    "vus",
                     "vus_or_conflicting"
                 ]
             },
@@ -361,16 +350,14 @@
                     "af": 1
                 },
                 "callset": {
-                    "ac": null,
-                    "af": 0.03
+                    "ac": 3000
                 },
                 "gnomad_svs": {
                     "ac": null,
                     "af": 0.01
                 },
                 "sv_callset": {
-                    "ac": null,
-                    "af": 0.01
+                    "ac": 100
                 },
                 "gnomad_exomes": {
                     "ac": null,
@@ -435,6 +422,9 @@
                 "clinvar": [
                     "pathogenic",
                     "likely_pathogenic",
+                    "conflicting_p_lp",
+                    "conflicting_no_p",
+                    "vus",
                     "vus_or_conflicting"
                 ]
             },
@@ -449,16 +439,6 @@
                     "5_prime_UTR_variant",
                     "3_prime_UTR_variant",
                     "non_coding_transcript_exon_variant__canonical"
-                ],
-                "motif_feature": [
-                    "TFBS_ablation",
-                    "TFBS_amplification",
-                    "TF_binding_site_variant"
-                ],
-                "regulatory_feature": [
-                    "regulatory_region_variant",
-                    "regulatory_region_ablation",
-                    "regulatory_region_amplification"
                 ],
                 "in_frame": [
                     "inframe_insertion",

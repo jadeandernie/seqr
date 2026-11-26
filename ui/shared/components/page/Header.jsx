@@ -2,12 +2,12 @@ import React from 'react'
 import PropTypes from 'prop-types'
 import styled from 'styled-components'
 
-import { Menu, Header, Dropdown } from 'semantic-ui-react'
+import { Menu, Header, Dropdown, Label } from 'semantic-ui-react'
 import { connect } from 'react-redux'
 import { Link } from 'react-router-dom'
 
 import { updateUser } from 'redux/rootReducer'
-import { getUser, getOauthLoginProvider } from 'redux/selectors'
+import { getUser, getOauthLoginProvider, getLastFeatureUpdate } from 'redux/selectors'
 import { USER_NAME_FIELDS, LOCAL_LOGIN_URL, FEATURE_UPDATES_PATH } from 'shared/utils/constants'
 import UpdateButton from '../buttons/UpdateButton'
 
@@ -16,22 +16,48 @@ import AwesomeBar from './AwesomeBar'
 const HeaderMenu = styled(Menu)`
   padding-left: 100px;
   padding-right: 100px;
+
+  @media (max-width: 1800px) {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  @media (max-width: 1400px) {
+    flex-wrap: wrap;
+  }
 `
 
-const PageHeader = React.memo(({ user, oauthLoginProvider, onSubmit }) => {
+const AwesomeBarMenuItem = styled(Menu.Item)`
+  flex: 0 1 382px !important;
+  min-width: 216px;
+  max-width: 382px;
+
+  .ui.search {
+    width: 100%;
+  }
+`
+
+const PageHeader = React.memo(({ user, oauthLoginProvider, onSubmit, lastFeatureUpdate }) => {
   const loginUrl = oauthLoginProvider ? `/login/${oauthLoginProvider}` : LOCAL_LOGIN_URL
 
   return (
     <HeaderMenu borderless inverted attached>
-      <Menu.Item as={Link} to="/"><Header size="medium" inverted>seqr</Header></Menu.Item>
+      <Menu.Item as={Link} to="/"><Header size="medium" inverted><i>seqr</i></Header></Menu.Item>
       {Object.keys(user).length ? [
+        <Menu.Item key="search" as={Link} to="/variant_search" content="Search" />,
+        <Menu.Item key="variant_lookup" as={Link} to="/variant_lookup" content="Variant Lookup" />,
+        <Menu.Item key="gene_lookup" as={Link} to="/variant_lookup/gene" content="Gene Lookup" />,
         <Menu.Item key="summary_data" as={Link} to="/summary_data" content="Summary Data" />,
         (user.isAnalyst || user.isPm) ? <Menu.Item key="report" as={Link} to="/report" content="Reports" /> : null,
         (user.isDataManager || user.isPm) ? <Menu.Item key="data_management" as={Link} to="/data_management" content="Data Management" /> : null,
-        <Menu.Item key="awesomebar" fitted="vertically"><AwesomeBar newWindow inputwidth="350px" /></Menu.Item>,
+        <AwesomeBarMenuItem key="awesomebar" fitted="vertically"><AwesomeBar newWindow inputwidth="350px" /></AwesomeBarMenuItem>,
       ] : null }
       <Menu.Item key="spacer" position="right" />
-      <Menu.Item key="feature_updates" as={Link} to={FEATURE_UPDATES_PATH} content="Feature Updates" />
+      <Menu.Item key="feature_updates">
+        <Link to={FEATURE_UPDATES_PATH}>Feature Updates</Link>
+        {(lastFeatureUpdate && (new Date()).setMonth(new Date().getMonth() - 1) < new Date(lastFeatureUpdate)) &&
+          <Label color="red" pointing="left" size="tiny">New</Label>}
+      </Menu.Item>
       {Object.keys(user).length ? [
         <Dropdown
           item
@@ -52,9 +78,9 @@ const PageHeader = React.memo(({ user, oauthLoginProvider, onSubmit }) => {
               formFields={USER_NAME_FIELDS}
               onSubmit={onSubmit}
             />
+            <Dropdown.Item as="a" href="/logout" icon="sign out" text="Log out" />
           </Dropdown.Menu>
         </Dropdown>,
-        <Menu.Item key="logout" as="a" href="/logout">Log out</Menu.Item>,
       ] :
       <Menu.Item as="a" href={loginUrl}>Log in</Menu.Item> }
     </HeaderMenu>
@@ -65,12 +91,14 @@ PageHeader.propTypes = {
   user: PropTypes.object,
   oauthLoginProvider: PropTypes.string,
   onSubmit: PropTypes.func,
+  lastFeatureUpdate: PropTypes.string,
 }
 
 // wrap top-level component so that redux state is passed in as props
 const mapStateToProps = state => ({
   user: getUser(state),
   oauthLoginProvider: getOauthLoginProvider(state),
+  lastFeatureUpdate: getLastFeatureUpdate(state),
 })
 
 const mapDispatchToProps = {

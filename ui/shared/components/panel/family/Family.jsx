@@ -129,7 +129,7 @@ const FAMILY_FIELD_RENDER_LOOKUP = {
   [FAMILY_FIELD_DISCOVERY_MONDO_ID]: {
     ...MONDO_FIELD,
     internal: true,
-    canEditFamily: ({ discoveryTags }) => discoveryTags?.length > 0,
+    canEditFamily: ({ discoveryGeneIds }) => discoveryGeneIds?.length > 0,
   },
   [FAMILY_FIELD_OMIM_NUMBERS]: {
     canEditFamily: ({ postDiscoveryOmimOptions }) => Object.keys(postDiscoveryOmimOptions || {}).length > 0,
@@ -245,13 +245,16 @@ class Family extends React.PureComponent {
 
     let leftContent = null
     if (!hidePedigree) {
+      const isCoreEditable = isEditable && !!project.workspaceName && !project.isAnalystProject
       const familyHeader = (
         <BaseFieldView
           field="familyId"
           idField="familyGuid"
           initialValues={family}
           fieldDisplay={this.familyHeader}
-          isEditable={isEditable && !!project.workspaceName && !project.isAnalystProject}
+          isEditable={isCoreEditable}
+          isDeletable={isCoreEditable}
+          deleteConfirm={`Are you sure you want to delete ${family.displayName}? This action can not be undone`}
           formFieldProps={FAMILY_NAME_FIELD_PROPS}
           modalTitle={`Edit Family ${family.displayName}`}
           onSubmit={dispatchUpdateFamily}

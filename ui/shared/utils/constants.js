@@ -56,8 +56,6 @@ export const GENOME_VERSION_DISPLAY_LOOKUP = {
 
 export const FILE_FIELD_NAME = 'uploadedFile'
 
-export const PROJECT_DESC_FIELD = { name: 'description', label: 'Project Description', placeholder: 'Description' }
-
 export const CONSENT_CODES = ['HMB', 'GRU']
 const CONSENT_CODE_OPTIONS = [...CONSENT_CODES, 'Other'].map(text => ({ text, value: text[0] }))
 export const CONSENT_CODE_LOOKUP = CONSENT_CODE_OPTIONS.reduce(
@@ -70,9 +68,28 @@ const CONSENT_CODE_FIELD = {
   options: CONSENT_CODE_OPTIONS,
 }
 
+export const OPTIONAL_PROJECT_FIELDS = [
+  { name: 'description', label: 'Project Description', placeholder: 'Description' },
+  {
+    name: 'recoveryEmail',
+    label: 'Recovery Email',
+    labelHelp: 'An email the seqr team can contact in the event that the project owner is no longer reachable. ' +
+      'Note that this account does not need to be granted access to the project, and may be a group or shared email.',
+    validate: value => (!value ? undefined : validators.requiredEmail(value)),
+  },
+  {
+    name: 'restrictSharing',
+    label: 'Do not share detailed metadata in variant lookup',
+    labelHelp: 'On the Variant Lookup page, all seqr users are able to see details about individuals that have a matched ' +
+      'variant of interest. While high-level details such as affected status, sex, and top-level HPO categories must be ' +
+      'shared, sharing detailed metadata such as full HPO terms can be restricted by selecting this option.',
+    component: BooleanCheckbox,
+  },
+]
+
 export const EDITABLE_PROJECT_FIELDS = [
   { name: 'name', label: 'Project Name', placeholder: 'Name', validate: validators.required, autoFocus: true },
-  PROJECT_DESC_FIELD,
+  ...OPTIONAL_PROJECT_FIELDS,
 ]
 
 export const PM_EDITABLE_PROJECT_FIELDS = [
@@ -112,12 +129,13 @@ export const FILE_FORMATS = [
 ]
 
 const MAILTO_CONTACT_URL_REGEX = /^mailto:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4}(,\s*[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{1,4})*$/i
+export const isValidMailtoEmail = email => MAILTO_CONTACT_URL_REGEX.test(email)
 export const MATCHMAKER_CONTACT_NAME_FIELD = { label: 'Contact Name' }
 export const MATCHMAKER_CONTACT_URL_FIELD = {
   label: 'Contact URL',
   parse: val => `mailto:${val}`,
   format: val => (val || '').replace('mailto:', ''),
-  validate: val => (MAILTO_CONTACT_URL_REGEX.test(val) ? undefined : 'Invalid contact url'),
+  validate: val => (isValidMailtoEmail(val) ? undefined : 'Invalid contact url'),
 }
 
 // SAMPLES
@@ -129,6 +147,52 @@ export const DATASET_TYPE_MITO_CALLS = 'MITO'
 export const DATA_TYPE_TPM = 'T'
 export const DATA_TYPE_EXPRESSION_OUTLIER = 'E'
 export const DATA_TYPE_SPLICE_OUTLIER = 'S'
+
+const uploadLabelHelp = (
+  <div>
+    RNA-seq data should be formatted according to&nbsp;
+    <a
+      href="https://github.com/broadinstitute/seqr/blob/master/deploy/LOCAL_INSTALL_HELM.md#loading-rnaseq-datasets"
+      target="_blank"
+      rel="noreferrer"
+    >
+      these guidelines
+    </a>
+    .
+  </div>
+)
+
+export const LOAD_RNA_FIELDS = [
+  {
+    name: 'file',
+    label: 'RNA-seq data',
+    placeholder: 'gs:// Google bucket path for RNA data file',
+    validate: validators.required,
+    labelHelp: uploadLabelHelp,
+  },
+  {
+    name: 'dataType',
+    label: 'Data Type',
+    component: Select,
+    options: [
+      { text: 'Expression Outlier', value: DATA_TYPE_EXPRESSION_OUTLIER, description: 'OUTRIDER' },
+      { text: 'Splice Outlier', value: DATA_TYPE_SPLICE_OUTLIER, description: 'FRASER2' },
+      { text: 'TPM', value: DATA_TYPE_TPM },
+    ],
+    validate: validators.required,
+  },
+  {
+    name: 'ignoreExtraSamples',
+    component: BooleanCheckbox,
+    label: 'Ignore extra samples',
+  },
+  {
+    name: 'skipNewSampleValidation',
+    component: BooleanCheckbox,
+    label: 'Skip new sample validation',
+    labelHelp: 'Allow loading to proceed if no new samples are included in the loading request',
+  },
+]
 
 export const DATASET_TITLE_LOOKUP = {
   [DATASET_TYPE_SV_CALLS]: ' SV',
@@ -164,6 +228,7 @@ const FAMILY_STATUS_CLOSED = 'C'
 const FAMILY_STATUS_PARTIAL_SOLVE = 'P'
 const FAMILY_STATUS_ANALYSIS_IN_PROGRESS = 'I'
 const FAMILY_STATUS_WAITING_FOR_DATA = 'Q'
+const FAMILY_STATUS_LOADING_FAILED = 'F'
 const FAMILY_STATUS_NO_DATA = 'N'
 
 const DEPRECATED_FAMILY_ANALYSIS_STATUS_OPTIONS = [
@@ -184,6 +249,7 @@ export const SELECTABLE_FAMILY_ANALYSIS_STATUS_OPTIONS = [
   { value: FAMILY_STATUS_PARTIAL_SOLVE, color: '#288582', name: 'Partial Solve - Analysis in Progress' },
   { value: FAMILY_STATUS_ANALYSIS_IN_PROGRESS, color: '#4682B4', name: 'Analysis in Progress' },
   { value: FAMILY_STATUS_WAITING_FOR_DATA, color: '#FFC107', name: 'Waiting for data' },
+  { value: FAMILY_STATUS_LOADING_FAILED, color: '#ba4c12', name: 'Loading failed' },
   { value: FAMILY_STATUS_NO_DATA, color: '#646464', name: 'No data expected' },
 ]
 export const ALL_FAMILY_ANALYSIS_STATUS_OPTIONS = [
@@ -324,9 +390,9 @@ const SHOW_ANALYSED_BY_ME = 'SHOW_ANALYSED_BY_ME'
 const SHOW_ANALYSED = 'SHOW_ANALYSED'
 const SHOW_NOT_ANALYSED = 'SHOW_NOT_ANALYSED'
 
-const hasMatchingSampleFilter = isMatchingSample => (family, user, samplesByFamily) => (
-  (family.sampleTypes || samplesByFamily[family.familyGuid] || []).some(
-    sample => sample.isActive && isMatchingSample(sample),
+const hasMatchingDatasetFilter = isMatchingDataset => (family, user, activeDatasetsByFamily) => (
+  (family.sampleTypes || activeDatasetsByFamily[family.familyGuid] || []).some(
+    sample => isMatchingDataset(sample),
   ))
 
 export const ASSIGNED_TO_ME_FILTER = {
@@ -381,7 +447,7 @@ export const CATEGORY_FAMILY_FILTERS = {
     {
       value: SHOW_DATA_LOADED,
       name: 'Data Loaded',
-      createFilter: hasMatchingSampleFilter(() => true),
+      createFilter: hasMatchingDatasetFilter(() => true),
     },
     {
       value: `${SHOW_DATA_LOADED}_RNA`,
@@ -391,7 +457,7 @@ export const CATEGORY_FAMILY_FILTERS = {
     ...[DATASET_TYPE_SV_CALLS, DATASET_TYPE_MITO_CALLS].map(dataType => ({
       value: `${SHOW_DATA_LOADED}_${dataType}`,
       name: `Data Loaded -${DATASET_TITLE_LOOKUP[dataType]}`,
-      createFilter: hasMatchingSampleFilter(
+      createFilter: hasMatchingDatasetFilter(
         ({ datasetType }) => datasetType === dataType,
       ),
     })),
@@ -684,27 +750,27 @@ export const INDIVIDUAL_FIELD_LOOKUP = {
 
 // CLINVAR
 
-const CLINVAR_DEFAULT_PATHOGENICITY = 'no_pathogenic_assertion'
-const CLINVAR_MAX_RISK_PATHOGENICITY = 'established_risk_allele'
-const CLINVAR_MIN_RISK_PATHOGENICITY = 'likely_risk_allele'
+const CLINVAR_DEFAULT_PATHOGENICITY = 'No_pathogenic_assertion'
+const CLINVAR_MAX_RISK_PATHOGENICITY = 'Established_risk_allele'
+const CLINVAR_MIN_RISK_PATHOGENICITY = 'Likely_risk_allele'
 const CLINVAR_PATHOGENICITIES = [
-  'pathogenic',
-  'pathogenic/likely_pathogenic',
-  'pathogenic/likely_pathogenic/established_risk_allele',
-  'pathogenic/likely_pathogenic/likely_risk_allele',
-  'pathogenic/likely_risk_allele',
-  'likely_pathogenic',
-  'likely_pathogenic/likely_risk_allele',
+  'Pathogenic',
+  'Pathogenic/Likely_pathogenic',
+  'Pathogenic/Likely_pathogenic/Established_risk_allele',
+  'Pathogenic/Likely_pathogenic/Likely_risk_allele',
+  'Pathogenic/Likely_risk_allele',
+  'Likely_pathogenic',
+  'Likely_pathogenic/Likely_risk_allele',
   CLINVAR_MAX_RISK_PATHOGENICITY,
   CLINVAR_MIN_RISK_PATHOGENICITY,
-  'conflicting_interpretations_of_pathogenicity',
-  'uncertain_risk_allele',
-  'uncertain_significance/uncertain_risk_allele',
-  'uncertain_significance',
+  'Conflicting_classifications_of_pathogenicity',
+  'Uncertain_risk_allele',
+  'Uncertain_significance/Uncertain_risk_allele',
+  'Uncertain_significance',
   CLINVAR_DEFAULT_PATHOGENICITY,
-  'likely_benign',
-  'benign/likely_benign',
-  'benign',
+  'Likely_benign',
+  'Benign/Likely_benign',
+  'Benign',
 ].reverse().reduce((acc, path, i) => ({ ...acc, [path]: i }), {})
 
 const HGMD_SEVERITY = {
@@ -808,7 +874,6 @@ export const VEP_GROUP_SYNONYMOUS = 'synonymous'
 export const VEP_GROUP_OTHER = 'other'
 export const VEP_GROUP_SV = 'structural'
 export const VEP_GROUP_SV_CONSEQUENCES = 'structural_consequence'
-export const VEP_GROUP_SV_NEW = 'new_structural_variants'
 
 export const SV_TYPES = [
   {
@@ -931,14 +996,6 @@ const VEP_SV_CONSEQUENCES = [
     description: 'An SV is predicted to duplicate the transcription start site',
     text: 'Transcription Start Site Duplication',
     value: 'TSS_DUP',
-  },
-]
-
-const SV_NEW_OPTIONS = [
-  {
-    description: 'An SV with no overlap in a previous callset',
-    text: 'New Calls Only',
-    value: 'NEW',
   },
 ]
 
@@ -1159,7 +1216,7 @@ export const GROUPED_VEP_CONSEQUENCES = ORDERED_VEP_CONSEQUENCES.reduce((acc, co
   const group = consequence.group || VEP_GROUP_OTHER
   acc[group] = [...(acc[group] || []), consequence]
   return acc
-}, { [VEP_GROUP_SV_NEW]: SV_NEW_OPTIONS })
+}, {})
 
 export const VEP_CONSEQUENCE_ORDER_LOOKUP = ORDERED_VEP_CONSEQUENCES.reduce(
   (acc, consequence, i) => ({ ...acc, [consequence.value]: i }), {},
@@ -1215,7 +1272,7 @@ const SORT_BY_PRIORITIZED_GENE = 'PRIORITIZED_GENE'
 const SORT_BY_PROTEIN_CONSQ = 'PROTEIN_CONSEQUENCE'
 const SORT_BY_GNOMAD_GENOMES = 'GNOMAD'
 const SORT_BY_GNOMAD_EXOMES = 'GNOMAD_EXOMES'
-const SORT_BY_CALLSET_AF = 'CALLSET_AF'
+const SORT_BY_SEQR_AC = 'SEQR_AC'
 const SORT_BY_CONSTRAINT = 'CONSTRAINT'
 const SORT_BY_CADD = 'CADD'
 const SORT_BY_REVEL = 'REVEL'
@@ -1228,31 +1285,12 @@ const SORT_BY_TAGGED_DATE = 'TAGGED_DATE'
 const SORT_BY_SIZE = 'SIZE'
 
 export const getPermissionedHgmdClass = (variant, user, familiesByGuid, projectByGuid) => (
-  user.isAnalyst || variant.familyGuids.some(
+  user.isAnalyst || (variant.familyGuids || []).some(
     familyGuid => projectByGuid[familiesByGuid[familyGuid].projectGuid].enableHgmd,
   )) && variant.hgmd && variant.hgmd.class
 
-export const clinvarSignificance = (clinvar) => {
-  let { pathogenicity, assertions } = clinvar || {}
-  const { clinicalSignificance } = clinvar || {}
-  if (clinicalSignificance && !pathogenicity) {
-    [pathogenicity, ...assertions] = clinicalSignificance.split(/[,|]/)
-    if (pathogenicity === 'Pathogenic/Likely_pathogenic/Pathogenic') {
-      pathogenicity = 'Pathogenic/Likely_pathogenic'
-    } else if (pathogenicity === 'Pathogenic/Pathogenic') {
-      pathogenicity = 'Pathogenic'
-    }
-    if (!(pathogenicity.replace(' ', '_').toLowerCase() in CLINVAR_PATHOGENICITIES)) {
-      assertions = [pathogenicity, ...assertions]
-      pathogenicity = CLINVAR_DEFAULT_PATHOGENICITY
-    }
-    assertions = assertions.map(a => a.replace(/^_/, ''))
-  }
-
-  return { pathogenicity, assertions, severity: CLINVAR_PATHOGENICITIES[pathogenicity?.replace(' ', '_').toLowerCase()] }
-}
-
-export const clinvarColor = (severity, pathColor, riskColor, benignColor) => {
+export const clinvarColor = (clinvar, pathColor, riskColor, benignColor) => {
+  const severity = CLINVAR_PATHOGENICITIES[clinvar?.pathogenicity]
   if (severity > CLINVAR_PATHOGENICITIES[CLINVAR_MAX_RISK_PATHOGENICITY]) {
     return pathColor
   }
@@ -1266,10 +1304,10 @@ export const clinvarColor = (severity, pathColor, riskColor, benignColor) => {
 }
 
 const clinsigSeverity = (variant, user, familiesByGuid, projectByGuid) => {
-  const { pathogenicity, severity } = clinvarSignificance(variant.clinvar)
+  const { pathogenicity } = variant.clinvar || {}
   const hgmdSignificance = getPermissionedHgmdClass(variant, user, familiesByGuid, projectByGuid)
   if (!pathogenicity && !hgmdSignificance) return -10
-  const clinvarSeverity = pathogenicity ? severity + 1 : 0.1
+  const clinvarSeverity = pathogenicity ? CLINVAR_PATHOGENICITIES[pathogenicity] + 1 : 0.1
   const hgmdSeverity = HGMD_SEVERITY[hgmdSignificance] || 0
   return clinvarSeverity + hgmdSeverity
 }
@@ -1343,7 +1381,7 @@ const VARIANT_SORT_OPTONS = [
   },
   { value: SORT_BY_GNOMAD_GENOMES, text: 'gnomAD Genomes Frequency', comparator: populationComparator('gnomad_genomes') },
   { value: SORT_BY_GNOMAD_EXOMES, text: 'gnomAD Exomes Frequency', comparator: populationComparator('gnomad_exomes') },
-  { value: SORT_BY_CALLSET_AF, text: 'Callset AF', comparator: populationComparator('callset') },
+  { value: SORT_BY_SEQR_AC, text: 'seqr AC', comparator: (a, b) => a.populations?.seqr?.ac - b.populations?.seqr?.ac },
   { value: SORT_BY_CADD, text: 'CADD', comparator: predictionComparator('cadd') },
   { value: SORT_BY_REVEL, text: 'REVEL', comparator: predictionComparator('revel') },
   { value: SORT_BY_EIGEN, text: 'Eigen', comparator: predictionComparator('eigen') },
@@ -1395,7 +1433,7 @@ const VARIANT_SORT_OPTONS = [
     ),
   },
 ]
-const VARIANT_SEARCH_SORT_OPTONS = VARIANT_SORT_OPTONS.slice(1, VARIANT_SORT_OPTONS.length - 1)
+const VARIANT_SEARCH_SORT_OPTONS = VARIANT_SORT_OPTONS.slice(0, VARIANT_SORT_OPTONS.length - 1)
 
 export const VARIANT_SORT_LOOKUP = VARIANT_SORT_OPTONS.reduce(
   (acc, opt) => ({
@@ -1459,22 +1497,6 @@ export const VARIANT_TAGGED_DATE_FIELD = {
   inline: true,
 }
 
-const INDICATOR_MAP = {
-  D: { color: 'red', value: 'damaging' },
-  T: { color: 'green', value: 'tolerated' },
-}
-
-const FATHMM_MAP = {
-  ...INDICATOR_MAP,
-  N: { color: 'green', value: 'neutral' },
-}
-
-const POLYPHEN_MAP = {
-  D: { color: 'red', value: 'probably damaging' },
-  P: { color: 'yellow', value: 'possibly damaging' },
-  B: { color: 'green', value: 'benign' },
-}
-
 const MUTTASTER_MAP = {
   D: { color: 'red', value: 'disease causing' },
   A: { color: 'red', value: 'disease causing automatic' },
@@ -1495,17 +1517,31 @@ const SPLICING_IN_SILICO_GROUP = 'Splicing'
 export const SV_IN_SILICO_GROUP = 'Structural'
 export const NO_SV_IN_SILICO_GROUPS = [MISSENSE_IN_SILICO_GROUP, CODING_IN_SILICO_GROUP]
 export const SPLICE_AI_FIELD = 'splice_ai'
+export const ALPHAMISSENSE_THRESHHOLDS = [0.071, 0.17, 0.792, 0.906, 0.99]
 
-const rangeSourceLink = <a href="https://pubmed.ncbi.nlm.nih.gov/36413997" target="_blank" rel="noreferrer">36413997</a>
+const CLINGEN_CITATION = { name: '2022 ClinGen recommendations', pmid: '36413997' }
 const PRED_COLOR_MAP = ['green', 'olive', 'grey', 'yellow', 'red', '#8b0000']
 const REVERSE_PRED_COLOR_MAP = [...PRED_COLOR_MAP].reverse()
 
 export const ORDERED_PREDICTOR_FIELDS = [
-  { field: 'cadd', group: CODING_IN_SILICO_GROUP, thresholds: [0.151, 22.8, 25.3, 28.1, undefined], min: 1, max: 99, fieldTitle: 'CADD', requiresCitation: true },
-  { field: 'revel', group: MISSENSE_IN_SILICO_GROUP, thresholds: [0.0161, 0.291, 0.644, 0.773, 0.932], fieldTitle: 'REVEL', requiresCitation: true },
-  { field: 'alphamissense', fieldTitle: 'AlphaMissense', displayOnly: true },
-  { field: 'vest', thresholds: [undefined, 0.45, 0.764, 0.861, 0.965], fieldTitle: 'VEST', requiresCitation: true },
-  { field: 'mut_pred', thresholds: [0.0101, 0.392, 0.737, 0.829, 0.932], fieldTitle: 'MutPred', requiresCitation: true },
+  { field: 'cadd', group: CODING_IN_SILICO_GROUP, thresholds: [0.151, 22.8, 25.3, 28.1, undefined], min: 1, max: 99, fieldTitle: 'CADD', citation: CLINGEN_CITATION },
+  { field: 'revel', group: MISSENSE_IN_SILICO_GROUP, thresholds: [0.0161, 0.291, 0.644, 0.773, 0.932], fieldTitle: 'REVEL', citation: CLINGEN_CITATION },
+  {
+    field: 'alphagenome',
+    group: CODING_IN_SILICO_GROUP,
+    thresholds: [undefined, 18, 23, 27, undefined],
+    max: 99,
+    fieldTitle: 'AlphaGenome',
+    getHref: ({ chrom, pos, ref, alt }) => (
+      `https://deepmind.google.com/science/alphagenome/atlas?q=chr${chrom}:${pos}:${ref}%3E${alt}&m=variant`
+    ),
+    citation: {
+      name: 'Avsec Ž, Latysheva N, Cheng J, et al. Advancing regulatory variant effect prediction with AlphaGenome. Nature. 2026;649(8099):1206-1218',
+      linkText: 'doi:10.1038/s41586-025-10014-0',
+      href: 'https://doi.org/10.1038/s41586-025-10014-0',
+    },
+  },
+  { field: 'alphamissense', fieldTitle: 'AlphaMissense', group: MISSENSE_IN_SILICO_GROUP, thresholds: ALPHAMISSENSE_THRESHHOLDS, citation: { name: '2025 ClinGen SVI recommendations', pmid: '40084623' } },
   { field: 'mpc', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1.36, 1.828, undefined], max: 5, fieldTitle: 'MPC' },
   {
     field: SPLICE_AI_FIELD,
@@ -1517,54 +1553,74 @@ export const ORDERED_PREDICTOR_FIELDS = [
     getHref: ({ chrom, pos, ref, alt, genomeVersion }) => (
       `https://spliceailookup.broadinstitute.org/#variant=${chrom}-${pos}-${ref}-${alt}&hg=${genomeVersion}&distance=1000&mask=0`
     ),
+    defaultValue: '?',
   },
-  { field: 'primate_ai', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.484, 0.79, 0.867, undefined], fieldTitle: 'PrimateAI', requiresCitation: true },
+  { field: 'absplice', thresholds: [0.05, 0.05, 0.1, 0.2, undefined], fieldTitle: 'AbSplice', citation: { name: '"Aberrant splicing prediction across human tissues"', pmid: '37142848' } },
+  { field: 'promoter_ai', thresholds: [undefined, undefined, 0.2, 0.5, undefined], absValue: true, fieldTitle: 'PromoterAI', citation: { name: '"Predicting expression-altering promoter mutations with deep learning"', pmid: '40440429' } },
+  {
+    field: 'pext',
+    thresholds: [0, 0.2, undefined],
+    colorOverride: { 0: 'green' },
+    thresholdMap: { green: 'Not Expressed', olive: 'Low Expression', grey: 'Expressed' },
+    fieldTitle: 'PEXT',
+    citation: { name: 'Cummings, Beryl B et al. "Transcript expression-aware annotation improves rare variant interpretation."', pmid: '32461655' },
+  },
+  { field: 'vest', thresholds: [undefined, 0.45, 0.764, 0.861, 0.965], fieldTitle: 'VEST', citation: CLINGEN_CITATION },
+  { field: 'mut_pred', thresholds: [0.0101, 0.392, 0.737, 0.829, 0.932], fieldTitle: 'MutPred', citation: CLINGEN_CITATION },
+  { field: 'primate_ai', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.484, 0.79, 0.867, undefined], fieldTitle: 'PrimateAI', citation: CLINGEN_CITATION },
   { field: 'eigen', group: CODING_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1, 2, undefined], max: 99 },
-  { field: 'dann', displayOnly: true, thresholds: [undefined, undefined, 0.93, 0.96, undefined] },
   { field: 'strvctvre', group: SV_IN_SILICO_GROUP, thresholds: [undefined, undefined, 0.5, 0.75, undefined] },
-  { field: 'polyphen', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.114, 0.978, 0.999, undefined], indicatorMap: POLYPHEN_MAP, fieldTitle: 'PolyPhen', requiresCitation: true },
-  { field: 'sift', reverseThresholds: true, thresholds: [undefined, 0, 0.002, 0.081, undefined], group: MISSENSE_IN_SILICO_GROUP, indicatorMap: INDICATOR_MAP, fieldTitle: 'SIFT', requiresCitation: true },
+  { field: 'polyphen', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.114, 0.978, 0.999, undefined], fieldTitle: 'PolyPhen', citation: CLINGEN_CITATION },
+  { field: 'sift', reverseThresholds: true, thresholds: [undefined, 0, 0.002, 0.081, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'SIFT', citation: CLINGEN_CITATION },
   { field: 'mut_taster', group: MISSENSE_IN_SILICO_GROUP, indicatorMap: MUTTASTER_MAP, fieldTitle: 'MutTaster' },
-  { field: 'fathmm', reverseThresholds: true, thresholds: [undefined, -5.041, -4.14, 3.32, undefined], group: MISSENSE_IN_SILICO_GROUP, indicatorMap: FATHMM_MAP, fieldTitle: 'FATHMM', requiresCitation: true },
+  { field: 'fathmm', reverseThresholds: true, thresholds: [undefined, -5.041, -4.14, 3.32, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'FATHMM', citation: CLINGEN_CITATION },
   { field: 'apogee', thresholds: [undefined, undefined, 0.5, 0.5, undefined] },
   {
     field: 'gnomad_noncoding',
     fieldTitle: 'gnomAD Constraint',
     displayOnly: true,
     thresholds: [undefined, undefined, 2.18, 4, undefined],
-    requiresCitation: true,
+    citation: {
+      name: '2022 recommendations from the gnomAD team',
+      linkText: 'Blog',
+      href: 'https://gnomad.broadinstitute.org/news/2022-10-the-addition-of-a-genomic-constraint-metric-to-gnomad/',
+    },
   },
-  { field: 'haplogroup_defining', indicatorMap: { Y: { color: 'green', value: '' } } },
+  { field: 'haplogroup_defining', indicatorMap: { true: { color: 'green', value: '' } } },
   { field: 'mitotip', indicatorMap: MITOTIP_MAP, fieldTitle: 'MitoTIP' },
   { field: 'hmtvar', thresholds: [undefined, undefined, 0.35, 0.35, undefined], fieldTitle: 'HmtVar' },
   { field: 'mlc', thresholds: [undefined, 0.5, 0.5, 0.75, undefined], fieldTitle: 'MLC' },
 ]
 
 export const coloredIcon = color => React.createElement(color.startsWith('#') ? ColoredIcon : Icon, { name: 'circle', size: 'small', color })
+const thresholdPredictionFieldValue = (floatValue, props) => {
+  const { thresholds, reverseThresholds, absValue, thresholdMap = {}, colorOverride = {} } = props
+  const threshholdValue = absValue ? Math.abs(floatValue) : floatValue
+  const color = colorOverride[threshholdValue] || (reverseThresholds ? REVERSE_PRED_COLOR_MAP : PRED_COLOR_MAP).find(
+    (clr, i) => (thresholds[i - 1] || thresholds[i]) &&
+      (thresholds[i - 1] === undefined || threshholdValue >= thresholds[i - 1]) &&
+      (thresholds[i] === undefined || threshholdValue < thresholds[i]),
+  )
+  return { value: thresholdMap[color] || floatValue.toPrecision(3), color, ...props }
+}
 export const predictionFieldValue = (
-  predictions, { field, fieldValue, thresholds, reverseThresholds, indicatorMap, infoField, infoTitle },
+  predictions, { field, fieldValue, thresholds, indicatorMap, defaultValue, ...props },
 ) => {
-  let value = fieldValue || predictions[field]
+  const value = fieldValue || predictions[field]
   if (value === null || value === undefined) {
-    return { value }
+    return { value: defaultValue || value, color: 'grey' }
   }
-
-  const infoValue = predictions[infoField]
 
   const floatValue = parseFloat(value)
-  if (thresholds && !(indicatorMap && Number.isNaN(floatValue))) {
-    value = floatValue.toPrecision(3)
-    const color = (reverseThresholds ? REVERSE_PRED_COLOR_MAP : PRED_COLOR_MAP).find(
-      (clr, i) => (thresholds[i - 1] || thresholds[i]) &&
-        (thresholds[i - 1] === undefined || value >= thresholds[i - 1]) &&
-        (thresholds[i] === undefined || value < thresholds[i]),
+  if (thresholds && !Number.isNaN(floatValue)) {
+    return thresholdPredictionFieldValue(
+      floatValue, { thresholds, infoValue: predictions[props.infoField], ...props },
     )
-    return { value, color, infoValue, infoTitle, thresholds, reverseThresholds }
   }
 
-  return indicatorMap[value[0]] || indicatorMap[value]
+  return indicatorMap && indicatorMap[value]
 }
-export const predictorColorRanges = (thresholds, requiresCitation, reverseThresholds) => (
+export const predictorColorRanges = (thresholds, { citation, reverseThresholds, thresholdMap, absValue }) => (
   <div>
     {(reverseThresholds ? REVERSE_PRED_COLOR_MAP : PRED_COLOR_MAP).map((c, i) => {
       const prevUndefined = thresholds[i - 1] === undefined
@@ -1574,12 +1630,21 @@ export const predictorColorRanges = (thresholds, requiresCitation, reverseThresh
           return null
         }
         range = ` >= ${thresholds[i - 1]}`
+        if (absValue) {
+          range = `${range}, <= -${thresholds[i - 1]}`
+        }
       } else if (prevUndefined) {
         range = ` < ${thresholds[i]}`
       } else if (thresholds[i - 1] === thresholds[i]) {
         return null
       } else {
         range = ` ${thresholds[i - 1]} - ${thresholds[i]}`
+        if (absValue) {
+          range = `${range}, -${thresholds[i]} - -${thresholds[i - 1]}`
+        }
+      }
+      if (thresholdMap) {
+        range = ` ${thresholdMap[c]}:${range}`
       }
       return (
         <div key={c}>
@@ -1588,10 +1653,13 @@ export const predictorColorRanges = (thresholds, requiresCitation, reverseThresh
         </div>
       )
     })}
-    {requiresCitation && (
+    {citation && (
       <small>
-        {/* eslint-disable-next-line react/jsx-one-expression-per-line */}
-        Based on 2022 ClinGen recommendations (PMID:&nbsp;{rangeSourceLink})
+        {`Based on ${citation.name} (${citation.pmid ? 'PMID: ' : ''}`}
+        <a href={citation.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}` : citation.href} target="_blank" rel="noreferrer">
+          {citation.pmid || citation.linkText}
+        </a>
+        )
       </small>
     )}
   </div>
@@ -1615,8 +1683,8 @@ export const getVariantMainTranscript = ({ transcripts = {}, mainTranscriptId, s
 ).find(({ transcriptId }) => transcriptId === (selectedMainTranscriptId || mainTranscriptId)) || {}
 
 export const getVariantSummary = (variant, individualGuid) => {
-  const { alt, ref, chrom, pos, end, genomeVersion } = variant
-  const mainTranscript = getVariantMainTranscript(variant)
+  const { alt, ref, chrom, pos, end, genomeVersion, selectedMainTranscript } = variant
+  const mainTranscript = selectedMainTranscript || getVariantMainTranscript(variant)
   let consequence = `${(mainTranscript.majorConsequence || '').replace(/_variant/g, '').replace(/_/g, ' ')} variant`
   let variantDetail = [(mainTranscript.hgvsc || '').split(':').pop(), (mainTranscript.hgvsp || '').split(':').pop()].filter(val => val).join('/')
   const displayGenomeVersion = GENOME_VERSION_DISPLAY_LOOKUP[genomeVersion] || genomeVersion
@@ -1651,7 +1719,7 @@ export const VARIANT_EXPORT_DATA = [
   { header: 'alt' },
   { header: 'gene', getVal: getVariantGene },
   { header: 'worst_consequence', getVal: variant => getVariantMainTranscript(variant).majorConsequence },
-  { header: 'callset_freq', getVal: variant => getPopAf('callset')(variant) || getPopAf('seqr')(variant) },
+  { header: 'callset_freq', getVal: variant => getPopAf('seqr')(variant) },
   { header: 'exac_freq', getVal: getPopAf('exac') },
   { header: 'gnomad_genomes_freq', getVal: getPopAf('gnomad_genomes') },
   { header: 'gnomad_exomes_freq', getVal: getPopAf('gnomad_exomes') },
@@ -1660,14 +1728,14 @@ export const VARIANT_EXPORT_DATA = [
   { header: 'revel', getVal: variant => (variant.predictions || {}).revel },
   { header: 'eigen', getVal: variant => (variant.predictions || {}).eigen },
   { header: 'splice_ai', getVal: variant => (variant.predictions || {}).splice_ai },
-  { header: 'polyphen', getVal: variant => (POLYPHEN_MAP[(variant.predictions || {}).polyphen] || {}).value || (variant.predictions || {}).polyphen },
-  { header: 'sift', getVal: variant => (INDICATOR_MAP[(variant.predictions || {}).sift] || {}).value || (variant.predictions || {}).sift },
+  { header: 'polyphen', getVal: variant => (variant.predictions || {}).polyphen },
+  { header: 'sift', getVal: variant => (variant.predictions || {}).sift },
   { header: 'muttaster', getVal: variant => (MUTTASTER_MAP[(variant.predictions || {}).mut_taster] || {}).value },
-  { header: 'fathmm', getVal: variant => (INDICATOR_MAP[(variant.predictions || {}).fathmm] || {}).value || (variant.predictions || {}).fathmm },
+  { header: 'fathmm', getVal: variant => (variant.predictions || {}).fathmm },
   { header: 'rsid', getVal: variant => variant.rsid },
   { header: 'hgvsc', getVal: variant => getVariantMainTranscript(variant).hgvsc },
   { header: 'hgvsp', getVal: variant => getVariantMainTranscript(variant).hgvsp },
-  { header: 'clinvar_clinical_significance', getVal: variant => (variant.clinvar || {}).clinicalSignificance || (variant.clinvar || {}).pathogenicity },
+  { header: 'clinvar_clinical_significance', getVal: variant => (variant.clinvar || {}).pathogenicity },
   { header: 'clinvar_gold_stars', getVal: variant => (variant.clinvar || {}).goldStars },
   { header: 'project' },
   { header: 'family' },
@@ -1682,50 +1750,74 @@ export const VARIANT_EXPORT_DATA = [
   },
 ]
 
-export const ALL_INHERITANCE_FILTER = 'all'
-export const RECESSIVE_FILTER = 'recessive'
-export const HOM_RECESSIVE_FILTER = 'homozygous_recessive'
-export const X_LINKED_RECESSIVE_FILTER = 'x_linked_recessive'
-export const COMPOUND_HET_FILTER = 'compound_het'
-export const DE_NOVO_FILTER = 'de_novo'
 export const ANY_AFFECTED = 'any_affected'
 
-export const INHERITANCE_FILTER_OPTIONS = [
-  { value: ALL_INHERITANCE_FILTER, text: 'All' },
+export const TOPMED_FREQUENCY = 'topmed'
+export const THIS_CALLSET_FREQUENCY = 'callset'
+export const SV_CALLSET_FREQUENCY = 'sv_callset'
+export const SNP_FREQUENCIES = [
   {
-    value: RECESSIVE_FILTER,
-    text: 'Recessive',
-    detail: 'This method identifies genes with any evidence of recessive variation. It is the union of all variants returned by the homozygous recessive, x-linked recessive, and compound heterozygous methods.',
+    name: 'gnomad_genomes',
+    label: 'gnomAD genomes',
+    homHemi: true,
+    labelHelp: 'Filter by allele count (AC) or homozygous/hemizygous count (H/H) among gnomAD genomes, or by allele frequency (popmax AF) in any one of these five subpopulations defined for gnomAD genomes: AFR, AMR, EAS, NFE, SAS',
   },
   {
-    value: HOM_RECESSIVE_FILTER,
-    color: 'transparent', // Adds an empty label so option is indented
-    text: 'Homozygous Recessive',
-    detail: 'Finds variants where all affected individuals are Alt / Alt and each of their parents Heterozygous.',
+    name: 'gnomad_exomes',
+    label: 'gnomAD exomes',
+    homHemi: true,
+    labelHelp: 'Filter by allele count (AC) or homozygous/hemizygous count (H/H) among gnomAD exomes, or by allele frequency (popmax AF) in any one of these five subpopulations defined for gnomAD exomes: AFR, AMR, EAS, NFE, SAS',
   },
   {
-    value: X_LINKED_RECESSIVE_FILTER,
-    color: 'transparent', // Adds an empty label so option is indented
-    text: 'X-Linked Recessive',
-    detail: "Recessive inheritance on the X Chromosome. This is similar to the homozygous recessive search, but a proband's father must be homozygous reference. (This is how hemizygous genotypes are called by current variant calling methods.)",
+    name: TOPMED_FREQUENCY,
+    label: 'TOPMed',
+    homHemi: false,
+    labelHelp: 'Filter by allele count (AC) or allele frequency (AF) in TOPMed',
   },
   {
-    value: COMPOUND_HET_FILTER,
-    color: 'transparent', // Adds an empty label so option is indented
-    text: 'Compound Heterozygous',
-    detail: 'Affected individual(s) have two heterozygous mutations in the same gene on opposite haplotypes. Unaffected individuals cannot have the same combination of alleles as affected individuals, or be homozygous alternate for any of the variants. If parents are not present, this method only searches for pairs of heterozygous variants; they may not be on different haplotypes.',
-  },
-  {
-    value: DE_NOVO_FILTER,
-    text: 'De Novo/ Dominant',
-    detail: 'Finds variants where all affected individuals have at least one alternate allele and all unaffected are homozygous reference.',
-  },
-  {
-    value: ANY_AFFECTED,
-    text: 'Any Affected',
-    detail: 'Finds variants where at least one affected individual has at least one alternate allele.',
+    name: THIS_CALLSET_FREQUENCY,
+    label: 'seqr',
+    homHemi: true,
+    skipAf: true,
+    labelHelp: 'Filter by allele count (AC) across all the samples in seqr.',
   },
 ]
+
+export const MITO_FREQUENCIES = [
+  {
+    name: 'gnomad_mito',
+    label: 'gnomAD homoplasmic',
+    homHemi: false,
+    labelHelp: 'Filter by the gnomAD allele count (AC) and allele frequency (AF) restricted to variants with a heteroplasmy level >= 0.95',
+  },
+]
+export const SV_CALLSET_CRITERIA_MESSAGE = 'Only an SV that is estimated to be the same SV (type and breakpoints) among jointly genotyped samples will be counted as an allele. CNVs called on exomes have unknown breakpoints so similar overlapping CNVs may be counted as an allele.'
+export const GNOMAD_SV_CRITERIA_MESSAGE = 'The following criteria need to be met for an SV in gnomAD to be counted as an allele: Has the same SV type (deletion, duplication, etc) and either has sufficient reciprocal overlap (SVs >5Kb need 50%, SVs < 5Kb need 10%) or has insertion breakpoints within 100bp'
+export const SV_FREQUENCIES = [
+  {
+    name: 'gnomad_svs',
+    label: 'gnomAD genome SVs',
+    homHemi: false,
+    labelHelp: `Filter by locus frequency (AF) among gnomAD SVs. ${GNOMAD_SV_CRITERIA_MESSAGE}`,
+  },
+  {
+    name: SV_CALLSET_FREQUENCY,
+    label: 'seqr SV',
+    skipAf: true,
+    homHemi: false,
+    labelHelp: `Filter by allele count (AC) across all samples in seqr with Structural Variant (SV) calling. ${SV_CALLSET_CRITERIA_MESSAGE}`,
+  },
+]
+
+export const FREQUENCIES = [...SNP_FREQUENCIES, ...MITO_FREQUENCIES, ...SV_FREQUENCIES]
+
+export const GENE_SEARCH_FREQUENCIES = {
+  ...FREQUENCIES.filter(({ name }) => name !== TOPMED_FREQUENCY).reduce(
+    (acc, { name }) => ({ ...acc, [name]: { af: 0.03 } }), {},
+  ),
+  [THIS_CALLSET_FREQUENCY]: { ac: 3000 },
+  [SV_CALLSET_FREQUENCY]: { ac: 300 },
+}
 
 const VARIANT_ICON_COLORS = {
   red: '#eaa8a8',
@@ -1989,7 +2081,6 @@ export const VARIANT_METADATA_COLUMNS = [
   { name: 'phenotype_contribution' },
   { name: 'partial_contribution_explained' },
   { name: 'notes' },
-  { name: 'ClinGen_allele_ID' },
 ]
 
 export const BASE_FAMILY_METADATA_COLUMNS = [
@@ -2018,6 +2109,12 @@ export const TISSUE_DISPLAY = {
   L: 'Lymphocyte',
   A: 'Airway Cultured Epithelium',
   B: 'Brain',
+}
+
+export const PRODUCT_DISPLAY = {
+  K: 'Kinnex',
+  T: 'TruSeq',
+  W: 'Watchmaker',
 }
 
 export const RNASEQ_JUNCTION_PADDING = 200

@@ -35,6 +35,7 @@ CHROMOSOMES = [
     'M',
 ]
 
+CHROMOSOME_CHOICES = [(i+1, chrom) for i, chrom in enumerate(CHROMOSOMES)]
 CHROM_TO_CHROM_NUMBER = {chrom: i for i, chrom in enumerate(CHROMOSOMES)}
 CHROM_NUMBER_TO_CHROM = {i: chrom for i, chrom in enumerate(CHROMOSOMES)}
 MIN_POS = 1
@@ -55,12 +56,6 @@ def format_chrom(chrom):
 
 
 def get_xpos(chrom, pos):
-    """Compute single number representing this chromosome and position.
-
-    Args:
-        chrom (string): examples '1', 'Y', 'M'
-        pos (integer): genomic position on chromosome
-    """
     chrom = format_chrom(chrom)
 
     if pos < MIN_POS or pos > MAX_POS:
@@ -70,7 +65,6 @@ def get_xpos(chrom, pos):
 
 
 def get_chrom_pos(xpos):
-    """Converts xpos position to a (chr, pos) tuple"""
     chrom_idx = int(xpos/1e9) - 1
     if chrom_idx < 0 or chrom_idx >= len(CHROMOSOMES):
         raise ValueError("Invalid xpos: %s" % (xpos,))
@@ -79,3 +73,14 @@ def get_chrom_pos(xpos):
         CHROM_NUMBER_TO_CHROM[chrom_idx],
         xpos % int(1e9)
     )
+
+
+def parse_variant_id(variant_id):
+    try:
+        chrom, pos, ref, alt = variant_id.split('-')
+        chrom = format_chrom(chrom)
+        pos = int(pos)
+        get_xpos(chrom, pos)
+        return chrom, pos, ref, alt
+    except (KeyError, ValueError):
+        return None

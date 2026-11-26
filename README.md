@@ -9,30 +9,23 @@ This repository contains code that underlies the [Broad seqr instance](http://se
 
 seqr consists of the following components:
 - postgres - SQL database used by seqr to store project metadata and user-generated content such as variant notes, etc.
-- elasticsearch - NoSQL database used to store variant callsets.
+- clickhouse - High-performance SQL database used to store variant data.
 - redis - in-memory cache used to speed up request handling.
 - seqr - the main client-server application built using react.js, python and django.
-- pipeline-runner - optional container for running hail pipelines to annotate and load new datasets into elasticsearch. If seqr is hosted on google cloud (GKE or GCE), Dataproc spark clusters can be used instead.
-- kibana - optional dashboard and visual interface for elasticsearch.
+- pipeline-runner - server for running hail pipelines to annotate and load new datasets into clickhouse.
 
 ## Install
 
-The seqr production instance runs on Google Kubernetes Engine (GKE) and data is loaded using Google Dataproc Spark clusters. 
+The seqr production instance runs on Google Kubernetes Engine (GKE) and data is loaded using Google Dataproc Spark clusters.
 
-On-prem installs using the elasticsearch backend can be created using docker-compose:
- **[Local installs using docker-compose](deploy/LOCAL_INSTALL.md)**
+On-prem installs can be created using **[helm](deploy/LOCAL_INSTALL_HELM.md)**
 
-On-prem installs using the `hail` backend can be created using **[helm](deploy/LOCAL_INSTALL_HELM.md)**
+To set up seqr for local development, see instructions **[here](deploy/LOCAL_DEVELOPMENT_INSTALL.md)**
 
-To help you decide which backend is best suited for your needs, please refer to the discussion post [announcing the `hail` backend](https://github.com/broadinstitute/seqr/discussions/4531).
+## Updating / Migrating a  seqr Instance	
 
-To set up seqr for local development, see instructions **[here](deploy/LOCAL_DEVELOPMENT_INSTALL.md)**  
-
-## Updating / Migrating an older seqr Instance	
-
-For notes on how to update an older instance, see  	
-
-[Update/Migration Instructions](deploy/MIGRATE.md)
+Instructions for updating an existing seqr instance to the latest version are found 
+**[here](https://github.com/broadinstitute/seqr-helm?tab=readme-ov-file#updating-seqr)**
 
 ## Contributing to seqr
 

@@ -40,7 +40,9 @@ class UsersAPITest(object):
     @mock.patch('seqr.views.utils.orm_to_json_utils.ANALYST_USER_GROUP', 'analysts')
     def test_get_project_collaborator_options(self):
         url = reverse(get_project_collaborator_options, args=[PROJECT_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url, {'test_user_no_access': {
+            'displayName': 'Test No Access User', 'username': 'test_user_no_access', 'email': 'test_user_no_access@test.com',
+        }})
 
         if hasattr(self, 'mock_get_ws_acl'):
             self.mock_get_ws_acl.reset_mock()
@@ -163,8 +165,9 @@ class UsersAPITest(object):
         new_collab = next(collab for collab in collaborators if collab['email'] == 'test@test.com')
         self.assertEqual(new_collab['username'], username)
         self.assertEqual(new_collab['displayName'], 'Test Name Update')
-        self.assert_json_logs(user, [('update User 20', {'dbUpdate': {
-            'dbEntity': 'User', 'entityId': 20, 'updateFields': ['last_name'], 'updateType': 'update'}})])
+        new_user_model = User.objects.get(username=new_collab['username'])
+        self.assert_json_logs(user, [(f'update User {new_user_model.id}', {'dbUpdate': {
+            'dbEntity': 'User', 'entityId': new_user_model.id, 'updateFields': ['last_name'], 'updateType': 'update'}})])
 
         # Test email failure
         mock_send_mail.side_effect = AnymailError('Connection err')
@@ -387,7 +390,7 @@ class LocalUsersAPITest(AuthenticationTestCase, UsersAPITest):
         self.assertEqual(response.reason_phrase, 'Password is required')
 
         response = self.client.post(set_password_url, content_type='application/json', data=json.dumps({
-            'userToken': quote_plus(password), 'password': 'password123', 'firstName': 'Test', 'isSuperuser': True}))
+            'userToken': quote_plus(password), 'password': 'password123', 'firstName': 'Test', 'isSuperuser': True}))  # nosec
         self.assertEqual(response.status_code, 200)
 
         user = User.objects.get(username='test_new_user')

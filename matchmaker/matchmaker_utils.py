@@ -126,9 +126,7 @@ def _parse_mme_gene_variants(result, gene_symbols_to_ids):
 
 
 def get_gene_ids_for_feature(gene_feature, gene_symbols_to_ids):
-    gene_id = gene_feature.get('gene', {}).get('id')
-    if not gene_id:
-        return []
+    gene_id = gene_feature['gene']['id']
     if not gene_id.startswith('ENSG'):
         gene_ids = gene_symbols_to_ids.get(gene_feature['gene']['id'], [])
     else:
@@ -155,8 +153,8 @@ def get_submission_json_for_external_match(submission, score=None, genomic_featu
             'id': submission.submission_id,
             'label': submission.label,
             'contact': {
-                'href': submission.contact_href.replace(' ', ''),
-                'name': submission.contact_name,
+                'href': f"mailto:{','.join([contact['email'] for contact in submission.contacts])}",
+                'name': ','.join([contact['name'] for contact in submission.contacts if contact.get('name')]),
                 'institution': MME_DEFAULT_CONTACT_INSTITUTION,
             },
             'species': 'NCBITaxon:9606',
@@ -185,7 +183,7 @@ def _submission_genes_to_external_genomic_features(submission):
 def _submission_gene_to_external_genomic_features(submission_gene, individual):
     variant = submission_gene.saved_variant
     chrom, pos = get_chrom_pos(variant.xpos)
-    genome_version = variant.saved_variant_json.get('genomeVersion', individual.family.project.genome_version)
+    genome_version = individual.family.project.genome_version
 
     feature = {
         'gene': {'id': submission_gene.gene_id},
@@ -204,7 +202,7 @@ def _submission_gene_to_external_genomic_features(submission_gene, individual):
         _, end = get_chrom_pos(variant.xpos_end)
         feature['variant']['end'] = end
 
-    genotype = variant.saved_variant_json.get('genotypes', {}).get(individual.guid)
+    genotype = variant.genotypes.get(individual.guid)
     if genotype and genotype.get('numAlt', -1) > 0:
         feature['zygosity'] = genotype['numAlt']
 
@@ -337,7 +335,7 @@ def get_mme_metrics():
 
     submitters = set()
     for submission in submissions:
-        submitters.update({name.strip() for name in submission.contact_name.split(',')})
+        submitters.update({contact['name'] for contact in submission.contacts if contact.get('name')})
 
     incoming_request_count = MatchmakerIncomingQuery.objects.count()
     matched_incoming_request_count = MatchmakerIncomingQuery.objects.filter(

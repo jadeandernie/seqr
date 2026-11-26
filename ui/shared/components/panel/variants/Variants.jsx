@@ -1,9 +1,10 @@
 import React from 'react'
 import PropTypes from 'prop-types'
+import { NavLink } from 'react-router-dom'
 import styled from 'styled-components'
 import { Grid, Popup, Label, Button, Header, Tab } from 'semantic-ui-react'
 
-import { GENOME_VERSION_37, clinvarSignificance, clinvarColor, getVariantMainGeneId } from 'shared/utils/constants'
+import { GENOME_VERSION_37, clinvarColor, getVariantMainGeneId } from 'shared/utils/constants'
 import { VerticalSpacer } from '../../Spacers'
 import { TagFieldDisplay } from '../view-fields/TagFieldView'
 import FamilyReads from '../family/FamilyReads'
@@ -16,16 +17,16 @@ import VariantGenes, { VariantGene } from './VariantGene'
 import VariantIndividuals from './VariantIndividuals'
 import { compHetGene, has37Coords } from './VariantUtils'
 
-export const StyledVariantRow = styled(({ isSV, severity, ...props }) => <Grid.Row {...props} />)`  
+export const StyledVariantRow = styled(({ isSV, severityColor, ...props }) => <Grid.Row {...props} />)`  
   .column {
     margin-top: 0em !important;
     margin-bottom: 0em !important;
   }
   
   color: #999;
-  background-color: ${({ severity, isSV }) => {
-    if (severity !== undefined) {
-      return clinvarColor(severity, '#eaa8a857', '#f5d55c57', '#21a92624') || 'inherit'
+  background-color: ${({ severityColor, isSV }) => {
+    if (severityColor) {
+      return severityColor
     }
     if (isSV) {
       return '#f3f8fa'
@@ -78,22 +79,24 @@ const tagFamily = tag => (
 const VariantLayout = (
   {
     variant, compoundHetToggle, mainGeneId, isCompoundHet, linkToSavedVariants, topContent,
-    bottomContent, children, ...rowProps
+    bottomContent, children, searchHash, ...rowProps
   },
 ) => {
   const coreVariant = Array.isArray(variant) ? variant[0] : variant
+  const geneModalId = Array.isArray(variant) ? variant.map(({ variantId }) => variantId).join('_') : variant.variantId
   return (
     <StyledVariantRow {...rowProps}>
       <Grid.Column width={16}>
         {topContent}
       </Grid.Column>
-      {coreVariant.familyGuids.map(familyGuid => (
+      {coreVariant.familyGuids?.map(familyGuid => (
         <Grid.Column key={familyGuid} width={16}>
           <FamilyVariantTags
             familyGuid={familyGuid}
             variant={variant}
             isCompoundHet={isCompoundHet}
             linkToSavedVariants={linkToSavedVariants}
+            searchHash={searchHash}
           />
           <VerticalSpacer height={10} />
         </Grid.Column>
@@ -101,9 +104,14 @@ const VariantLayout = (
       {!isCompoundHet && (
         <Grid.Column width={4}>
           {!mainGeneId && coreVariant.svName && <Header size="medium" content={coreVariant.svName} />}
-          {mainGeneId ?
-            <VariantGene geneId={mainGeneId} variant={coreVariant} compoundHetToggle={compoundHetToggle} /> :
-            <VariantGenes variant={variant} />}
+          {mainGeneId ? (
+            <VariantGene
+              geneId={mainGeneId}
+              geneModalId={geneModalId}
+              variant={coreVariant}
+              compoundHetToggle={compoundHetToggle}
+            />
+          ) : <VariantGenes variant={variant} />}
         </Grid.Column>
       )}
       <Grid.Column width={isCompoundHet ? 16 : 12}>
@@ -125,33 +133,48 @@ VariantLayout.propTypes = {
   topContent: PropTypes.node,
   bottomContent: PropTypes.node,
   children: PropTypes.node,
+  searchHash: PropTypes.string,
 }
 
 export const Variant = React.memo((
   { variant, mainGeneId, reads, showReads, dispatch, isCompoundHet, updateReads, ...props },
 ) => {
   const variantMainGeneId = mainGeneId || getVariantMainGeneId(variant)
-  const { severity } = clinvarSignificance(variant.clinvar)
   return (
     <VariantLayout
-      severity={severity}
+      severityColor={clinvarColor(variant.clinvar, '#eaa8a857', '#f5d55c57', '#21a92624')}
       isSV={!!variant.svType}
       variant={variant}
       mainGeneId={variantMainGeneId}
       topContent={
         <div>
           <Pathogenicity variant={variant} />
-          {variant.discoveryTags && variant.discoveryTags.length > 0 && (
+          {(variant.discoveryTags?.length > 0 || variant.noAccessDiscoveryFamilies > 0) && (
             <InlinePopup
               on="click"
               position="right center"
               trigger={<Button as={Label} basic color="grey">Other Project Discovery Tags</Button>}
-              content={<TagFieldDisplay
-                displayFieldValues={variant.discoveryTags}
-                popup={taggedByPopup}
-                tagAnnotation={tagFamily}
-                displayAnnotationFirst
-              />}
+              content={(
+                <span>
+                  {variant.discoveryTags?.length > 0 && (
+                    <TagFieldDisplay
+                      displayFieldValues={variant.discoveryTags}
+                      popup={taggedByPopup}
+                      tagAnnotation={tagFamily}
+                      displayAnnotationFirst
+                    />
+                  )}
+                  {variant.noAccessDiscoveryFamilies > 0 && (
+                    <NavLink
+                      to={`/variant_lookup?variantId=${variant.variantId}&genomeVersion=${variant.genomeVersion}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Label basic color="teal" content={`${variant.noAccessDiscoveryFamilies} families in external projects`} />
+                    </NavLink>
+                  )}
+                </span>
+              )}
             />
           )}
         </div>
@@ -170,7 +193,8 @@ export const Variant = React.memo((
         </Grid.Row>
         <Grid.Row>
           <Grid.Column width={16}>
-            <VariantIndividuals variant={variant} />
+            {variant.familyGuids && <VariantIndividuals variant={variant} />}
+            {variant.numFamilies && `Variant present in ${variant.numFamilies} families in external projects`}
             {showReads}
           </Grid.Column>
         </Grid.Row>
@@ -266,8 +290,8 @@ CompoundHets.propTypes = {
 const Variants = React.memo(({ variants, compoundHetToggle, ...props }) => (
   <Grid stackable divided="vertically">
     {(variants || []).map(variant => (Array.isArray(variant) ?
-      <CompoundHets variants={variant} key={`${variant.map(v => v.variantId).join()}-${variant[0].familyGuids.join('-')}`} compoundHetToggle={compoundHetToggle} {...props} /> :
-      <VariantWithReads variant={variant} key={`${variant.variantId}-${variant.familyGuids.join('-')}`} {...props} />
+      <CompoundHets variants={variant} key={`${variant.map(v => v.variantId).join()}-${variant[0].familyGuids?.join('-')}`} compoundHetToggle={compoundHetToggle} {...props} /> :
+      <VariantWithReads variant={variant} key={`${variant.variantId}-${variant.familyGuids?.join('-')}`} {...props} />
     ))}
   </Grid>
 ))

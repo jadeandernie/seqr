@@ -315,7 +315,7 @@ const InlineFormGroup = styled(Form.Group).attrs({ inline: true })`
 `
 
 const selectAll = (onChange, value, options) => ({ checked }) => {
-  const remainValue = value.filter(val => !options.find(opt => opt.value === val))
+  const remainValue = (value || []).filter(val => !options.find(opt => opt.value === val))
   if (checked) {
     onChange(options.map(option => option.value).concat(remainValue))
   } else {
@@ -325,9 +325,9 @@ const selectAll = (onChange, value, options) => ({ checked }) => {
 
 const selectCheckbox = (onChange, value, option) => ({ checked }) => {
   if (checked) {
-    onChange([...value, option.value])
+    onChange([...(value || []), option.value])
   } else {
-    onChange(value.filter(val => val !== option.value))
+    onChange((value || []).filter(val => val !== option.value))
   }
 }
 
@@ -338,9 +338,9 @@ const chunkArray = (arr, maxChunkSize) => {
 }
 
 export const CheckboxGroup = React.memo((props) => {
-  const { value, label, groupLabel, onChange, maxOptionsPerColumn, ...baseProps } = props
+  const { value, label, groupLabel, onChange, maxOptionsPerColumn, inline, ...baseProps } = props
   const options = props.options.map(styledOption)
-  const numSelected = options.filter(opt => value.includes(opt.value)).length
+  const numSelected = options.filter(opt => value?.includes(opt.value)).length
   const optionGroups = maxOptionsPerColumn && options.length > maxOptionsPerColumn ?
     chunkArray(options, maxOptionsPerColumn) : [options]
   const optionLists = optionGroups.map(optionGroup => (
@@ -350,7 +350,7 @@ export const CheckboxGroup = React.memo((props) => {
           <BaseSemanticInput
             {...baseProps}
             inputType="Checkbox"
-            checked={value.includes(option.value)}
+            checked={value?.includes(option.value)}
             label={helpLabel(option.text, option.description)}
             onChange={selectCheckbox(onChange, value, option)}
           />
@@ -375,8 +375,9 @@ export const CheckboxGroup = React.memo((props) => {
       </List.Item>
     </List>
   )
-  return optionLists.length > 1 ?
-    [mainList, ...optionLists.slice(1)].map(c => <Form.Field inline>{c}</Form.Field>) : mainList
+  return (optionLists.length > 1 || inline) ?
+    // eslint-disable-next-line react/no-array-index-key
+    [mainList, ...optionLists.slice(1)].map((c, i) => <Form.Field inline key={i}>{c}</Form.Field>) : mainList
 })
 
 CheckboxGroup.propTypes = {
@@ -387,6 +388,7 @@ CheckboxGroup.propTypes = {
   groupLabel: PropTypes.node,
   horizontalGrouped: PropTypes.bool,
   maxOptionsPerColumn: PropTypes.number,
+  inline: PropTypes.bool,
 }
 
 export const AlignedCheckboxGroup = styled(CheckboxGroup)`

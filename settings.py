@@ -4,8 +4,6 @@ import random
 import string
 import subprocess  # nosec
 
-from ssl import create_default_context
-
 import google.auth
 import google.auth.transport.requests
 
@@ -42,9 +40,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'guardian',
     'anymail',
+    'clickhouse_backend',
     'notifications',
     'seqr',
     'reference_data',
+    'clickhouse_search',
     'matchmaker',
     'social_django',
     'panelapp',
@@ -157,7 +157,7 @@ else:
     MEDIA_URL = '/media/'
 
 LOADING_DATASETS_DIR = os.environ.get('LOADING_DATASETS_DIR')
-HAIL_SEARCH_DATA_DIR = os.environ.get('HAIL_SEARCH_DATA_DIR')
+PIPELINE_DATA_DIR = os.environ.get('PIPELINE_DATA_DIR')
 
 LOGGING = {
     'version': 1,
@@ -234,11 +234,39 @@ POSTGRES_DB_CONFIG = {
     'USER': os.environ.get('POSTGRES_USERNAME', 'postgres'),
     'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'pgtest'),
 }
+CLICKHOUSE_DB_CONFIG = {
+    'ENGINE': 'clickhouse_search.backend',
+    'NAME': 'seqr',
+    'HOST': os.environ.get('CLICKHOUSE_SERVICE_HOSTNAME', 'localhost'),
+    'PORT': int(os.environ.get('CLICKHOUSE_SERVICE_PORT', '9000')),
+    'OPTIONS': {
+        'settings': {
+            'use_client_time_zone': False,
+        }
+    }
+}
+CLICKHOUSE_WRITER_USER = os.environ.get('CLICKHOUSE_WRITER_USER', 'clickhouse')
+CLICKHOUSE_WRITER_PASSWORD = os.environ.get('CLICKHOUSE_WRITER_PASSWORD', 'clickhouse_test')
 DATABASES = {
     'default': dict(NAME='seqrdb', **POSTGRES_DB_CONFIG),
     'reference_data': dict(NAME='reference_data_db', **POSTGRES_DB_CONFIG),
+    'clickhouse_write': {
+        **CLICKHOUSE_DB_CONFIG,
+        'USER': CLICKHOUSE_WRITER_USER,
+        'PASSWORD': CLICKHOUSE_WRITER_PASSWORD,
+    },
+    'clickhouse': {
+        **CLICKHOUSE_DB_CONFIG,
+        'USER': os.environ.get('CLICKHOUSE_READER_USER', 'clickhouse'),
+        'PASSWORD': os.environ.get('CLICKHOUSE_READER_PASSWORD', 'clickhouse_test'),
+    },
 }
-DATABASE_ROUTERS = ['reference_data.models.ReferenceDataRouter']
+DATABASE_ROUTERS = ['reference_data.models.ReferenceDataRouter', 'clickhouse_search.models.ClickHouseRouter']
+
+CLICKHOUSE_IN_MEMORY_DIR = os.environ.get('CLICKHOUSE_IN_MEMORY_DIR', '/in-memory-dir')
+CLICKHOUSE_DATA_DIR = os.getenv('CLICKHOUSE_DATA_DIR', '/var/seqr/clickhouse-data')
+
+TEST_RUNNER = "seqr.testrunner.OrderedDatabaseDeletionRunner"
 
 WSGI_APPLICATION = 'wsgi.application'
 
@@ -313,6 +341,9 @@ SLACK_TOKEN = os.environ.get("SLACK_TOKEN")
 AIRTABLE_URL = 'https://api.airtable.com/v0'
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
 
+CLINGEN_ALLELE_REGISTRY_LOGIN = os.environ.get('CLINGEN_ALLELE_REGISTRY_LOGIN')
+CLINGEN_ALLELE_REGISTRY_PASSWORD = os.environ.get('CLINGEN_ALLELE_REGISTRY_PASSWORD')
+
 GREGOR_DATA_MODEL_URL = os.environ.get('GREGOR_DATA_MODEL_URL', 'https://raw.githubusercontent.com/UW-GAC/gregor_data_models/main/GREGoR_data_model.json')
 
 API_LOGIN_REQUIRED_URL = '/api/login-required-error'
@@ -323,35 +354,9 @@ INTERNAL_NAMESPACES = os.environ.get('INTERNAL_NAMESPACES', '').split(',')
 ANALYST_USER_GROUP = os.environ.get('ANALYST_USER_GROUP')
 PM_USER_GROUP = os.environ.get('PM_USER_GROUP')
 
-ANVIL_LOADING_DELAY_EMAIL_START_DATE = os.environ.get('ANVIL_LOADING_DELAY_EMAIL_START_DATE')
+IS_ANVIL_LOADING_DELAY = bool(os.environ.get('IS_ANVIL_LOADING_DELAY'))
 
 # External service settings
-ELASTICSEARCH_SERVICE_HOSTNAME = os.environ.get('ELASTICSEARCH_SERVICE_HOSTNAME')
-ELASTICSEARCH_SERVICE_PORT = os.environ.get('ELASTICSEARCH_SERVICE_PORT', '9200')
-ELASTICSEARCH_SERVER = '{host}:{port}'.format(
-    host=ELASTICSEARCH_SERVICE_HOSTNAME, port=ELASTICSEARCH_SERVICE_PORT)
-
-SEQR_ELASTICSEARCH_PASSWORD = os.environ.get('SEQR_ES_PASSWORD')
-ELASTICSEARCH_USER = os.environ.get('ELASTICSEARCH_USER', 'seqr')
-ELASTICSEARCH_CREDENTIALS = (ELASTICSEARCH_USER, SEQR_ELASTICSEARCH_PASSWORD) if SEQR_ELASTICSEARCH_PASSWORD else None
-ELASTICSEARCH_PROTOCOL = os.environ.get('ELASTICSEARCH_PROTOCOL', 'http')
-ELASTICSEARCH_CA_PATH = os.environ.get('ELASTICSEARCH_CA_PATH')
-# if we have a custom CA certificate for elasticsearch, add it to the verification path for connections
-if ELASTICSEARCH_CA_PATH:
-    ES_SSL_CONTEXT = create_default_context(cafile=ELASTICSEARCH_CA_PATH)
-else:
-    ES_SSL_CONTEXT = None
-
-KIBANA_SERVER = '{host}:{port}'.format(
-    host=os.environ.get('KIBANA_SERVICE_HOSTNAME', 'localhost'),
-    port=os.environ.get('KIBANA_SERVICE_PORT', 5601)
-)
-KIBANA_ELASTICSEARCH_USER = os.environ.get('KIBANA_ELASTICSEARCH_USER', 'kibana')
-KIBANA_ELASTICSEARCH_PASSWORD = os.environ.get('KIBANA_ES_PASSWORD')
-
-HAIL_BACKEND_SERVICE_HOSTNAME = os.environ.get('HAIL_BACKEND_SERVICE_HOSTNAME', 'hail-search')
-HAIL_BACKEND_SERVICE_PORT = int(os.environ.get('HAIL_BACKEND_SERVICE_PORT', '5000'))
-
 REDIS_SERVICE_HOSTNAME = os.environ.get('REDIS_SERVICE_HOSTNAME', 'localhost')
 REDIS_SERVICE_PORT = int(os.environ.get('REDIS_SERVICE_PORT', '6379'))
 
@@ -368,8 +373,11 @@ MME_DEFAULT_CONTACT_INSTITUTION = 'Broad Center for Mendelian Genomics'
 MME_DEFAULT_CONTACT_EMAIL = 'matchmaker@broadinstitute.org'
 MME_DEFAULT_CONTACT_HREF = 'mailto:{}'.format(MME_DEFAULT_CONTACT_EMAIL)
 
-VLM_DEFAULT_CONTACT_EMAIL = 'vlm@broadinstitute.org'
-VLM_SEND_EMAIL = 'vlm-noreply@broadinstitute.org'
+VLM_DEFAULT_CONTACT_EMAIL = os.environ.get('VLM_DEFAULT_CONTACT_EMAIL', 'vlm@broadinstitute.org')
+VLM_SEND_EMAIL = os.environ.get('VLM_SEND_EMAIL', 'vlm-noreply@broadinstitute.org')
+VLM_CLIENT_ID = os.environ.get('VLM_CLIENT_ID')
+VLM_CLIENT_SECRET = os.environ.get('VLM_CLIENT_SECRET')
+VLM_AUTH_API = 'https://vlm-auth.us.auth0.com/'
 
 MME_CONFIG_DIR = os.environ.get('MME_CONFIG_DIR', '')
 MME_NODES = {}
@@ -451,9 +459,6 @@ TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS = os.environ.get('TERRA_WORKSPACE_CACHE_EXP
 SERVICE_ACCOUNT_FOR_ANVIL = None
 SERVICE_ACCOUNT_CREDENTIALS = None
 
-AIRFLOW_WEBSERVER_URL = os.environ.get('AIRFLOW_WEBSERVER_URL')
-AIRFLOW_DAG_VERSION = os.environ.get('AIRFLOW_DAG_VERSION', '0.0.1')
-
 if TERRA_API_ROOT_URL:
     try:
        # Refresh pattern taken from: https://stackoverflow.com/a/74377391
@@ -482,7 +487,7 @@ if TERRA_API_ROOT_URL:
 elif SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_KEY:
     SOCIAL_AUTH_PIPELINE = SOCIAL_AUTH_PIPELINE_BASE + \
                            SOCIAL_AUTH_PIPELINE_CLOUD_BASE + \
-                           ('seqr.utils.social_auth_pipeline.log_azure_signed_in',)
+                           ('seqr.utils.social_auth_pipeline.log_signed_in',)
 else:
     SOCIAL_AUTH_PIPELINE = SOCIAL_AUTH_PIPELINE_BASE + SOCIAL_AUTH_PIPELINE_USER_EXIST + \
                            SOCIAL_AUTH_PIPELINE_ASSOCIATE_USER + SOCIAL_AUTH_PIPELINE_LOG

@@ -1,24 +1,28 @@
 import json
 import re
-from datetime import datetime
 from django.contrib.auth.models import User
 from django.core.serializers.json import DjangoJSONEncoder
 from django.middleware.csrf import rotate_token
 from django.template import loader
 from django.http import HttpResponse
+import logging
+
 from settings import (
     SEQR_VERSION,
     CSRF_COOKIE_NAME,
     DEBUG,
     LOGIN_URL,
     GA_TOKEN_ID,
-    ANVIL_LOADING_DELAY_EMAIL_START_DATE,
     SOCIAL_AUTH_PROVIDER,
+    VLM_CLIENT_ID,
 )
 from seqr.models import WarningMessage
-from seqr.utils.search.utils import backend_specific_call
+from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_set_json
+from seqr.views.apis.feature_updates_api import fetch_feature_updates
 from seqr.views.utils.orm_to_json_utils import get_json_for_user, get_json_for_current_user
 from seqr.views.utils.permissions_utils import login_active_required
+
+logger = logging.getLogger(__name__)
 
 
 @login_active_required(login_url=LOGIN_URL)
@@ -52,16 +56,13 @@ def render_app_html(request, additional_json=None, include_user=True, status=200
         ui_version = 'local'
         html = html.replace('</head>', '<script defer="defer" src="/app.js"></script></head>')
 
-    should_show_loading_delay = bool(ANVIL_LOADING_DELAY_EMAIL_START_DATE)
-    if should_show_loading_delay:
-        should_show_loading_delay = datetime.strptime(ANVIL_LOADING_DELAY_EMAIL_START_DATE, '%Y-%m-%d') < datetime.now()
     initial_json = {'meta':  {
         'version': '{}-{}'.format(SEQR_VERSION, ui_version),
         'hijakEnabled': DEBUG or False,
         'oauthLoginProvider': SOCIAL_AUTH_PROVIDER,
-        'elasticsearchEnabled': backend_specific_call(True, False),
+        'vlmEnabled': bool(VLM_CLIENT_ID),
         'warningMessages': [message.json() for message in WarningMessage.objects.all()],
-        'anvilLoadingDelayDate': ANVIL_LOADING_DELAY_EMAIL_START_DATE if should_show_loading_delay else None,
+        'lastFeatureUpdate': _get_latest_feature_update_date(),
     }}
     if include_user:
         initial_json['user'] = get_json_for_current_user(request.user)
@@ -88,5 +89,25 @@ def render_app_html(request, additional_json=None, include_user=True, status=200
             'window.gaTrackingId=null',
             'window.gaTrackingId="{}"'.format(GA_TOKEN_ID),
         )
+        if include_user:
+            html = html.replace(
+                'window.userEmail=null',
+                f'window.userEmail="{request.user.email}"',
+            )
 
     return HttpResponse(html, content_type="text/html", status=status)
+
+
+FEATURE_CACHE_KEY = 'feature_updates_latest_date'
+
+def _get_latest_feature_update_date():
+    update_date = safe_redis_get_json(FEATURE_CACHE_KEY)
+    if not update_date:
+        try:
+            entries = fetch_feature_updates()
+        except Exception as e:
+            logger.error(f'Unable to fetch feature update date: {e}')
+            return None
+        update_date = entries[0].published
+        safe_redis_set_json(FEATURE_CACHE_KEY, update_date, expire=60*60*3)
+    return update_date

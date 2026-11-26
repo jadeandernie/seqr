@@ -6,7 +6,7 @@ import { Grid, Icon, Popup, Loader, Dimmer } from 'semantic-ui-react'
 import { connect } from 'react-redux'
 import { NavLink } from 'react-router-dom'
 
-import { getUser, getElasticsearchEnabled } from 'redux/selectors'
+import { getUser } from 'redux/selectors'
 import DataLoader from 'shared/components/DataLoader'
 import { VerticalSpacer } from 'shared/components/Spacers'
 import UpdateButton from 'shared/components/buttons/UpdateButton'
@@ -29,8 +29,10 @@ import {
   getProjectAnalysisGroupFamilySizeHistogram,
   getProjectAnalysisGroupDataLoadedFamilySizeHistogram,
   getProjectAnalysisGroupSamplesByTypes,
+  getProjectAnalysisGroupRnaSamplesByTypes,
   getProjectAnalysisGroupMmeSubmissionDetails,
   getMmeSubmissionsLoading,
+  getCurrentAnalysisGroup,
 } from '../selectors'
 import EditFamiliesAndIndividualsButton from './edit-families-and-individuals/EditFamiliesAndIndividualsButton'
 import EditIndividualMetadataButton from './edit-families-and-individuals/EditIndividualMetadataButton'
@@ -303,15 +305,19 @@ class DatasetSection extends React.PureComponent {
 
 }
 
-const Dataset = React.memo(({ showLoadWorkspaceData, hasAnvil, samplesByType, user, elasticsearchEnabled }) => {
-  const datasetSections = samplesByType.map(([sampleTypeKey, loadedSampleCounts]) => {
+const Dataset = React.memo(({ showLoadWorkspaceData, hasAnvil, samplesByType, rnaSamplesByType, user }) => {
+  const datasetSections = [...Object.entries(samplesByType).map(([sampleTypeKey, loadedSampleCounts]) => {
     const [sampleType, datasetType] = sampleTypeKey.split('__')
     return {
       key: sampleTypeKey,
       title: `${SAMPLE_TYPE_LOOKUP[sampleType] || sampleType}${DATASET_TITLE_LOOKUP[datasetType] || ''} Datasets`,
       content: <DatasetSection loadedSampleCounts={loadedSampleCounts} />,
     }
-  }).sort((a, b) => a.title.localeCompare(b.title))
+  }), ...rnaSamplesByType.map(([dataType, loadedSampleCounts]) => ({
+    key: dataType,
+    title: `RNA${DATASET_TITLE_LOOKUP[dataType]} Datasets`,
+    content: <DatasetSection loadedSampleCounts={loadedSampleCounts} />,
+  }))].sort((a, b) => a.title.localeCompare(b.title))
 
   const noLoadedData = !datasetSections.length
   if (noLoadedData) {
@@ -350,7 +356,6 @@ const Dataset = React.memo(({ showLoadWorkspaceData, hasAnvil, samplesByType, us
         <EditDatasetsButton
           showLoadWorkspaceData={showLoadWorkspaceData && !noLoadedData}
           user={user}
-          elasticsearchEnabled={elasticsearchEnabled}
         />
       ) : null}
     />
@@ -359,16 +364,16 @@ const Dataset = React.memo(({ showLoadWorkspaceData, hasAnvil, samplesByType, us
 
 Dataset.propTypes = {
   samplesByType: PropTypes.object.isRequired,
+  rnaSamplesByType: PropTypes.arrayOf(PropTypes.any).isRequired,
   hasAnvil: PropTypes.bool,
   showLoadWorkspaceData: PropTypes.bool,
-  elasticsearchEnabled: PropTypes.bool,
   user: PropTypes.object.isRequired,
 }
 
 const mapDatasetStateToProps = (state, ownProps) => ({
   user: getUser(state),
-  elasticsearchEnabled: getElasticsearchEnabled(state),
   samplesByType: getProjectAnalysisGroupSamplesByTypes(state, ownProps),
+  rnaSamplesByType: getProjectAnalysisGroupRnaSamplesByTypes(state, ownProps),
 })
 
 const DatasetOverview = connect(mapDatasetStateToProps)(Dataset)
@@ -408,9 +413,17 @@ Anvil.propTypes = {
   onSubmit: PropTypes.func,
 }
 
-const mapAnvilStateToProps = state => ({
-  user: getUser(state),
-})
+const mapAnvilStateToProps = (state, ownProps) => {
+  const analysisGroup = getCurrentAnalysisGroup(state, ownProps)
+  const {
+    workspaceName, workspaceNamespace,
+  } = analysisGroup?.workspaceNamespace ? analysisGroup : getCurrentProject(state, ownProps)
+  return {
+    workspaceName,
+    workspaceNamespace,
+    user: getUser(state),
+  }
+}
 
 const mapAnvilDispatchToProps = {
   onSubmit: updateAnvilWorkspace,
@@ -445,7 +458,7 @@ LoadingSection.propTypes = {
 }
 
 const ProjectOverview = React.memo(({
-  familiesLoading, overviewLoading, analysisGroupGuid, projectName, genomeVersion, workspaceName, workspaceNamespace,
+  familiesLoading, overviewLoading, analysisGroupGuid, projectName, genomeVersion, workspaceName,
   canEdit, hasCaseReview, isAnalystProject, mmeSubmissionCount, mmeDeletedSubmissionCount,
 }) => (
   <Grid>
@@ -490,7 +503,7 @@ const ProjectOverview = React.memo(({
         <AnalysisStatusOverview analysisGroupGuid={analysisGroupGuid} />
       </LoadingSection>
       <VerticalSpacer height={10} />
-      <AnvilOverview workspaceName={workspaceName} workspaceNamespace={workspaceNamespace} />
+      <AnvilOverview analysisGroupGuid={analysisGroupGuid} />
     </Grid.Column>
   </Grid>
 ))
@@ -499,7 +512,6 @@ ProjectOverview.propTypes = {
   projectName: PropTypes.string,
   genomeVersion: PropTypes.string,
   workspaceName: PropTypes.string,
-  workspaceNamespace: PropTypes.string,
   canEdit: PropTypes.bool,
   hasCaseReview: PropTypes.bool,
   isAnalystProject: PropTypes.bool,
@@ -515,7 +527,6 @@ const mapStateToProps = (state) => {
     name,
     genomeVersion,
     workspaceName,
-    workspaceNamespace,
     canEdit,
     hasCaseReview,
     isAnalystProject,
@@ -526,7 +537,6 @@ const mapStateToProps = (state) => {
     projectName: name,
     genomeVersion,
     workspaceName,
-    workspaceNamespace,
     canEdit,
     hasCaseReview,
     isAnalystProject,

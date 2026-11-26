@@ -1,0 +1,132 @@
+from clickhouse_backend import models
+from django.db import connections
+from django.db.models import Func
+import requests
+
+from clickhouse_search.backend.fields import NamedTupleField
+from seqr.utils.logging_utils import SeqrLogger
+from settings import DATABASES, PIPELINE_RUNNER_SERVER
+
+logger = SeqrLogger(__name__)
+
+
+MATERIALIZED_VIEW_META_FIELDS = [
+    'to_table', 'source_table', 'source_sql', 'source_url', 'source_url_template', 'column_selects', 'refreshable', 'create_empty',
+]
+DICTIONARY_META_FIELDS = ['layout', 'lifetime_max', 'postgres_query', 'postgres_db', 'clickhouse_query_template']
+
+
+def conditionally_refresh_reference_dataset(reference_dataset: str):
+    def inner(apps, schema_editor):
+        if DATABASES['default']['NAME'].startswith('test_'):
+            return
+        requests.post( # pragma: no cover
+            f"{PIPELINE_RUNNER_SERVER}/refresh_clickhouse_reference_dataset_enqueue",
+            json={"reference_dataset": reference_dataset},
+            timeout=60,
+        )
+    return inner
+
+
+def conditionally_reload_dictionary(dictionary_name: str):
+    def inner(apps, schema_editor):
+        if DATABASES['default']['NAME'].startswith('test_'):
+            return
+        schema_editor.execute(f'SYSTEM RELOAD DICTIONARY "{dictionary_name}"')
+    return inner
+
+
+class Projection(Func):
+
+    def __init__(self, name, select='*', order_by=None):
+        self.name = name
+        self.select = select
+        self.order_by = order_by
+
+
+class FixtureLoadableClickhouseModel(models.ClickhouseModel):
+
+    def _save_table(
+        self,
+        raw=False,
+        cls=None,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+        # loaddata attempts to run an ALTER TABLE to update existing rows, but since primary keys can not be altered
+        # and JOIN tables can not be altered this command fails so need to use the force_insert flag to run an INSERT instead
+        return super()._save_table(
+            raw=raw, cls=cls, force_insert=True, force_update=force_update, using=using, update_fields=update_fields,
+        )
+
+    class Meta:
+        abstract = True
+
+
+class IncrementalMaterializedView(models.ClickhouseModel):
+
+    class Meta:
+        abstract = True
+
+
+class RefreshableMaterializedView(IncrementalMaterializedView):
+
+    @classmethod
+    def refresh(cls, user=None):
+        logger.info(f'Refreshing materialized view {cls._meta.db_table}', user)
+        with connections['clickhouse_write'].cursor() as cursor:
+            cursor.execute(f'SYSTEM START VIEW "{cls._meta.db_table}"')
+            cursor.execute(f'SYSTEM REFRESH VIEW "{cls._meta.db_table}"')
+            cursor.execute(f'SYSTEM WAIT VIEW "{cls._meta.db_table}"')
+
+    class Meta:
+        abstract = True
+
+
+class RefreshableMaterializedViewMeta:
+    refreshable = True
+    column_selects = {}
+    source_sql = ''
+
+
+class Dictionary(models.ClickhouseModel):
+
+    @classmethod
+    def dict_get_sql(cls, key, fields, default=None, null_missing=False):
+        func_name = 'dictGet'
+        fields = [f"'{field}'" for field in fields]
+        field = fields[0] if len(fields) == 1 else f"({', '.join(fields)})"
+        args = [f"'{cls._meta.db_table}'", field, key]
+        if default is not None:
+            func_name = 'dictGetOrDefault'
+            args.append(f"'{default}'")
+        elif null_missing:
+            func_name = 'dictGetOrNull'
+        return f'{func_name}({", ".join(args)})'
+
+    @classmethod
+    def base_fields(cls):
+        return [(field.db_column or field.name, field) for field in cls._meta.local_fields if field.name != 'key']
+
+    @classmethod
+    def dict_get_expression(cls, *expressions, key_template='%(expressions)s', field_names=None, force_tuple=False, **kwargs):
+        base_fields = cls.base_fields()
+        if field_names:
+            base_fields = [f for f in base_fields if f[0] in field_names]
+        output_field = base_fields[0][1] if len(base_fields) == 1  and not force_tuple else NamedTupleField(base_fields)
+        dict_get_func = Func(*expressions, output_field=output_field)
+        dict_get_func.template = cls.dict_get_sql(key_template, [field_name for field_name, _  in base_fields], **kwargs)
+        if force_tuple and len(base_fields) == 1:
+            dict_get_func.template = f'tuple({dict_get_func.template})'
+        return dict_get_func
+
+    @classmethod
+    def reload(cls, user=None):
+        logger.info(f'Reloading dictionary {cls._meta.db_table}', user)
+        with connections['clickhouse_write'].cursor() as cursor:
+            cursor.execute(f'SYSTEM RELOAD DICTIONARY "{cls._meta.db_table}"')
+
+    class Meta:
+        abstract = True

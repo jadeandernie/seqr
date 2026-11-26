@@ -54,7 +54,7 @@ kubectl create secret generic pipeline-secrets \
 ```
 - Add secret references in your [values overrides](https://github.com/broadinstitute/seqr-helm?tab=readme-ov-file#valuesenvironment-overrides):
 ```yaml
-pipeline-runner:
+seqr:
   additionalSecrets:
     - name: CLINGEN_ALLELE_REGISTRY_LOGIN
       valueFrom:
@@ -69,47 +69,98 @@ pipeline-runner:
 ```
 
 ## Using the Load Data page to load VCF Callsets
+### Option #1
+#### Annotate and load on-prem
 - Copy your vcf into the loading datasets directory on the node running your kubernetes cluster (`/var/seqr/seqr-loading-temp/`).  You should see your vcf present when listing files:
 ```
 ls -h /var/seqr/seqr-loading-temp/
 loading_pipeline_queue  test.vcf.gz
 ```
+- Ensure Families and Individuals are created in the project(s) of interest.
 - In the top header of *seqr*, click on the **Data Management** button.
 - In the subheader, click on **Load Data**.
-- Type the name of the callset path into the **Callset File Path** text box (without the directory prefix), and select the appropriate Sample Type (WES/WGS) and Genome Version (GRCh37/GRCh38) for your project.  The pipeline includes a sequence of validation steps to insure the validity of your VCF, but these may be skipped by enabling the **Skip Callset Validation**option.  We strongly recommend leaving validation enabled to ensure the quality of your analysis.
-- Click through to the next page and select your project from the **Projects to Load** dropdown, then click **Submit**.
+- Select your VCF from the dropdown and select the appropriate Sample Type (WES/WGS) and Genome Version (GRCh37/GRCh38) for your project.  The pipeline includes a sequence of validation steps to insure the validity of your VCF, but these may be skipped by enabling the **Skip Callset Validation** option.  We strongly recommend leaving validation enabled to ensure the quality of your analysis.
+- Click through to the next page and select your project(s) from the **Projects to Load** dropdown, then click **Submit**.
 - If you wish to check the status of the loading request, you can click through to the **Pipeline Status** tab to view the loading pipeline interface.
 - Data should be loaded into the search backend automatically, usually within a few hours.
 
+### Option #2
+####  Annotate on and load on a Google Dataproc cluster.
+
+Google Dataproc makes it easy to start a spark cluster which can be used to parallelize annotation across many machines.  This option is available if you are running the *seqr* application on either a Google Cloud Platform VM or GKE.
+
+- Verify that the seqr pod has an associated service account.
+```
+kubectl exec seqr-POD-ID -c seqr -it -- bash
+gcloud auth list
+```
+This service account must be permissioned to create and modify dataproc clusters, and read and write to the GCS buckets that will host your data.  We also recommend verifying that the Cloud API access scopes are permissioned for both IAM and Compute Engine access.  
+- [Create GCS service account HMAC key and secret](https://clickhouse.com/docs/integrations/gcs#generate-an-access-key) for your service account.  These keys are used by the built-in Clickhouse integration to Google Cloud Storage.
+- Set those values as secrets within your Kubernetes envirionment:
+```
+kubectl create secret generic clickhouse-hmac-secrets
+--from-literal=pipeline_data_dir_hmac_key='HMAC_KEY'
+--from-literal=pipeline_data_dir_hmac_secret='HMAC_SECRET'
+```
+- Create or add the following environment variables to your existing `helm` [override values file](https://github.com/broadinstitute/seqr-helm?tab=readme-ov-file#valuesenvironment-overrides):
+```yaml
+pipeline-runner:
+  environment:
+    # Bucket used as a scratch directory by HAIL during loading.
+    # We recommend a <1 week expiration policy for this bucket.
+    HAIL_TMP_DIR: 'gs://...'
+    # Stores a copy of seqr's reference data hosted in your project's account.
+    # Objects should not expire from this bucket.
+    REFERENCE_DATASETS_DIR: 'gs://...'
+    RUN_PIPELINE_ON_DATAPROC: '1'
+    GCLOUD_PROJECT: 'your-gcp-project'
+    GCLOUD_REGION: 'region-of-dataproc-cluster'
+    GCLOUD_ZONE: 'zone-of-dataproc-cluster'
+global:
+  seqr:
+    environment:
+      # Stores authoritative copies of newly annotated variants
+      # and sample calls from the pipeline.  Objects should not expire from this bucket.
+      PIPELINE_DATA_DIR: 'gs://...'
+      # Bucket used for caching and worker communication by the pipeline.
+      # We recommend a ~2 week expiration policy for this bucket.
+      LOADING_DATASETS_DIR: 'gs://...'
+```
+- Install/Upgrade with the override values applied:
+```
+helm upgrade YOUR_INSTITUTION_NAME-seqr seqr-helm/seqr-platform -f my-values.yaml
+```
+- Follow the Option #1 Instructions to load data from the **Load Data** page.
+
 ## Loading RNASeq datasets
 
-Currently, seqr has a preliminary integration for RNA data, which requires the use of publicly available 
-pipelines run outside of the seqr platform. After these pipelines are run, the output must be annotated with metadata 
-from seqr to ensure samples are properly associated with the correct seqr families. After calling is completed, it can
-be added to seqr from the "Data Management" > "Rna Seq" page. You will need to provide the file path for the data and the 
-data type. Note that the file path can either be a gs:// path to a google bucket or as a local file stored in the `/var/seqr` folder. 
+seqr supports loading RNA data generated by certain publicly available pipelines. After these pipelines are run, the output can
+be added to seqr using the "Edit Datasets" button on the project page. You will need to provide the file path for the data,
+the data type, and the tissue type. Note that the file path can either be a gs:// path to a google bucket or a local file stored in the `/var/seqr` folder. 
 
 The following data types are supported:
 
-#### Gene Expression
-
-seqr accepts normalized expression TPMs from STAR or RNAseqQC. TSV files should have the following columns:
-
-- sample_id
-- project
-- gene_id
-- TPM
-- tissue
-
 #### Expression Outliers
 
-seqr accepts gene expression outliers from OUTRIDER.  TSV files should have the following columns:
+seqr accepts gene expression outliers from [OUTRIDER](https://www.bioconductor.org/packages/release/bioc/vignettes/OUTRIDER/inst/doc/OUTRIDER.pdf)
 
-- sampleID
-- geneID
-- pValue
-- padjust
-- zScore
+#### Splice Outliers
+
+seqr accepts splice junction outliers from [FRASER2](https://www.bioconductor.org/packages/release/bioc/vignettes/FRASER/inst/doc/FRASER.pdf)
+
+#### Gene Expression
+
+seqr accepts normalized expression TPMs from STAR or RNAseqQC. There are 2 different accepted formats for the TSV files:
+
+1. A single sample file with the sample ID provided in the file header and the following columns:
+  - Name
+  - Description (Optional)
+  - \<sample ID\>
+
+2. A multi-sample file with the following columns:
+  - sample_id
+  - gene_id
+  - TPM
 
 #### IGV
 

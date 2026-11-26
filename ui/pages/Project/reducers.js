@@ -8,7 +8,7 @@ import {
   loadProjectAnalysisGroups,
 } from 'redux/utils/reducerUtils'
 import { SHOW_ALL, SORT_BY_FAMILY_GUID, NOTE_TAG_NAME } from 'shared/utils/constants'
-import { HttpRequestHelper } from 'shared/utils/httpRequestHelper'
+import { HttpRequestHelper, loadMultipleData } from 'shared/utils/httpRequestHelper'
 import { SHOW_IN_REVIEW, SORT_BY_FAMILY_NAME, SORT_BY_FAMILY_ADDED_DATE, CASE_REVIEW_TABLE_NAME } from './constants'
 
 // action creators and reducers in one file as suggested by https://github.com/erikras/ducks-modular-redux
@@ -34,6 +34,7 @@ const REQUEST_INDIVIDUALS = 'REQUEST_INDIVIDUALS'
 const REQUEST_MME_SUBMISSIONS = 'REQUEST_MME_SUBMISSIONS'
 const REQUEST_LOCUS_LISTS = 'REQUEST_LOCUS_LISTS'
 const RECEIVE_LOCUS_LISTS = 'RECEIVE_LOCUS_LISTS'
+const RECEIVE_RNA_SEQ_UPLOAD_STATS = 'RECEIVE_RNA_SEQ_UPLOAD_STATS'
 
 // Data actions
 
@@ -55,17 +56,33 @@ export const loadMmeSubmissions = () => loadCurrentProjectChildEntities('mme sub
 
 const loadFamilyNotes = () => loadCurrentProjectChildEntities('family notes', REQUEST_FAMILIES, RECEIVE_FAMILIES)
 
-const loadSamples = () => loadCurrentProjectChildEntities('samples', REQUEST_INDIVIDUALS)
-
 export const loadProjectExportData = () => (dispatch, getState) => Promise.all([
   loadIndividuals()(dispatch, getState),
-  loadSamples()(dispatch, getState),
   loadFamilyNotes()(dispatch, getState),
 ])
 
 export const loadProjectOverview = () => loadCurrentProjectChildEntities('overview', REQUEST_PROJECT_OVERVIEW, RECEIVE_PROJECT_OVERVIEW)
 
-export const loadProjectCollaborators = () => loadCurrentProjectChildEntities('collaborators', REQUEST_PROJECT_COLLABORATORS, RECEIVE_PROJECT_COLLABORATORS)
+const loadAnalysisGroupCollaborators = analysisGroupGuid => (dispatch, getState) => {
+  const { currentProjectGuid, analysisGroupsByGuid } = getState()
+  if (!analysisGroupsByGuid[analysisGroupGuid]?.collaborators) {
+    dispatch({ type: REQUEST_PROJECT_COLLABORATORS })
+    new HttpRequestHelper(`/api/project/${currentProjectGuid}/analysis_groups/${analysisGroupGuid}/get_collaborators`,
+      (responseJson) => {
+        dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_PROJECT_COLLABORATORS })
+      },
+      (e) => {
+        dispatch({ type: RECEIVE_PROJECT_COLLABORATORS, error: e.message })
+      }).get()
+  }
+}
+
+export const loadProjectAnalysisGroupCollaborators = analysisGroupGuid => (
+  analysisGroupGuid ? loadAnalysisGroupCollaborators(analysisGroupGuid) : loadCurrentProjectChildEntities(
+    'collaborators', REQUEST_PROJECT_COLLABORATORS, RECEIVE_PROJECT_COLLABORATORS,
+  )
+)
 
 export const loadCurrentProjectAnalysisGroups = () => (dispatch, getState) => {
   const { currentProjectGuid } = getState()
@@ -75,7 +92,7 @@ export const loadCurrentProjectAnalysisGroups = () => (dispatch, getState) => {
 export const loadProjectLocusLists = () => loadCurrentProjectChildEntities('locus lists', REQUEST_LOCUS_LISTS, RECEIVE_LOCUS_LISTS)
 
 export const loadFamilyVariantSummary = familyGuid => loadFamilyData(
-  familyGuid, 'discoveryTags', 'variant_tag_summary', REQUEST_FAMILY_VARIANT_SUMMARY,
+  familyGuid, 'discoveryGeneIds', 'variant_tag_summary', REQUEST_FAMILY_VARIANT_SUMMARY,
 )
 
 export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatch, getState) => {
@@ -142,16 +159,14 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
 
 export const loadFamilySavedVariants = familyGuid => loadSavedVariants({ familyGuids: [familyGuid] })
 
-const unloadSavedVariants = (dispatch, getState) => {
-  const state = getState()
-  const variantsToDelete = Object.keys(state.savedVariantsByGuid).reduce((acc, o) => ({ ...acc, [o]: null }), {})
-  const variantFamiliesToDelete = Object.keys(state.savedVariantFamilies).reduce((acc, o) => (
-    { ...acc, [o]: { loaded: false } }), {})
-  dispatch({ type: RECEIVE_DATA, updatesById: { savedVariantsByGuid: variantsToDelete } })
-  dispatch({ type: RECEIVE_SAVED_VARIANT_FAMILIES, updates: variantFamiliesToDelete })
-}
-
 export const unloadProject = () => dispatch => dispatch({ type: UPDATE_CURRENT_PROJECT, newValue: null })
+
+export const createManualVariant = (familyGuid, values) => dispatch => new HttpRequestHelper(
+  `/api/saved_variant/create_manual/${familyGuid}`,
+  (responseJson) => {
+    dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+  },
+).post(values)
 
 export const updateFamilies = values => (dispatch, getState) => {
   const action = values.delete ? 'delete' : 'edit'
@@ -187,17 +202,6 @@ export const updateIndividualsMetadata = ({ uploadedFileId }) => (dispatch, getS
   },
 ).post()
 
-export const addVariantsDataset = values => (dispatch, getState) => new HttpRequestHelper(
-  `/api/project/${getState().currentProjectGuid}/add_dataset/variants`,
-  (responseJson) => {
-    dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-
-    // Clear all loaded variants and update the saved variant json. This should happen asynchronously
-    unloadSavedVariants(dispatch, getState)
-    new HttpRequestHelper(`/api/project/${getState().currentProjectGuid}/update_saved_variant_json`, () => {}).post()
-  },
-).post(values)
-
 export const updateIndividualIGV = (values, onError) => dispatch => (
   new HttpRequestHelper(
     `/api/individual/${values.individualGuid}/update_igv_sample`,
@@ -222,6 +226,16 @@ export const addIGVDataset = ({ mappingFile, ...values }) => (dispatch) => {
     }
   })
 }
+
+export const uploadRnaSeq = values => (dispatch, getState) => loadMultipleData(
+  `/api/project/${getState().currentProjectGuid}/update_rna_seq`,
+  ({ sampleGuids, fileName }, { dataType }) => sampleGuids.map(sampleGuid => ([
+    `/api/load_rna_seq_sample/${sampleGuid}`, sampleGuid, { fileName, dataType },
+  ])),
+  RECEIVE_RNA_SEQ_UPLOAD_STATS,
+  numLoaded => `Successfully loaded data for ${numLoaded} RNA-seq samples`,
+  10,
+)(values)(dispatch)
 
 export const updateLocusLists = values => (dispatch, getState) => {
   const projectGuid = getState().currentProjectGuid
@@ -256,13 +270,9 @@ export const getMmeMatches = submissionGuid => (dispatch, getState) => {
   const state = getState()
   const submission = state.mmeSubmissionsByGuid[submissionGuid]
   if (submission && !submission.geneVariants) {
-    const { familyGuid } = state.individualsByGuid[submission.individualGuid]
     dispatch({ type: REQUEST_MME_MATCHES })
     new HttpRequestHelper(`/api/matchmaker/get_mme_matches/${submissionGuid}`,
       (responseJson) => {
-        dispatch({
-          type: RECEIVE_SAVED_VARIANT_FAMILIES, updates: { [familyGuid]: { loaded: true, noteVariants: true } },
-        })
         dispatch({
           type: RECEIVE_DATA,
           updatesById: responseJson,
@@ -441,6 +451,7 @@ export const reducers = {
     page: 1,
     recordsPerPage: 25,
   }, false),
+  rnaSeqUploadStats: createSingleValueReducer(RECEIVE_RNA_SEQ_UPLOAD_STATS, {}),
 }
 
 const rootReducer = combineReducers(reducers)

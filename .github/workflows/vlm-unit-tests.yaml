@@ -1,4 +1,6 @@
 name: VLM Unit Tests
+permissions:
+  contents: read
 
 # Run the test suite on pushes (incl. merges) to master and dev
 # Run the test suite when a PR is opened, pushed to, or reopened
@@ -9,32 +11,133 @@ on:
       - dev
     paths:
       - 'vlm/**'
-      - '.github/workflows/*vlm*.yaml'
-      - 'hail_search/fixtures/*'
+      - '.github/workflows/*vlm-release.yaml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - 'vlm/**'
       - '.github/workflows/*vlm*.yaml'
-      - 'hail_search/fixtures/*'
+      - 'clickhouse_search/migrations/*.py'
+      - 'clickhouse_search/fixtures/clickhouse_search.json'
+      - 'seqr/fixtures/1kg_project.json'
 
 jobs:
-  vlm:
+  vlm_clickhouse:
     runs-on: ubuntu-latest
-    container: hailgenetics/hail:0.2.128
+
+    services:
+      clickhouse:
+        image: gcr.io/seqr-project/seqr-clickhouse:26.3.9
+        ports:
+          - 8123:8123   # HTTP interface
+          - 9000:9000   # Native client interface
+        volumes:
+          - /var/tmp:/var/seqr/clickhouse-data
+          - /tmp:/in-memory-dir
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 10s 
+          --health-timeout 5s 
+          --health-retries 5
+          --name clickhouse
+        env:
+          CLICKHOUSE_USER: clickhouse_test_user
+          CLICKHOUSE_PASSWORD: clickhouse_test_password
+          ALLOW_EMPTY_PASSWORD: no
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      postgres:
+        image: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        env:
+          POSTGRES_PASSWORD: pgtest
 
     steps:
       - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: 'pip'
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip wheel
-          pip install -r hail_search/requirements-test.txt
+          pip install -r vlm/requirements.txt
+          pip install -r vlm/requirements-test.txt
+      - name: Set up Clickhouse Settings
+        run: |
+          cat <<EOF > test_user_config.xml
+          <clickhouse>
+            <users>
+              <clickhouse_test_user>
+                <named_collection_control>1</named_collection_control>
+              </clickhouse_test_user>
+            </users>
+          </clickhouse>
+          EOF
+          docker cp ${{ github.workspace }}/test_user_config.xml clickhouse:/etc/clickhouse-server/users.d/users.xml
+          docker exec clickhouse clickhouse-client --query "CREATE USER vlm_test_user IDENTIFIED WITH plaintext_password BY 'vlm_test_password'"
+          docker exec clickhouse clickhouse-client --query "SYSTEM RELOAD USERS"
+          docker exec clickhouse clickhouse-client --query "CREATE SETTINGS PROFILE clickhouse_settings SETTINGS flatten_nested=0, join_use_nulls=1, stop_refreshable_materialized_views_on_startup=1 TO vlm_test_user, clickhouse_test_user"
+          docker exec clickhouse clickhouse-client --query "CREATE NAMED COLLECTION seqr_postgres_named_collection AS user='postgres', password='pgtest', host='postgres', port='5432'"
+          docker exec clickhouse clickhouse-client --query "SYSTEM RELOAD USERS"
+          cat <<EOF > test_config.xml
+          <clickhouse>
+            <user_files_path>/</user_files_path>
+          </clickhouse>
+          EOF
+          docker cp ${{ github.workspace }}/test_config.xml clickhouse:/etc/clickhouse-server/config.d/config.xml
+          docker restart clickhouse
+      - name: Wait for service restart
+        run: |
+          timeout 50s sh -c '
+          until curl --fail http://localhost:8123/ping; do
+            sleep 5
+          done
+          '
+      - name: Set up Clickhouse Test Database
+        run: | 
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install -r vlm/requirements.txt
+          pip install -r vlm/requirements-test.txt
+          pip install pytest-django
+          pip install -r requirements.txt 
+          pip install -r requirements-dev.txt 
+          export CLICKHOUSE_WRITER_USER=clickhouse_test_user
+          export CLICKHOUSE_WRITER_PASSWORD=clickhouse_test_password
+          export CLICKHOUSE_SERVICE_HOSTNAME=localhost
+          export POSTGRES_SERVICE_HOSTNAME=localhost
+          python3 -m pytest --setup-only --create-db --reuse-db --ds=settings vlm
+      - name: Set up Clickhouse test user
+        run: |
+          docker exec clickhouse clickhouse-client --query "GRANT SELECT ON test_seqr.\`GRCh37/SNV_INDEL/key_lookup\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT SELECT ON test_seqr.\`GRCh38/SNV_INDEL/key_lookup\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.\`GRCh37/SNV_INDEL/gt_stats_dict\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.\`GRCh38/SNV_INDEL/gt_stats_dict\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT SELECT ON test_seqr.\`GRCh37/SNV_INDEL/entries\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT SELECT ON test_seqr.\`GRCh38/SNV_INDEL/entries\` TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_affected_status_dict TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_sex_dict TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_individual_metadata_dict TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_discovery_variant_dict TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_excluded_variant_dict TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "GRANT dictGet ON test_seqr.seqrdb_omim TO vlm_test_user"
+          docker exec clickhouse clickhouse-client --query "SYSTEM RELOAD USERS"
       - name: Run coverage tests
         run: |
-          export VLM_DATA_DIR=./hail_search/fixtures
           export SEQR_BASE_URL=https://test-seqr.org/
           export NODE_ID=TestVLM
-          export MACHINE_MEM=24
-          export JAVA_OPTS_XSS=16M
-          coverage run --source="./vlm" --omit="./vlm/__main__.py" -m pytest vlm/
-          coverage report --fail-under=95
+          export CLICKHOUSE_SERVICE_HOSTNAME=localhost
+          export CLICKHOUSE_SERVICE_PORT=8123
+          export CLICKHOUSE_VLM_USERNAME=vlm_test_user
+          export CLICKHOUSE_VLM_PASSWORD=vlm_test_password
+          export CLICKHOUSE_DATABASE=test_seqr
+          coverage run --source="./vlm" --omit="./vlm/__main__.py","./vlm/conftest.py" -m pytest vlm/
+          coverage report -m --fail-under=95
+

@@ -1,4 +1,4 @@
-"""API that generates auto-complete suggestions for the search bar in the header of seqr pages"""
+"""API that generates auto-complete suggestions for the search bar in the header of seqr pages."""
 from django.db.models import F, Q, Case, When, Value, ExpressionWrapper, BooleanField, CharField
 from django.db.models.functions import Cast, Coalesce, Concat, Left, Length, NullIf, Replace
 from django.views.decorators.http import require_GET
@@ -6,7 +6,7 @@ from django.views.decorators.http import require_GET
 from reference_data.models import Omim, HumanPhenotypeOntology
 from seqr.utils.gene_utils import get_queried_genes
 from seqr.views.utils.json_utils import create_json_response, _to_title_case
-from seqr.views.utils.permissions_utils import get_project_guids_user_can_view, login_and_policies_required
+from seqr.views.utils.permissions_utils import get_project_analysis_group_guids_user_can_view, login_and_policies_required
 from seqr.models import Project, Family, Individual, AnalysisGroup, ProjectCategory
 
 
@@ -16,11 +16,14 @@ MAX_STRING_LENGTH = 100
 FUZZY_MATCH_CHARS = ['-', '_', '.']
 
 
-def _get_matching_objects(query, project_guids, object_cls, core_fields, href_expression, description_content=None,
-                          project_field=None, select_related_project=True):
+def _get_matching_objects(query, project_guids, analysis_group_guids, object_cls, core_fields, href_expression, description_content=None,
+                          project_field=None, analysis_group_guid_field=None, select_related_project=True):
     if project_field:
         matching_objects = getattr(object_cls, 'objects')
-        matching_objects = matching_objects.filter(Q(**{'{}__guid__in'.format(project_field): project_guids}))
+        match_q = Q(**{'{}__guid__in'.format(project_field): project_guids})
+        if analysis_group_guid_field and analysis_group_guids:
+            match_q |= Q(**{f'{analysis_group_guid_field}__in': analysis_group_guids})
+        matching_objects = matching_objects.filter(match_q)
         if select_related_project:
             matching_objects = matching_objects.select_related(project_field)
     else:
@@ -69,35 +72,35 @@ def _get_matching_objects(query, project_guids, object_cls, core_fields, href_ex
     return list(results)
 
 
-def _get_matching_projects(query, project_guids):
+def _get_matching_projects(*args):
     return _get_matching_objects(
-        query, project_guids, Project,
+        *args, Project,
         core_fields=['name'],
         href_expression=Concat(Value('/project/'), 'guid', Value('/project_page')),
     )
 
 
-def _get_matching_families(query, project_guids):
+def _get_matching_families(*args):
     return _get_matching_objects(
-        query, project_guids, Family,
+        *args, Family,
         core_fields=['display_name', 'family_id'],
         href_expression=Concat(Value('/project/'), 'project__guid', Value('/family_page/'), 'guid'),
         description_content=[Cast('project__name', output_field=CharField())],
-        project_field='project')
+        project_field='project', analysis_group_guid_field='analysisgroup__guid')
 
 
-def _get_matching_analysis_groups(query, project_guids):
+def _get_matching_analysis_groups(*args):
     return _get_matching_objects(
-        query, project_guids, AnalysisGroup,
+        *args, AnalysisGroup,
         core_fields=['name'],
         href_expression=Concat(Value('/project/'), 'project__guid', Value('/analysis_group/'), 'guid'),
         description_content=[Cast('project__name', output_field=CharField())],
-        project_field='project')
+        project_field='project', analysis_group_guid_field='guid')
 
 
-def _get_matching_individuals(query, project_guids):
+def _get_matching_individuals(*args):
     return _get_matching_objects(
-        query, project_guids, Individual,
+        *args, Individual,
         core_fields=['display_name', 'individual_id'],
         href_expression=Concat(Value('/project/'), 'family__project__guid', Value('/family_page/'), 'family__guid'),
         description_content=[
@@ -105,12 +108,12 @@ def _get_matching_individuals(query, project_guids):
             Value(': family '),
             Coalesce(NullIf('family__display_name', Value('')), NullIf('family__family_id', Value(''))),
         ],
-        project_field='family__project')
+        project_field='family__project', analysis_group_guid_field='family__analysisgroup__guid')
 
 
-def _get_matching_project_groups(query, project_guids):
+def _get_matching_project_groups(*args):
     return _get_matching_objects(
-        query, project_guids, ProjectCategory,
+        *args, ProjectCategory,
         core_fields=['name'],
         href_expression=F('guid'),
         project_field='projects',
@@ -119,14 +122,6 @@ def _get_matching_project_groups(query, project_guids):
 
 
 def _get_matching_genes(query, *args):
-    """Returns genes that match the given query string, and that the user can view.
-
-    Args:
-       user: Django user
-       query: String typed into the awesomebar
-    Returns:
-       Sorted list of matches where each match is a dictionary of strings
-    """
     result = []
     for g in get_queried_genes(query, MAX_RESULTS_PER_CATEGORY):
         if query.lower() in g['gene_id'].lower():
@@ -147,7 +142,6 @@ def _get_matching_genes(query, *args):
 
 
 def _get_matching_omim(query, *args):
-    """Returns OMIM records that match the given query string"""
     records = Omim.objects.filter(
         Q(phenotype_mim_number__icontains=query) | Q(phenotype_description__icontains=query)
     ).filter(phenotype_mim_number__isnull=False).annotate(
@@ -167,7 +161,6 @@ def _get_matching_omim(query, *args):
 
 
 def _get_matching_hpo_terms(query, *args):
-    """Returns OMIM records that match the given query string"""
     records = HumanPhenotypeOntology.objects.filter(
         Q(hpo_id__icontains=query) | Q(name__icontains=query)
     ).annotate(
@@ -206,19 +199,17 @@ DEFAULT_CATEGORIES = ['projects', 'families', 'analysis_groups', 'individuals', 
 @login_and_policies_required
 @require_GET
 def awesomebar_autocomplete_handler(request):
-    """Accepts HTTP GET request with q=.. url arg, and returns suggestions"""
-
     query = request.GET.get('q').strip()
     if not query:
         return create_json_response({'matches': {}})
 
     categories = request.GET.get('categories').split(',') if request.GET.get('categories') else DEFAULT_CATEGORIES
 
-    project_guids = get_project_guids_user_can_view(request.user, limit_data_manager=False) if any(
-        category for category in categories if category in PROJECT_SPECIFIC_CATEGORY_MAP) else None
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user, limit_data_manager=False) if any(
+        category for category in categories if category in PROJECT_SPECIFIC_CATEGORY_MAP) else (None, None)
 
     results = {
-        category: {'name': _to_title_case(category), 'results': CATEGORY_MAP[category](query, project_guids)}
+        category: {'name': _to_title_case(category), 'results': CATEGORY_MAP[category](query, project_guids, analysis_group_guids)}
         for category in categories
     }
 

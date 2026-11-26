@@ -140,8 +140,8 @@ function getPaProps({ panelAppDetails, locusListDescription, paLocusList, geneSy
     }
   }
 
-  const { url, panelAppId } = paLocusList
-  const fullUrl = panelAppUrl(url, panelAppId, geneSymbol)
+  const { source, panelAppId } = paLocusList
+  const fullUrl = panelAppUrl(source, panelAppId, geneSymbol)
   const moi = panelAppDetails.moi || 'Unknown'
   const confidence = panelAppDetails.confidence || 'Unknown'
   const initials = moiToMoiInitials(moi).join(', ') || null
@@ -621,12 +621,14 @@ export const BaseVariantGene = React.memo(({
         </a>
         &nbsp; | &nbsp;
         <Popup
-          trigger={<NavLink to={`/summary_data/saved_variants/ALL/${gene.geneId}`} target="_blank">seqr</NavLink>}
+          trigger={<NavLink to={`/summary_data/saved_variants/ALL/${gene.geneId}`} target="_blank">Saved Variants</NavLink>}
           content="Show all previously saved variants in this gene across all your seqr projects"
           size="tiny"
         />
         &nbsp; | &nbsp;
-        {!variant.lookupFamilyGuids && <GeneSearchLinkWithPopup location={geneId} familyGuids={variant.familyGuids} />}
+        {variant.familyGuids?.length > 0 && (
+          <GeneSearchLinkWithPopup location={geneId} familyGuids={variant.familyGuids} />
+        )}
       </GeneLinks>
     )
   }
@@ -689,8 +691,8 @@ BaseVariantGene.propTypes = {
 }
 
 const getRnaSeqProps = (state, ownProps) => ({
-  tpmGenes: getFamiliesByGuid(state)[ownProps.variant.familyGuids[0]]?.tpmGenes,
-  individualGeneData: getIndividualGeneDataByFamilyGene(state)[ownProps.variant.familyGuids[0]],
+  tpmGenes: getFamiliesByGuid(state)[(ownProps.variant.familyGuids || [])[0]]?.tpmGenes,
+  individualGeneData: getIndividualGeneDataByFamilyGene(state)[(ownProps.variant.familyGuids || [])[0]],
 })
 
 const mapStateToProps = (state, ownProps) => ({
@@ -723,7 +725,7 @@ class VariantGenes extends React.PureComponent {
   render() {
     const { variant, genesById, mainGeneId, showMainGene, individualGeneData, tpmGenes } = this.props
     const { showAll } = this.state
-    const geneIds = Object.keys(variant.transcripts || {})
+    const geneIds = Object.keys(variant.transcripts || {}).filter(geneId => geneId !== 'null')
     const genes = geneIds.map(geneId => genesById[geneId]).filter(gene => gene)
 
     const geneSearchLink = !mainGeneId && geneIds.length > 0 &&

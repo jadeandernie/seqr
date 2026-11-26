@@ -12,7 +12,7 @@ TEST_MME_NODES = {TEST_ACCESS_TOKEN: {'name': 'Test Node'}}
 
 @mock.patch('matchmaker.views.external_api.MME_NODES', TEST_MME_NODES)
 class ExternalAPITest(TestCase):
-    databases = '__all__'
+    databases = ['default', 'reference_data']
     fixtures = ['users', '1kg_project', 'reference_data']
 
     def _check_mme_authenticated(self, url):
@@ -23,7 +23,7 @@ class ExternalAPITest(TestCase):
         self.assertEqual(response.status_code, 401)
 
         response = self.client.get(
-            url, HTTP_ACCEPT='application/vnd.ga4gh.matchmaker.v1.0+json', HTTP_X_AUTH_TOKEN='invalid',
+            url, HTTP_ACCEPT='application/vnd.ga4gh.matchmaker.v1.0+json', HTTP_X_AUTH_TOKEN='invalid', # nosec
         )
         self.assertEqual(response.status_code, 401)
 
@@ -42,7 +42,7 @@ class ExternalAPITest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {
             'metrics': {
-                'numberOfCases': 4,
+                'numberOfCases': 5,
                 'numberOfSubmitters': 2,
                 'numberOfUniqueGenes': 3,
                 'numberOfUniqueFeatures': 4,
@@ -253,7 +253,7 @@ Our website can be found at https://seqr.broadinstitute.org/matchmaker/matchbox 
 be found found at https://seqr.broadinstitute.org/matchmaker/disclaimer."""
         match1 = 'seqr ID NA19675_1 from project 1kg project n\u00e5me with uni\u00e7\u00f8de in family 1 inserted into matchbox on May 23, 2018, with seqr link /project/R0001_1kg/family_page/F000001_1/matchmaker_exchange'
         match2 = 'seqr ID NA20888 from project Test Reprocessed Project in family 12 inserted into matchbox on Feb 05, 2019, with seqr link /project/R0003_test/family_page/F000012_12/matchmaker_exchange'
-        match3 = 'seqr ID NA21234 from project Non-Analyst Project in family 14 inserted into matchbox on Feb 05, 2019, with seqr link /project/R0004_non_analyst_project/family_page/F000014_14/matchmaker_exchange'
+        match3 = 'seqr ID NA21234 from project Non-Analyst Project in family fam14 inserted into matchbox on Feb 05, 2019, with seqr link /project/R0004_non_analyst_project/family_page/F000014_14/matchmaker_exchange'
 
         mock_post_to_slack.assert_called_with('matchmaker_matches', message_template.format(
             matches='\n'.join([match1, match2, match3]),
@@ -373,7 +373,7 @@ be found found at https://seqr.broadinstitute.org/matchmaker/disclaimer."""
     in matchbox. The following information was included with the query,
 
     genes: 
-    phenotypes: HP:0002017 (Nausea and vomiting), HP:0012469 (Infantile spasms), HP:0001252 (Muscular hypotonia), HP:0001263 (Global developmental delay)
+    phenotypes: HP:0001252 (Muscular hypotonia), HP:0001263 (Global developmental delay), HP:0002017 (Nausea and vomiting), HP:0012469 (Infantile spasms)
     contact: PI
     email: test@test.com
 

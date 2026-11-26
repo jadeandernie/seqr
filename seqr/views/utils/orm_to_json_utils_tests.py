@@ -1,18 +1,17 @@
 from django.contrib.auth.models import User
 import mock
 from copy import deepcopy
-from seqr.models import Project, Sample, IgvSample, SavedVariant, VariantNote, LocusList, VariantSearch
+from seqr.models import Project, IgvSample, SavedVariant, VariantNote, LocusList, VariantSearch
 from seqr.views.utils.orm_to_json_utils import get_json_for_user, _get_json_for_project, \
-    get_json_for_sample, get_json_for_saved_variants, get_json_for_variant_note, get_json_for_locus_list, \
+    get_json_for_sample, get_json_for_variant_note, get_json_for_locus_list, \
     get_json_for_saved_searches, get_json_for_saved_variants_with_tags, get_json_for_current_user
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, \
-    PROJECT_FIELDS,  INTERNAL_FAMILY_FIELDS, \
-    INDIVIDUAL_FIELDS, INTERNAL_INDIVIDUAL_FIELDS, SAMPLE_FIELDS, SAVED_VARIANT_FIELDS,  \
+    PROJECT_FIELDS, SAVED_VARIANT_FIELDS,  \
     FUNCTIONAL_FIELDS, SAVED_SEARCH_FIELDS, LOCUS_LIST_DETAIL_FIELDS, PA_LOCUS_LIST_FIELDS, IGV_SAMPLE_FIELDS, \
-    CASE_REVIEW_FAMILY_FIELDS, TAG_FIELDS, VARIANT_NOTE_FIELDS, NO_INTERNAL_CASE_REVIEW_INDIVIDUAL_FIELDS
+    TAG_FIELDS, VARIANT_NOTE_FIELDS
 
 class JSONUtilsTest(object):
-    databases = '__all__'
+    databases = ['default']
 
     def test_json_for_user(self):
         users = User.objects.all()
@@ -96,34 +95,11 @@ class JSONUtilsTest(object):
 
         self.assertSetEqual(set(json.keys()), PROJECT_FIELDS)
 
-    def test_json_for_sample(self):
-        sample = Sample.objects.first()
-        json = get_json_for_sample(sample)
-
-        self.assertSetEqual(set(json.keys()), SAMPLE_FIELDS)
-
     def test_json_for_igv_sample(self):
         sample = IgvSample.objects.first()
         json = get_json_for_sample(sample)
 
         self.assertSetEqual(set(json.keys()), IGV_SAMPLE_FIELDS)
-
-    def test_json_for_saved_variant(self):
-        variants = SavedVariant.objects.filter(guid='SV0000001_2103343353_r0390_100')
-        json = get_json_for_saved_variants(variants)[0]
-
-        self.assertSetEqual(set(json.keys()), SAVED_VARIANT_FIELDS)
-        self.assertListEqual(json['familyGuids'], ["F000001_1"])
-        self.assertEqual(json['variantId'], '21-3343353-GAGA-G')
-
-        fields = set()
-        fields.update(SAVED_VARIANT_FIELDS)
-        fields.update(list(variants.first().saved_variant_json.keys()))
-        json = get_json_for_saved_variants(variants, add_details=True)[0]
-        self.assertSetEqual(set(json.keys()), fields)
-        self.assertListEqual(json['familyGuids'], ["F000001_1"])
-        self.assertEqual(json['variantId'], '21-3343353-GAGA-G')
-        self.assertEqual(json['mainTranscriptId'], 'ENST00000258436')
 
     def test_json_for_saved_variants_with_tags(self):
         variant_guid_1 = 'SV0000001_2103343353_r0390_100'
@@ -160,6 +136,10 @@ class JSONUtilsTest(object):
             self.assertListEqual(json['variantTagsByGuid'][tag_guid]['variantGuids'], [variant_guid_1])
         for tag_guid in v2_tag_guids:
             self.assertListEqual(json['variantTagsByGuid'][tag_guid]['variantGuids'], [variant_guid_2])
+        self.assertDictEqual(
+            json['variantTagsByGuid']['VT1726985_2103343353_r0390_100']['structuredMetadata'],
+            {'4': {'date': '2023-11-15', 'name': 'de Novo'}, 'support': {'date': '2023-11-15', 'name': 'High in Silico Scores'}},
+        )
 
         self.assertSetEqual(set(json['variantNotesByGuid'].keys()), set(v2_note_guids))
         self.assertSetEqual(set(json['variantNotesByGuid'][v2_note_guids[0]].keys()), VARIANT_NOTE_FIELDS)

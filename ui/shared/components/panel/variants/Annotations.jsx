@@ -13,11 +13,10 @@ import {
   getFamiliesByGuid,
   getUser,
   getSpliceOutliersByChromFamily,
-  getElasticsearchEnabled,
 } from 'redux/selectors'
 import { HorizontalSpacer, VerticalSpacer } from '../../Spacers'
 import CopyToClipboardButton from '../../buttons/CopyToClipboardButton'
-import SearchResultsLink from '../../buttons/SearchResultsLink'
+import { PermissiveGeneSearchLink } from '../../buttons/SearchResultsLink'
 import Modal from '../../modal/Modal'
 import { ButtonLink, HelpIcon } from '../../StyledComponents'
 import RnaSeqJunctionOutliersTable from '../../table/RnaSeqJunctionOutliersTable'
@@ -111,6 +110,9 @@ const DividedLink = styled.a.attrs({ target: '_blank', rel: 'noreferrer' })`
 `
 
 const DividedButtonLink = DividedLink.withComponent(ButtonLink)
+
+const BaseDividedGeneSearchLink = DividedLink.withComponent(PermissiveGeneSearchLink)
+const DividedGeneSearchLink = props => <BaseDividedGeneSearchLink {...props} />
 
 const UcscBrowserLink = ({ genomeVersion, chrom, pos, refLength, endOffset, copyPosition }) => {
   const posInt = parseInt(pos, 10)
@@ -263,7 +265,7 @@ const VARIANT_LINKS = [
     getHref: ({ pos, ref, alt }) => `https://www.mitovisualize.org/variant/m-${pos}-${ref}-${alt}`,
   },
   {
-    name: 'google',
+    name: 'Google',
     shouldShow: ({ genes, variations }) => genes.length && variations.length,
     getHref: ({ genes, variations }) => `https://scholar.google.com/scholar?q=${getLitSearch(genes, variations).replaceAll('=', '')}`,
   },
@@ -313,8 +315,8 @@ const getSampleType = (genotypes) => {
   return sampleTypes.length === 1 ? sampleTypes[0] : ''
 }
 
-const variantSearchLinks = (variant, mainTranscript, genesById, user, elasticsearchEnabled) => {
-  const { chrom, endChrom, pos, end, ref, alt, genomeVersion, genotypes, svType, variantId, transcripts } = variant
+const variantSearchLinks = (variant, mainTranscript, genesById, user) => {
+  const { chrom, pos, ref, alt, genomeVersion, genotypes, svType, variantId, transcripts } = variant
 
   const mainGene = genesById[mainTranscript.geneId]
   let genes
@@ -348,31 +350,30 @@ const variantSearchLinks = (variant, mainTranscript, genesById, user, elasticsea
 
   const linkVariant = { genes, variations, hgvsc, ...variant }
 
-  const seqrSearchLink = elasticsearchEnabled ? (
-    <SearchResultsLink
-      buttonText="seqr"
-      genomeVersion={genomeVersion}
-      svType={svType}
-      variantId={svType ? null : variantId}
-      location={svType && (
-        (endChrom && endChrom !== chrom) ? `${chrom}:${pos - 50}-${pos + 50}` : `${chrom}:${pos}-${end}%20`)}
-    />
-  ) : (
+  const seqrSearchLink = (
     <NavLink
-      to={`/summary_data/variant_lookup?variantId=${variantId}&genomeVersion=${genomeVersion}&sampleType=${getSampleType(genotypes)}`}
+      to={`/variant_lookup?variantId=${variantId}&genomeVersion=${genomeVersion}&sampleType=${getSampleType(genotypes)}`}
       target="_blank"
     >
-      seqr
+      Variant Lookup
     </NavLink>
   )
 
+  const seqrLinks = [{
+    key: 'seqr-search',
+    trigger: seqrSearchLink,
+    content: `Search for this variant across all your seqr projects${svType ? '. Any structural variant with ≥20% reciprocal overlap will be returned.' : ''}`,
+  }]
+  if (!svType) {
+    seqrLinks.push({
+      key: 'codon-search',
+      trigger: <DividedGeneSearchLink buttonText="seqr codon" genomeVersion={genomeVersion} location={`${chrom}:${pos - 2}-${pos + 2}`} excludeSvs />,
+      content: 'Search for variants within 2bp of this variant across all your seqr projects in any affected individual and with AF < 3%',
+    })
+  }
+
   return [
-    <Popup
-      key="seqr-search"
-      trigger={seqrSearchLink}
-      content={`Search for this variant across all your seqr projects${svType ? '. Any structural variant with ≥20% reciprocal overlap will be returned.' : ''}`}
-      size="tiny"
-    />,
+    ...seqrLinks.map(props => <Popup size="tiny" {...props} />),
     ...VARIANT_LINKS.filter(({ shouldShow }) => shouldShow(linkVariant, user)).map(
       ({ name, getHref }) => <DividedLink key={name} href={getHref(linkVariant)}>{name}</DividedLink>,
     ),
@@ -386,7 +387,6 @@ class BaseSearchLinks extends React.PureComponent {
     mainTranscript: PropTypes.object,
     genesById: PropTypes.object,
     user: PropTypes.object,
-    elasticsearchEnabled: PropTypes.bool,
   }
 
   state = { showAll: false }
@@ -396,10 +396,10 @@ class BaseSearchLinks extends React.PureComponent {
   }
 
   render() {
-    const { variant, mainTranscript, genesById, user, elasticsearchEnabled } = this.props
+    const { variant, mainTranscript, genesById, user } = this.props
     const { showAll } = this.state
 
-    const links = variantSearchLinks(variant, mainTranscript, genesById, user, elasticsearchEnabled)
+    const links = variantSearchLinks(variant, mainTranscript, genesById, user)
     if (links.length < 5) {
       return links
     }
@@ -418,7 +418,6 @@ class BaseSearchLinks extends React.PureComponent {
 const mapStateToProps = state => ({
   genesById: getGenesById(state),
   user: getUser(state),
-  elasticsearchEnabled: getElasticsearchEnabled(state),
 })
 
 const SearchLinks = connect(mapStateToProps)(BaseSearchLinks)
@@ -450,11 +449,9 @@ const svSizeDisplay = (size) => {
   return `${(size / 1000000).toFixed(2) / 1}Mb`
 }
 
-const getLofDetails = ({ isLofNagnag, lofFilters, lofFilter, lofFlags, lof }) => {
-  const isNagnag = isLofNagnag || lofFlags === 'NAGNAG_SITE'
-  const filters = lofFilters || (lof === 'LC' && lofFilter && lofFilter.split(/&|,/g))
-  return (filters || isNagnag) ? [
-    ...(filters ? [...new Set(filters)] : []).map((lofFilterKey) => {
+const getLofDetails = ({ isLofNagnag, lofFilters }) => (
+  (lofFilters || isLofNagnag) ? [
+    ...(lofFilters ? [...new Set(lofFilters)] : []).map((lofFilterKey) => {
       const filter = LOF_FILTER_MAP[lofFilterKey] || { message: lofFilterKey }
       return (
         <div key={lofFilterKey}>
@@ -464,7 +461,7 @@ const getLofDetails = ({ isLofNagnag, lofFilters, lofFilter, lofFlags, lof }) =>
         </div>
       )
     }),
-    isNagnag ? (
+    isLofNagnag ? (
       <div key="NAGNAG_SITE">
         <b>LOFTEE: NAGNAG site</b>
         <br />
@@ -472,7 +469,7 @@ const getLofDetails = ({ isLofNagnag, lofFilters, lofFilter, lofFlags, lof }) =>
       </div>
     ) : null,
   ] : null
-}
+)
 
 // Adapted from https://github.com/ImperialCardioGenetics/UTRannotator/blob/master/README.md#the-detailed-annotation-for-each-consequence
 const UTR_ANNOTATOR_DESCRIPTIONS = {
@@ -530,11 +527,10 @@ UtrAnnotatorDetail.propTypes = {
 
 const Annotations = React.memo(({ variant, mainGeneId, showMainGene, transcriptsById }) => {
   const {
-    rsid, svType, numExon, pos, end, svTypeDetail, svSourceDetail, cpxIntervals, algorithms, bothsidesSupport,
-    endChrom, CAID,
+    rsid, svType, pos, end, svTypeDetail, svSourceDetail, cpxIntervals, endChrom, CAID,
   } = variant
   const mainTranscript = getVariantMainTranscript(variant)
-  const lofDetails = getLofDetails(mainTranscript.loftee || mainTranscript)
+  const lofDetails = getLofDetails(mainTranscript.loftee || {})
 
   const transcriptPopupProps = mainTranscript.transcriptId && {
     content: <TranscriptLink variant={variant} transcript={mainTranscript} />,
@@ -599,34 +595,6 @@ const Annotations = React.memo(({ variant, mainGeneId, showMainGene, transcripts
         <b>
           <HorizontalSpacer width={5} />
           {svSizeDisplay(end - pos)}
-        </b>
-      )}
-      {(algorithms || bothsidesSupport) && (
-        <b>
-          <HorizontalSpacer width={5} />
-          <Popup
-            trigger={<Icon name="help circle" />}
-            content={
-              <div>
-                {algorithms && `Algorithms: ${algorithms}.`}
-                {bothsidesSupport && (
-                  <div>
-                    Bothsides Support
-                  </div>
-                )}
-              </div>
-            }
-            position="top center"
-          />
-        </b>
-      )}
-      {Number.isInteger(numExon) && (
-        <b>
-          {`, ${numExon} exons`}
-          <Popup
-            trigger={<HelpIcon />}
-            content="CNV size and exon number are estimated from exome data and should be confirmed by an alternative method"
-          />
         </b>
       )}
       {lofDetails && (

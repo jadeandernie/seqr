@@ -17,16 +17,14 @@ def run_command(command, user=None, pipe_errors=False):
     return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE if pipe_errors else subprocess.STDOUT, shell=True) # nosec
 
 
-def _run_gsutil_command(command, gs_path, gunzip=False, user=None, pipe_errors=False, no_project=False):
+def _run_gsutil_command(command, gs_path, gunzip=False, user=None, pipe_errors=False, no_project=False, additional_args=''):
     if not is_google_bucket_file_path(gs_path):
         raise Exception('A Google Storage path is expected.')
 
     #  Anvil buckets are requester-pays and we bill them to the anvil project
     google_project = get_google_project(gs_path) if not no_project else None
     project_arg = '-u {} '.format(google_project) if google_project else ''
-    command = 'gsutil {project_arg}{command} {gs_path}'.format(
-        project_arg=project_arg, command=command, gs_path=gs_path,
-    )
+    command = f'gsutil {project_arg}{command} {gs_path}{additional_args}'
     if gunzip:
         command += " | gunzip -c -q - "
 
@@ -77,7 +75,7 @@ def does_file_exist(file_path, user=None):
         success = process.wait() == 0
         if not success:
             errors = [line.decode('utf-8').strip() for line in process.stdout]
-            logger.info(' '.join(errors), user)
+            logger.warning(' '.join(errors), user)
         return success
 
     # Equivalent code for s3
@@ -97,13 +95,17 @@ def does_file_exist(file_path, user=None):
     return os.path.isfile(file_path)
 
 
-def list_files(wildcard_path, user):
+def list_files(wildcard_path, user, check_subfolders=False, allow_missing=True):
+    if check_subfolders:
+        wildcard_path = f'{wildcard_path.rstrip("/")}/**'
     if is_google_bucket_file_path(wildcard_path):
-        return get_gs_file_list(wildcard_path, user, check_subfolders=False, allow_missing=True)
-    return [file_path for file_path in glob.glob(wildcard_path) if os.path.isfile(file_path)]
+        return _get_gs_file_list(wildcard_path, user, check_subfolders, allow_missing)
+    return [file_path for file_path in glob.glob(wildcard_path, recursive=check_subfolders) if os.path.isfile(file_path)]
 
 
 def file_iter(file_path, byte_range=None, raw_content=False, user=None, **kwargs):
+    if not does_file_exist(file_path, user=user):
+        raise FileNotFoundError(f'Could not access file {file_path}')
     if is_google_bucket_file_path(file_path):
         for line in _google_bucket_file_iter(file_path, byte_range=byte_range, raw_content=raw_content, user=user, **kwargs):
             yield line
@@ -117,19 +119,23 @@ def file_iter(file_path, byte_range=None, raw_content=False, user=None, **kwargs
             size=byte_range[1]-byte_range[0] + 1,
             file_path=file_path,
         )
+        if file_path.endswith("gz"):
+            command += " | gunzip -c - "
         process = run_command(command, user=user)
         for line in process.stdout:
             yield line
     else:
         mode = 'rb' if raw_content else 'r'
-        open_func = gzip.open if file_path.endswith("gz") else open
+        is_gz = file_path.endswith("gz")
+        open_func = gzip.open if is_gz else open
         with open_func(file_path, mode) as f:
             for line in f:
+                if is_gz and not raw_content:
+                    line = line.decode('utf-8')
                 yield line
 
 
 def _google_bucket_file_iter(gs_path, byte_range=None, raw_content=False, user=None, **kwargs):
-    """Iterate over lines in the given file"""
     range_arg = ' -r {}-{}'.format(byte_range[0], byte_range[1]) if byte_range else ''
     process = _run_gsutil_command(
         'cat{}'.format(range_arg), gs_path, gunzip=gs_path.endswith("gz") and not raw_content, user=user, **kwargs)
@@ -158,23 +164,22 @@ def mv_file_to_gs(local_path, gs_path, user=None):
     run_gsutil_with_wait(command, gs_path, user)
 
 
-def get_gs_file_list(gs_path, user=None, check_subfolders=True, allow_missing=False):
+def _get_gs_file_list(gs_path, user, check_subfolders, allow_missing):
     gs_path = gs_path.rstrip('/')
     command = 'ls'
 
     if check_subfolders:
         # If a bucket is empty gsutil throws an error when running ls with ** instead of returning an empty list
-        subfolders = _run_gsutil_with_stdout(command, gs_path, user)
+        subfolders = _run_gsutil_with_stdout(command, gs_path.replace('/**', ''), user)
         if not subfolders:
             return []
-        gs_path = f'{gs_path}/**'
 
     all_lines = _run_gsutil_with_stdout(command, gs_path, user, allow_missing=allow_missing)
     return [line for line in all_lines if is_google_bucket_file_path(line)]
 
 
-def run_gsutil_with_wait(command, gs_path, user=None):
-    process = _run_gsutil_command(command, gs_path, user=user)
+def run_gsutil_with_wait(command, gs_path, user=None, **kwargs):
+    process = _run_gsutil_command(command, gs_path, user=user, **kwargs)
     if process.wait() != 0:
         errors = [line.decode('utf-8').strip() for line in process.stdout]
         raise Exception('Run command failed: ' + ' '.join(errors))

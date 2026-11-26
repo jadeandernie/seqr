@@ -45,26 +45,12 @@ def authenticate_mme_request(view_func):
 
 @authenticate_mme_request
 def mme_metrics_proxy(request, originating_node_name):
-    """
-    -Proxies public metrics endpoint
-    Returns:
-        Metric JSON from matchbox
-    """
     logger.info('Received MME metrics request from {}'.format(originating_node_name))
     return create_json_response({'metrics': get_mme_metrics()})
 
 
 @authenticate_mme_request
 def mme_match_proxy(request, originating_node_name):
-    """
-    -Looks for matches for the given individual ONLY in the local MME DB.
-    -Expects a single patient (as per MME spec) in the POST
-
-    Args:
-        None, all data in POST under key "patient_data"
-    Returns:
-        Status code and results (as per MME spec), returns raw results from MME Server
-    """
     logger.info('Received MME match request from {}'.format(originating_node_name))
 
     try:
@@ -88,15 +74,6 @@ def mme_match_proxy(request, originating_node_name):
 
 
 def _safe_generate_notification_for_incoming_match(results, incoming_query, incoming_request_node, incoming_patient):
-    """
-    Generate a SLACK notifcation to say that a VALID match request came in and the following
-    results were sent back. If Slack is not supported, a message is not sent, but details persisted.
-
-    Args:
-        response_from_matchbox (python requests object): contains the response from matchbox
-        incoming_request (Django request object): The request that came into the view
-        incoming_patient (JSON): The query patient JSON structure from outside MME node that was matched with
-    """
     incoming_patient_id = incoming_patient['patient']['id']
 
     logger.info('{} MME matches found for patient {} from {}'.format(
@@ -141,7 +118,7 @@ matchbox on {insertion_date}, with seqr link
             individual_id=individual.individual_id, project_guid=project.guid, project_name=project.name,
             family_guid=individual.family.guid, family_id=individual.family.family_id,
             insertion_date=submission.created_date.strftime('%b %d, %Y'), host=BASE_URL)
-        emails = [email.strip() for email in submission.contact_href.replace('mailto:', '').split(',')]
+        emails = [contact['email'] for contact in submission.contacts]
         send_emails = emails if len(emails) < 2 else [email for email in emails if email!= MME_DEFAULT_CONTACT_EMAIL]
         all_emails.update(send_emails)
         match_results.append((result_text, send_emails, submission.submission_id))
@@ -163,7 +140,7 @@ matchbox on {insertion_date}, with seqr link
         query_institution=institution,
         number_of_results=len(results),
         incoming_query_genes=', '.join(sorted([gene['geneSymbol'] for gene in genes_by_id.values()])),
-        incoming_query_phenotypes=', '.join(['{} ({})'.format(hpo_id, term) for hpo_id, term in hpo_terms_by_id.items()]),
+        incoming_query_phenotypes=', '.join(['{} ({})'.format(hpo_id, term) for hpo_id, term in sorted(hpo_terms_by_id.items())]),
         incoming_query_contact_url=contact_href,
         incoming_query_contact_name=incoming_patient['patient']['contact'].get('name', '(sorry I was not able to read the information given for name'),
     )

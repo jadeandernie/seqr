@@ -8,7 +8,7 @@ import responses
 from seqr.models import Project, Family, Individual
 from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_project_from_workspace, \
     validate_anvil_vcf, grant_workspace_access, add_workspace_data, get_anvil_vcf_list, get_anvil_igv_options
-from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase, AirflowTestCase, AirtableTest, \
+from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase, AirtableTest, \
     TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME, TEST_WORKSPACE_NAME1, TEST_NO_PROJECT_WORKSPACE_NAME, TEST_NO_PROJECT_WORKSPACE_NAME2
 from seqr.views.utils.terra_api_utils import remove_token, TerraAPIException, TerraRefreshTokenFailedException
 from settings import SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL, SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL
@@ -26,9 +26,25 @@ INVALID_ADDED_SAMPLE_DATA = [['22', 'HG00731', 'HG00731', '', '', 'Female', 'Aff
 
 MISSING_REQUIRED_SAMPLE_DATA = [["21", "HG00736", "", "", "", "", "", "", "", ""]]
 
-LOAD_SAMPLE_DATA_EXTRA_SAMPLE = LOAD_SAMPLE_DATA + [["1", "NA19678", "", "", "", "Male", "Affected", "HP:0011675", "", ""]]
-
 LOAD_SAMPLE_DATA_NO_AFFECTED = LOAD_SAMPLE_DATA + [["22", "HG00736", "", "", "", "Unknown", "Unknown", "", "", ""]]
+
+LOAD_SAMPLE_DATA_ALL_PENDING = LOAD_SAMPLE_DATA + [
+    ["2", "HG00731", "", "HG00732", "HG00733", "Female", "Affected", "HP:0001508", "", ""],
+    ["2", "HG00732", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["2", "HG00733", "", "", "", "Female", "Unaffected", "", "", ""],
+    ["3", "NA20870", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["4", "NA20872", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["5", "NA20874", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["6", "NA20875", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["8", "NA20888", "", "", "", "Female", "Affected", "HP:0001508", "", ""],
+    ["9", "NA20878", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["no_individuals", "HG00736", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+]
+
+LOAD_SAMPLE_DATA_ALL_PENDING_PROJECT_2 = LOAD_SAMPLE_DATA + [
+    ["11", "NA20885", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+    ["12", "NA20888", "", "", "", "Male", "Affected", "HP:0001508", "", ""],
+]
 
 FILE_DATA = [
     '##fileformat=VCFv4.2\n',
@@ -69,9 +85,12 @@ TEMP_PATH = '/temp_path/temp_filename'
 
 MOCK_AIRTABLE_URL = 'http://testairtable'
 
-PROJECT1_SAMPLES = ['HG00735', 'NA19678', 'NA19679', 'NA20870', 'HG00732', 'NA19675_1', 'NA20874', 'HG00733', 'HG00731']
-PROJECT2_SAMPLES = ['NA20885', 'NA19675_1', 'NA19679', 'HG00735']
+PROJECT1_SAMPLES = ['HG00735', 'NA19678', 'NA19679', 'NA20870', 'HG00732', 'NA19675_1', 'NA20874', 'HG00733', 'HG00731',
+                    'HG00736', 'NA20872', 'NA20875', 'NA20888', 'NA20878']
+PROJECT2_SAMPLES = ['NA20885', 'NA19675_1', 'NA19679', 'HG00735', 'NA20888']
 PROJECT2_SAMPLE_DATA = [
+    {'Project_GUID': 'R0003_test', 'Family_GUID': 'F000011_11', 'Family_ID': '11', 'Individual_ID': 'NA20885', 'Paternal_ID': None, 'Maternal_ID': None, 'Sex': 'M'},
+    {'Project_GUID': 'R0003_test', 'Family_GUID': 'F000012_12', 'Family_ID': '12', 'Individual_ID': 'NA20888', 'Paternal_ID': None, 'Maternal_ID': None, 'Sex': 'M'},
     {'Project_GUID': 'R0003_test', 'Family_GUID': 'F000016_1', 'Family_ID': '1', 'Individual_ID': 'NA19675_1', 'Paternal_ID': None, 'Maternal_ID': 'NA19679', 'Sex': 'F'},
     {'Project_GUID': 'R0003_test', 'Family_GUID': 'F000016_1', 'Family_ID': '1', 'Individual_ID': 'NA19679', 'Paternal_ID': None, 'Maternal_ID': None, 'Sex': 'F'},
     {'Project_GUID': 'R0003_test', 'Family_GUID': 'F000017_21', 'Family_ID': '21', 'Individual_ID': 'HG00735', 'Paternal_ID': None, 'Maternal_ID': None, 'Sex': 'U'},
@@ -138,6 +157,8 @@ HEADER_LINE = [b'#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00735\
 DATA_LINES = [
     b'chr1\t10333\t.\tCT\tC\t1895\tPASS\tAC=5;AF=0.045;AN=112;DP=22546\tGT:AD:DP:GQ\t./.:63,0:63\t./.:44,0:44\t./.:44,0:44\n'
 ]
+PIPELINE_RUNNER_HOST = 'http://pipeline-runner:6000'
+PIPELINE_RUNNER_URL = f'{PIPELINE_RUNNER_HOST}/loading_pipeline_enqueue'
 
 
 @mock.patch('seqr.views.utils.permissions_utils.logger')
@@ -235,6 +256,10 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         mock_has_service_account.return_value = False
         response = self.client.post(url, content_type='application/json', data=json.dumps(GRANT_ACCESS_BODY))
         self.assertEqual(response.status_code, 400)
+        mock_logger.info.assert_called_with(
+            f'Added service account for {TEST_WORKSPACE_NAMESPACE}/{TEST_NO_PROJECT_WORKSPACE_NAME}, waiting for access to grant',
+            self.manager_user,
+        )
         self.assertEqual(response.json()['error'], 'Failed to grant seqr service account access to the workspace')
         mock_has_service_account.assert_called_with(self.manager_user, TEST_WORKSPACE_NAMESPACE,
                                                     TEST_NO_PROJECT_WORKSPACE_NAME)
@@ -243,6 +268,7 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
 
         # Test valid operation
         mock_time.reset_mock()
+        mock_logger.reset_mock()
         mock_has_service_account.reset_mock()
         mock_add_service_account.return_value = False
         response = self.client.post(url, content_type='application/json', data=json.dumps(GRANT_ACCESS_BODY))
@@ -252,6 +278,17 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
                                                     TEST_NO_PROJECT_WORKSPACE_NAME)
         mock_has_service_account.assert_not_called()
         mock_time.sleep.assert_not_called()
+        mock_logger.assert_not_called()
+
+        mock_time.reset_mock()
+        mock_add_service_account.return_value = True
+        mock_has_service_account.return_value = True
+        response = self.client.post(url, content_type='application/json', data=json.dumps(GRANT_ACCESS_BODY))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'success': True})
+        mock_add_service_account.assert_called_with(self.manager_user, TEST_WORKSPACE_NAMESPACE, TEST_NO_PROJECT_WORKSPACE_NAME)
+        mock_has_service_account.assert_called_with(self.manager_user, TEST_WORKSPACE_NAMESPACE, TEST_NO_PROJECT_WORKSPACE_NAME)
+        mock_time.sleep.assert_called_with(3)
         mock_logger.info.assert_called_with(
             f'Added service account for {TEST_WORKSPACE_NAMESPACE}/{TEST_NO_PROJECT_WORKSPACE_NAME}, waiting for access to grant',
             self.manager_user,
@@ -289,7 +326,7 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         response = self.client.post(url, content_type='application/json', data=json.dumps({**VALIDATE_VCF_BODY, 'genomeVersion': '37'}))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], [
-            'Project "Empty Project" is awaiting loading. Please wait for loading to complete before requesting additional data loading'
+            'Project "Test Reprocessed Project" is awaiting loading. Please wait for loading to complete and/or delete any families that will not be receiving data before requesting additional data loading'
         ])
 
         # Test bad data path
@@ -301,6 +338,8 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         mock_subprocess.assert_called_with('gsutil ls gs://test_bucket/test_path.vcf.gz', stdout=-1, stderr=-2, shell=True)  # nosec
         mock_file_logger.info.assert_has_calls([
             mock.call('==> gsutil ls gs://test_bucket/test_path.vcf.gz', self.manager_user),
+        ])
+        mock_file_logger.warning.assert_has_calls([
             mock.call('File not found', self.manager_user),
         ])
 
@@ -333,6 +372,7 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
                          ['Invalid VCF file format - file path must end with .vcf or .vcf.gz or .vcf.bgz'])
 
         # test no header line
+        mock_file_logger.reset_mock()
         mock_subprocess.reset_mock()
         mock_subprocess.return_value.wait.return_value = 0
         mock_subprocess.return_value.stdout = BASIC_META + DATA_LINES
@@ -347,7 +387,15 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
         mock_file_logger.info.assert_has_calls([
             mock.call('==> gsutil ls gs://test_bucket/test_path.vcf.gz', self.manager_user),
-            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path.vcf.gz | gunzip -c -q - ', None),
+            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path.vcf.gz | gunzip -c -q - ', self.manager_user),
+        ])
+
+        # test improperly encoded file
+        mock_subprocess.return_value.stdout = [b'\x80']
+        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], [
+            'Unable to read the VCF file. This often occurs when a file is improperly gzipped, or when the file extension does not align with the file type (i.e. a .gz file that is not actually gzipped)',
         ])
 
         # test header errors
@@ -388,26 +436,29 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
         mock_file_logger.info.assert_has_calls([
             mock.call('==> gsutil ls gs://test_bucket/test_path.vcf', self.manager_user),
-            mock.call('==> gsutil cat gs://test_bucket/test_path.vcf', None),
+            mock.call('==> gsutil cat gs://test_bucket/test_path.vcf', self.manager_user),
         ])
 
         # Test a valid sharded VCF file path
         mock_subprocess.reset_mock()
         mock_file_exist_or_list_subproc = mock.MagicMock()
         mock_get_header_subproc = mock.MagicMock()
-        mock_subprocess.side_effect = [mock_file_exist_or_list_subproc, mock_get_header_subproc]
+        mock_subprocess.side_effect = [mock_file_exist_or_list_subproc, mock_file_exist_or_list_subproc, mock_get_header_subproc]
         mock_file_exist_or_list_subproc.communicate.return_value = b'gs://test_bucket/test_path-001.vcf.gz\ngs://test_bucket/test_path-102.vcf.gz\n', None
+        mock_file_exist_or_list_subproc.wait.return_value = 0
         mock_get_header_subproc.stdout = BASIC_META + INFO_META + FORMAT_META + HEADER_LINE + DATA_LINES
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_SHARDED_DATA_PATH))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'fullDataPath': 'gs://test_bucket/test_path-*.vcf.gz', 'vcfSamples': ['HG00735', 'NA19675_1', 'NA19679']})
         mock_subprocess.assert_has_calls([
             mock.call('gsutil ls gs://test_bucket/test_path-*.vcf.gz', stdout=-1, stderr=-1, shell=True),  # nosec
+            mock.call('gsutil ls gs://test_bucket/test_path-001.vcf.gz', stdout=-1, stderr=-2, shell=True),  # nosec
             mock.call('gsutil cat -r 0-65536 gs://test_bucket/test_path-001.vcf.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True),  # nosec
         ])
         mock_file_logger.info.assert_has_calls([
             mock.call('==> gsutil ls gs://test_bucket/test_path-*.vcf.gz', self.manager_user),
-            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path-001.vcf.gz | gunzip -c -q - ', None),
+            mock.call('==> gsutil ls gs://test_bucket/test_path-001.vcf.gz', self.manager_user),
+            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path-001.vcf.gz | gunzip -c -q - ', self.manager_user),
         ])
 
         # Test logged in locally
@@ -433,7 +484,7 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
     def test_get_anvil_vcf_list(self, *args):
         url = reverse(get_anvil_vcf_list, args=[TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME1])
         expected_files = [
-            '/test.vcf', '/data/test.vcf.gz', '/data/test-101.vcf.gz', '/data/test-102.vcf.gz', '/sharded/test-*.vcf.gz',
+            '/test.vcf', '/test.vcf.gz', '/data/test.vcf.gz', '/data/test-101.vcf.gz', '/data/test-102.vcf.gz', '/sharded/test-*.vcf.gz',
         ]
         self._test_get_workspace_files(url, 'dataPathList', expected_files, *args)
 
@@ -442,6 +493,12 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         mock_utils_logger.warning.assert_called_with('User does not have sufficient permissions for workspace {}/{}'
                                                      .format(TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME1),
                                                      self.collaborator_user)
+
+        # Test gsutil error
+        mock_subprocess.return_value.communicate.return_value = b'', b'-bash: gsutil: command not found.\nPlease check the path.\n'
+        response = self.client.get(url, content_type='application/json')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()['error'], 'Run command failed: -bash: gsutil: command not found. Please check the path.')
 
         # Test empty bucket
         mock_subprocess.return_value.communicate.return_value = b'', None
@@ -456,7 +513,7 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         mock_file_logger.reset_mock()
         mock_subprocess.return_value.communicate.return_value = b'\n'.join([
             b'Warning: some packages are out of date',
-            b'gs://test_bucket/test.vcf', b'gs://test_bucket/test.tsv',
+            b'gs://test_bucket/test.vcf', b'gs://test_bucket/test.vcf.gz', b'gs://test_bucket/test.tsv',
             b'gs://test_bucket/test.bam', b'gs://test_bucket/test.bam.bai', b'gs://test_bucket/data/test.cram',
             # path with common prefix but not sharded VCFs
             b'gs://test_bucket/data/test.vcf.gz', b'gs://test_bucket/data/test-101.vcf.gz',
@@ -480,30 +537,17 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
 
 
-class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
+@mock.patch('seqr.utils.add_data_utils.LOADING_DATASETS_DIR', 'gs://seqr-loading-temp/v3.1')
+@mock.patch('reference_data.models.GeneInfo.CURRENT_VERSION', '27')
+class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
     fixtures = ['users', 'social_auth', 'reference_data', '1kg_project']
 
     LOADING_PROJECT_GUID = f'P_{TEST_NO_PROJECT_WORKSPACE_NAME}'
     ADDITIONAL_REQUEST_COUNT = 1
 
-    @staticmethod
-    def _get_dag_variable_overrides(additional_tasks_check):
-        variables = {
-            'project': LoadAnvilDataAPITest.LOADING_PROJECT_GUID,
-            'callset_path': 'test_path.vcf',
-            'sample_source': 'AnVIL',
-            'sample_type': 'WES',
-            'dataset_type': 'SNV_INDEL',
-        }
-        if additional_tasks_check:
-            variables.update({
-                'project': PROJECT1_GUID,
-                'reference_genome': 'GRCh37',
-            })
-        return variables
-
     def setUp(self):
         # Set up api responses
+        responses.add(responses.POST, PIPELINE_RUNNER_URL)
         responses.add(responses.POST, f'{MOCK_AIRTABLE_URL}/appUelDNM3BnWaR7M/AnVIL%20Seqr%20Loading%20Requests%20Tracking', status=400)
         patcher = mock.patch('seqr.views.utils.airtable_utils.AIRTABLE_URL', MOCK_AIRTABLE_URL)
         patcher.start()
@@ -518,16 +562,13 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
         patcher = mock.patch('seqr.views.utils.airtable_utils.logger')
         self.mock_airtable_logger = patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.search.add_data_utils.logger')
+        patcher = mock.patch('seqr.utils.add_data_utils.logger')
         self.mock_add_data_utils_logger = patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.views.apis.anvil_workspace_api.load_uploaded_file')
-        self.mock_load_file = patcher.start()
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA
-        self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.views.utils.export_utils.mv_file_to_gs')
-        self.mock_mv_file = patcher.start()
-        self.mock_mv_file.return_value = True
+        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
+        self.mock_subprocess = patcher.start()
+        self.mock_subprocess.return_value.wait.return_value = 0
+        self.mock_subprocess.return_value.stdout = [json.dumps(LOAD_SAMPLE_DATA).encode('utf-8')]
         self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.views.utils.export_utils.TemporaryDirectory')
         mock_tempdir = patcher.start()
@@ -536,6 +577,9 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
         patcher = mock.patch('seqr.views.utils.export_utils.open')
         self.mock_temp_open = patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = mock.patch('seqr.views.utils.export_utils.gzip.open')
+        self.mock_gzip_temp_open = patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.views.apis.anvil_workspace_api.logger')
         self.mock_api_logger = patcher.start()
         self.addCleanup(patcher.stop)
@@ -543,12 +587,14 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
         self.mock_datetime = patcher.start()
         self.mock_datetime.now.side_effect = lambda: datetime(2021, 3, 1, 0, 0, 0)
         self.addCleanup(patcher.stop)
-        self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.views.apis.anvil_workspace_api.send_html_email')
-        self.mock_send_email = patcher.start()
+        patcher = mock.patch('seqr.utils.add_data_utils.safe_post_to_slack')
+        self.mock_slack = patcher.start()
         self.addCleanup(patcher.stop)
 
         super().setUp()
+
+    def _set_load_file_iter(self, data):
+        self.mock_subprocess.return_value.stdout = [json.dumps(data).encode('utf-8')]
 
     @mock.patch('seqr.models.Family._compute_guid', lambda family: f'F_{family.family_id}_{family.project.workspace_name[17:]}')
     @mock.patch('seqr.models.Project._compute_guid', lambda project: f'P_{project.name}')
@@ -566,8 +612,8 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
 
         # Test valid operation
         responses.calls.reset()
-        self.mock_authorized_session.reset_mock()
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA
+        self._set_load_file_iter(LOAD_SAMPLE_DATA)
+        self.mock_subprocess.return_value.wait.side_effect = [0, 0, 1, 0]
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 200)
         project = Project.objects.get(workspace_namespace=TEST_WORKSPACE_NAMESPACE, workspace_name=TEST_NO_PROJECT_WORKSPACE_NAME)
@@ -592,6 +638,8 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
             'mme_primary_data_owner': 'Test Manager User',
             'mme_contact_url': 'mailto:test_user_manager@test.com',
             'vlm_contact_email': 'test_user_manager@test.com',
+            'restrict_sharing': False,
+            'recovery_email': None,
         })
 
         self._assert_valid_operation(project, test_add_data=False)
@@ -604,7 +652,7 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
                          .format(namespace=TEST_WORKSPACE_NAMESPACE, name=TEST_NO_PROJECT_WORKSPACE_NAME))
 
         url = reverse(create_project_from_workspace, args=[TEST_WORKSPACE_NAMESPACE, TEST_NO_PROJECT_WORKSPACE_NAME2])
-        self._test_mv_file_and_triggering_dag_exception(
+        self._test_mv_file_and_triggering_loading_exception(
             url, {'workspace_namespace': TEST_WORKSPACE_NAMESPACE, 'workspace_name': TEST_NO_PROJECT_WORKSPACE_NAME2},
             NEW_PROJECT_SAMPLE_DATA, 'GRCh38', REQUEST_BODY)
 
@@ -629,50 +677,70 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.json()['error'],
-            'New data cannot be added to this project until the previously requested data is loaded',
+            response.json()['errors'],
+            ['New data cannot be added to this project until the previously requested data is loaded'],
         )
 
         url = reverse(add_workspace_data, args=[PROJECT1_GUID])
-        self._test_errors(url, ['uploadedFileId', 'fullDataPath', 'vcfSamples'], TEST_WORKSPACE_NAME)
+        self._test_errors(url, ['uploadedFileId', 'fullDataPath', 'vcfSamples'], TEST_WORKSPACE_NAME, has_existing_data=True)
 
-        # Test Individual ID exists in an omitted family
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA + INVALID_ADDED_SAMPLE_DATA
+        # Test loading data from empty ped file
+        self._set_load_file_iter(LOAD_SAMPLE_DATA[:1])
+        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
+        self.assertEqual(response.status_code, 400)
+        response_json = response.json()
+        self.assertListEqual(response_json['errors'], ['No samples found in the pedigree file'])
+
+        # Test Individual ID exists in an omitted family and missing loaded samples
+        self._set_load_file_iter(LOAD_SAMPLE_DATA + INVALID_ADDED_SAMPLE_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         response_json = response.json()
         self.assertListEqual(response_json['errors'], [
+            'The following samples are included in the pedigree file but are missing from the VCF: HG00731',
+            'In order to load data for families with previously loaded data, new family samples must be joint called in a single VCF with all previously'
+            ' loaded samples. The following samples were previously loaded in this project but are missing from the VCF:'
+            '\nFamily 1: NA19678',
             'HG00731 already has loaded data and cannot be moved to a different family',
         ])
 
-        # Test missing loaded samples
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA
-        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
+        # Test project still has pending loading
+        self._set_load_file_iter(LOAD_SAMPLE_DATA)
+        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_ADD_DATA))
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()['error'],
-            'In order to load data for families with previously loaded data, new family samples must be joint called in a single VCF with all previously'
-            ' loaded samples. The following samples were previously loaded in this project but are missing from the VCF:'
-            '\nFamily 1: NA19678')
+        self.assertListEqual(response.json()['errors'], [
+            'The following families in this project are awaiting loading from a previous loading request: 2, 3, 4, 5, 6, 8, 9, no_individuals. '
+            'Please wait for loading to complete and/or delete any families that will not be receiving data before requesting additional data loading'
+        ])
 
         # Test a valid operation
-        mock_compute_indiv_guid.return_value = 'I0000020_hg00735'
+        self.mock_subprocess.return_value.wait.side_effect = [0, 0, 1, 0]
+        self._set_load_file_iter(LOAD_SAMPLE_DATA_ALL_PENDING)
+        mock_compute_indiv_guid.side_effect = ['I0000020_hg00735', 'I0000021_hg00736']
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_ADD_DATA))
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
         self.assertSetEqual(set(response_json.keys()), {'familiesByGuid', 'familyNotesByGuid', 'individualsByGuid'})
-        self.assertSetEqual(set(response_json['individualsByGuid'].keys()), {'I0000020_hg00735', 'I000001_na19675', 'I000003_na19679'})
-        self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {'F000001_1', 'F000015_21'})
-        self.assertEqual(list(response_json['familyNotesByGuid'].keys()), ['FAN000004_21_c_a_new_family'])
+        self.assertSetEqual(set(response_json['individualsByGuid'].keys()), {
+            'I0000020_hg00735', 'I000001_na19675', 'I000003_na19679', 'I0000021_hg00736', 'I000007_na20870',
+            'I000009_na20874', 'I000004_hg00731', 'I000010_na20875', 'I000008_na20872', 'I000005_hg00732',
+            'I000006_hg00733', 'I000012_na20877',
+        })
+        self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {
+            'F000001_1', 'F000015_21', 'F000006_6', 'F000013_13', 'F000005_5', 'F000008_8', 'F000004_4',
+            'F000002_2', 'F000003_3',
+        })
+        self.assertEqual(list(response_json['familyNotesByGuid'].keys()), ['FAN000005_21_c_a_new_family'])
 
         self._assert_valid_operation(Project.objects.get(guid=PROJECT1_GUID))
 
+        self._set_load_file_iter(LOAD_SAMPLE_DATA_ALL_PENDING_PROJECT_2)
         mock_compute_indiv_guid.side_effect = ['I0000021_na19675_1', 'I0000022_na19678', 'I0000023_hg00735']
         url = reverse(add_workspace_data, args=[PROJECT2_GUID])
-        self._test_mv_file_and_triggering_dag_exception(
-            url, {'guid': PROJECT2_GUID}, PROJECT2_SAMPLE_DATA, 'GRCh37', REQUEST_BODY_ADD_DATA2)
+        self._test_mv_file_and_triggering_loading_exception(
+            url, {'guid': PROJECT2_GUID}, PROJECT2_SAMPLE_DATA, 'GRCh37', REQUEST_BODY_ADD_DATA2, sample_type='WGS')
 
-    def _test_errors(self, url, fields, workspace_name):
+    def _test_errors(self, url, fields, workspace_name, has_existing_data=False):
         # Test missing required fields in the request body
         response = self.client.post(url, content_type='application/json', data=json.dumps({}))
         self.assertEqual(response.status_code, 400)
@@ -681,42 +749,48 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
         self.mock_get_ws_access_level.assert_called_with(self.manager_user, TEST_WORKSPACE_NAMESPACE, workspace_name)
 
         # test missing columns
-        self.mock_load_file.return_value = [['family', 'individual'], ['1', '2']]
+        self._set_load_file_iter([['family', 'individual'], ['1', '2']])
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         response_json = response.json()
         self.assertListEqual(response_json['errors'], ['Missing required columns: Affected, HPO Terms, Sex'])
 
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA + MISSING_REQUIRED_SAMPLE_DATA
+        self._set_load_file_iter(LOAD_SAMPLE_DATA + MISSING_REQUIRED_SAMPLE_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         response_json = response.json()
         self.assertListEqual(response_json['errors'], ['Missing Sex in row #4', 'Missing Affected in row #4'])
 
-        # test sample data error
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA + BAD_SAMPLE_DATA
+        # test sample data error and missing samples
+        self._set_load_file_iter(LOAD_SAMPLE_DATA + BAD_SAMPLE_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         response_json = response.json()
+        missing_vcf_sample_error = (
+            'In order to load data for families with previously loaded data, new family samples must be joint called in '
+            'a single VCF with all previously loaded samples. The following samples were previously loaded in this '
+            'project but are missing from the VCF:\nFamily 1: NA19678'
+        )
+        missing_row_error = missing_vcf_sample_error if has_existing_data else \
+            'NA19678 is the father of NA19674 but is not included. Make sure to create an additional record with NA19678 as the Individual ID'
         self.assertListEqual(response_json['errors'], [
+            'The following samples are included in the pedigree file but are missing from the VCF: NA19674, NA19681',
+            missing_row_error,
             'NA19674 is affected but has no HPO terms',
             'NA19681 has invalid HPO terms: HP:0100258',
-            'NA19678 is the father of NA19674 but is not included. Make sure to create an additional record with NA19678 as the Individual ID',
         ])
 
-        # test missing samples
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA_EXTRA_SAMPLE
+        self._set_load_file_iter(LOAD_SAMPLE_DATA_NO_AFFECTED)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 400)
         response_json = response.json()
-        self.assertEqual(response_json['errors'],
-                         ['The following samples are included in the pedigree file but are missing from the VCF: NA19678'])
-
-        self.mock_load_file.return_value = LOAD_SAMPLE_DATA_NO_AFFECTED
-        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
-        self.assertEqual(response.status_code, 400)
-        response_json = response.json()
-        self.assertEqual(response_json['errors'],['The following families do not have any affected individuals: 22'])
+        errors = [
+            'The following samples are included in the pedigree file but are missing from the VCF: HG00736',
+            'The following families do not have any affected individuals: 22',
+        ]
+        if has_existing_data:
+            errors.insert(1, missing_vcf_sample_error)
+        self.assertEqual(response_json['errors'],errors)
 
     def _assert_valid_operation(self, project, test_add_data=True):
         genome_version = 'GRCh37' if test_add_data else 'GRCh38'
@@ -731,6 +805,16 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
                 ['R0001_1kg', 'F000001_1', '1', 'NA19675_1', '', 'NA19679', 'F'],
                 ['R0001_1kg', 'F000001_1', '1', 'NA19678', '', '', 'M'],
                 ['R0001_1kg', 'F000001_1', '1', 'NA19679', '', '', 'F'],
+                ['R0001_1kg', 'F000002_2', '2', 'HG00731', 'HG00732', 'HG00733', 'F'],
+                ['R0001_1kg', 'F000002_2', '2', 'HG00732', '', '', 'M'],
+                ['R0001_1kg', 'F000002_2', '2', 'HG00733', '', '', 'F'],
+                ['R0001_1kg', 'F000003_3', '3', 'NA20870', '', '', 'M'],
+                ['R0001_1kg', 'F000004_4', '4', 'NA20872', '', '', 'M'],
+                ['R0001_1kg', 'F000005_5', '5', 'NA20874', '', '', 'M'],
+                ['R0001_1kg', 'F000006_6', '6', 'NA20875', '', '', 'M'],
+                ['R0001_1kg', 'F000008_8', '8', 'NA20888', '', '', 'F'],
+                ['R0001_1kg', 'F000009_9', '9', 'NA20878', '', '', 'M'],
+                ['R0001_1kg', 'F000013_13', 'no_individuals', 'HG00736', '', '', 'M'],
                 ['R0001_1kg', 'F000015_21', '21', 'HG00735', '', '', 'U']
             ]
         else:
@@ -743,51 +827,41 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
             '\n'.join(['\t'.join(row) for row in [header] + rows])
         )
 
+        self.mock_gzip_temp_open.assert_called_with(f'{TEMP_PATH}/db_id_to_gene_id.csv.gz', 'wt')
+        gene_file = self.mock_gzip_temp_open.return_value.__enter__.return_value.write.call_args.args[0].split('\n')
+        self.assertEqual(len(gene_file), 52)
+        self.assertListEqual(gene_file[:3], ['db_id,gene_id', '1,ENSG00000223972', '2,ENSG00000227232'])
+
         gs_path = f'gs://seqr-loading-temp/v3.1/{genome_version}/SNV_INDEL/pedigrees/WES/'
-        self.mock_mv_file.assert_called_with(
-            f'{TEMP_PATH}/*', gs_path, self.manager_user
-        )
+        self.mock_subprocess.assert_has_calls([
+            mock.call('gsutil ls gs://seqr-scratch-temp/temp_upload_test_temp_file_id.json.gz', stdout=-1, stderr=-2, shell=True),  # nosec
+            mock.call().wait(),
+            mock.call('gsutil cat gs://seqr-scratch-temp/temp_upload_test_temp_file_id.json.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True),  # nosec
+            mock.call(f'gsutil mv {TEMP_PATH}/* {gs_path}',  stdout=-1, stderr=-2, shell=True), # nosec
+            mock.call().wait(),
+            mock.call('gsutil ls gs://seqr-loading-temp/v3.1/db_id_to_gene_id.csv.gz', stdout=-1, stderr=-2, shell=True),  # nosec
+            mock.call().wait(),
+            mock.call(f'gsutil mv {TEMP_PATH}/* gs://seqr-loading-temp/v3.1/',  stdout=-1, stderr=-2, shell=True), # nosec
+            mock.call().wait(),
+        ])
 
-        self.assert_airflow_calls(additional_tasks_check=test_add_data)
-
-        # create airtable record
-        self.assertDictEqual(json.loads(responses.calls[-1].request.body), {'records': [{'fields': {
-            'Requester Name': 'Test Manager User',
-            'Requester Email': 'test_user_manager@test.com',
-            'AnVIL Project URL': f'http://testserver/project/{project.guid}/project_page',
-            'Initial Request Date': '2021-03-01',
-            'Number of Samples': 4 if test_add_data else 3,
-            'Status': 'Loading',
-        }}]})
-        self.assert_expected_airtable_headers(-1)
-
-        dag_json = {
+        variables = {
             'projects_to_run': [project.guid],
-            'callset_path': 'gs://test_bucket/test_path.vcf',
-            'sample_type': 'WES',
             'dataset_type': 'SNV_INDEL',
             'reference_genome': genome_version,
-            'sample_source': 'AnVIL',
+            'callset_path': 'gs://test_bucket/test_path.vcf',
+            'sample_type': 'WES',
+            'skip_check_sex_and_relatedness': True,
+            'skip_expect_tdr_metrics': True,
         }
-        sample_summary = '3 new'
-        if test_add_data:
-            sample_summary += ' and 2 re-loaded'
-        slack_message = """
-        *test_user_manager@test.com* requested to load {sample_summary} WES samples ({version}) from AnVIL workspace *my-seqr-billing/{workspace_name}* at 
-        gs://test_bucket/test_path.vcf to seqr project <http://testserver/project/{guid}/project_page|*{project_name}*> (guid: {guid})
+        self._assert_expected_requests(variables, project, num_samples=14 if test_add_data else 3, status='Loading')
+        self.assert_expected_airtable_headers(-1)
 
-        Pedigree files have been uploaded to gs://seqr-loading-temp/v3.1/{version}/SNV_INDEL/pedigrees/WES
-
-        DAG LOADING_PIPELINE is triggered with following:
-        ```{dag}```
-    """.format(guid=project.guid, version=genome_version, workspace_name=project.workspace_name,
-                   project_name=project.name, sample_summary=sample_summary,
-               dag=json.dumps(dag_json, indent=4),
-               )
+        sample_summary = '7 new and 7 re-loaded' if test_add_data else '3 new'
         self.mock_slack.assert_called_with(
-            SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL, slack_message,
+            SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL,
+            self._success_slack_message(project, sample_summary, genome_version, variables),
         )
-        self.mock_send_email.assert_not_called()
 
         # test database models
         family_model_data = list(Family.objects.filter(project=project).values('family_id', 'familynote__note'))
@@ -802,7 +876,7 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
             'family__family_id', 'individual_id', 'mother__individual_id', 'father__individual_id', 'sex', 'affected', 'notes',
             'features',
         ))
-        self.assertEqual(len(individual_model_data), 15 if test_add_data else 3)
+        self.assertEqual(len(individual_model_data), 16 if test_add_data else 3)
         self.assertIn({
             'family__family_id': '21', 'individual_id': 'HG00735', 'mother__individual_id': None,
             'father__individual_id': None, 'sex': 'U', 'affected': 'A', 'notes': None, 'features': [{'id': 'HP:0001508'}],
@@ -817,113 +891,82 @@ class LoadAnvilDataAPITest(AirflowTestCase, AirtableTest):
             'father__individual_id': None, 'sex': 'F', 'affected': 'N', 'notes': 'a individual note', 'features': [],
         }, individual_model_data)
 
-    def _test_mv_file_and_triggering_dag_exception(self, url, workspace, sample_data, genome_version, request_body, num_samples=None):
-        # Test saving ID file exception
-        responses.calls.reset()
-        self.mock_authorized_session.reset_mock()
-        self.mock_mv_file.side_effect = Exception('Something wrong while moving the file.')
-        # Test triggering dag exception
-        self.set_dag_trigger_error_response()
+    def _assert_expected_requests(self, variables, project, num_samples, status):
+        self.assertEqual(len(responses.calls), 2)
 
-        response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
-        self.assertEqual(response.status_code, 200)
-        project = Project.objects.get(**workspace)
+        self.assertEqual(responses.calls[0].request.url, PIPELINE_RUNNER_URL)
+        self.assertDictEqual(json.loads(responses.calls[0].request.body), variables)
 
-        self.mock_add_data_utils_logger.error.assert_called_with(
-            'Uploading Pedigrees failed. Errors: Something wrong while moving the file.',
-            self.manager_user, detail={f'{project.guid}_pedigree': sample_data})
-        self.mock_api_logger.error.assert_not_called()
-        self.mock_airflow_logger.warning.assert_called_with(
-            'LOADING_PIPELINE DAG is running and cannot be triggered again.', self.manager_user)
-        self.mock_airtable_logger.error.assert_called_with(
-            f'Airtable post "AnVIL Seqr Loading Requests Tracking" error: 400 Client Error: Bad Request for url: '
-            f'{MOCK_AIRTABLE_URL}/appUelDNM3BnWaR7M/AnVIL%20Seqr%20Loading%20Requests%20Tracking', self.manager_user, detail=mock.ANY)
-
-        slack_message_on_failure = """ERROR triggering AnVIL loading for project {guid}: LOADING_PIPELINE DAG is running and cannot be triggered again.
-        
-        DAG LOADING_PIPELINE should be triggered with following: 
-        ```{dag}```
-        """.format(
-            guid=project.guid,
-            dag=json.dumps({
-                'projects_to_run': [project.guid],
-                'callset_path': 'gs://test_bucket/test_path.vcf',
-                'sample_type': 'WES',
-                'dataset_type': 'SNV_INDEL',
-                'reference_genome': genome_version,
-                'sample_source': 'AnVIL',
-            }, indent=4),
-        )
-
-        self.mock_slack.assert_any_call(
-            SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL, slack_message_on_failure,
-        )
-        self.mock_send_email.assert_not_called()
-        self.assert_airflow_calls(trigger_error=True)
-
-        # Airtable record created with correct status
-        self.assertDictEqual(json.loads(responses.calls[-1].request.body), {'records': [{'fields': {
+        # create airtable record
+        self.assertDictEqual(json.loads(responses.calls[1].request.body), {'records': [{'fields': {
             'Requester Name': 'Test Manager User',
             'Requester Email': 'test_user_manager@test.com',
             'AnVIL Project URL': f'http://testserver/project/{project.guid}/project_page',
             'Initial Request Date': '2021-03-01',
-            'Number of Samples': num_samples or len(sample_data),
-            'Status': 'Loading Requested',
+            'Number of Samples': num_samples,
+            'Status': status,
         }}]})
 
-    @mock.patch('seqr.views.apis.anvil_workspace_api.ANVIL_LOADING_DELAY_EMAIL_START_DATE', '2021-06-01')
-    @responses.activate
-    def test_create_project_from_workspace_loading_delay_email(self):
-        url = reverse(create_project_from_workspace, args=[TEST_WORKSPACE_NAMESPACE, TEST_NO_PROJECT_WORKSPACE_NAME])
-        self.check_manager_login(url, login_redirect_url='/login/google-oauth2')
+    def _success_slack_message(self, project, sample_summary, genome_version, variables, sample_type='WES'):
+        return f"""*test_user_manager@test.com* requested to load {sample_summary} {sample_type} samples ({genome_version}) from AnVIL workspace *my-seqr-billing/{project.workspace_name}* at gs://test_bucket/test_path.vcf to seqr project <http://testserver/project/{project.guid}/project_page|*{project.name}*> (guid: {project.guid})
 
-        # make sure the task id including the newly created project to avoid infinitely pulling the tasks
-        self.add_dag_tasks_response([
-            'R0006_anvil_no_project_workspace', 'R0007_anvil_no_project_workspace', 'R0008_anvil_no_project_workspace'])
-        self._test_not_yet_email_date(url, REQUEST_BODY)
+Pedigree files have been uploaded to gs://seqr-loading-temp/v3.1/{genome_version}/SNV_INDEL/pedigrees/{sample_type}
 
-        # Remove created project to allow future requests
-        project = Project.objects.get(
-            workspace_namespace=TEST_WORKSPACE_NAMESPACE, workspace_name=TEST_NO_PROJECT_WORKSPACE_NAME)
-        project.workspace_name = None
-        project.save()
+Loading pipeline is triggered with:
+```{json.dumps(variables, indent=4)}```"""
 
-        self._test_after_email_date(url, REQUEST_BODY)
+    def _raise_move_file_error(self, command, *args, **kwargs):
+        mock_subprocess = mock.MagicMock()
+        is_mv_pedigree_command = 'pedigrees' in command
+        mock_subprocess.wait.return_value = 1 if is_mv_pedigree_command else 0
+        mock_subprocess.stdout = [b'Something wrong while moving the file.'] if is_mv_pedigree_command else self.mock_subprocess.return_value.stdout
+        return mock_subprocess
 
-    @mock.patch('seqr.views.apis.anvil_workspace_api.ANVIL_LOADING_DELAY_EMAIL_START_DATE', '2021-06-01')
-    @responses.activate
-    def test_add_workspace_data_loading_delay_email(self):
-        url = reverse(add_workspace_data, args=[PROJECT1_GUID])
-        self.check_manager_login(url, login_redirect_url='/login/google-oauth2')
-
-        # make sure the task id including the newly created project to avoid infinitely pulling the tasks
-        self.add_dag_tasks_response(['R0003_test', 'R0004_test'])
-        self._test_not_yet_email_date(url, REQUEST_BODY_ADD_DATA)
-
-        url = reverse(add_workspace_data, args=[PROJECT2_GUID])
-        self._test_after_email_date(url, REQUEST_BODY_ADD_DATA2)
-
-    def _test_not_yet_email_date(self, url, request_body):
-        self.mock_send_email.side_effect = ValueError('Unable to send email')
-        self.mock_datetime.strptime.side_effect = datetime.strptime
+    def _test_mv_file_and_triggering_loading_exception(self, url, workspace, sample_data, genome_version, request_body, num_samples=None, sample_type='WES'):
+        # Test saving ID file exception
+        responses.calls.reset()
+        self.mock_slack.reset_mock()
+        self.mock_subprocess.side_effect = self._raise_move_file_error
+        # Test triggering loading exception
+        responses.add(responses.POST, PIPELINE_RUNNER_URL, status=409)
 
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 200)
-        self.mock_send_email.assert_not_called()
+        project = Project.objects.get(**workspace)
+        variables = {
+            'projects_to_run': [project.guid],
+            'dataset_type': 'SNV_INDEL',
+            'reference_genome': genome_version,
+            'callset_path': 'gs://test_bucket/test_path.vcf',
+            'sample_type': sample_type,
+            'skip_check_sex_and_relatedness': True,
+            'skip_expect_tdr_metrics': True,
+        }
 
-    def _test_after_email_date(self, url, request_body):
-        self.mock_datetime.now.side_effect = lambda: datetime(2021, 9, 1, 0, 0, 0)
-        response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
-        self.assertEqual(response.status_code, 200)
-        self.mock_send_email.assert_called_with("""Hi Test Manager User,
-            We have received your request to load data to seqr from AnVIL. Currently, the Broad Institute is holding an 
-            internal retreat or closed for the winter break so we may not be able to load data until mid-January 
-            2022. We appreciate your understanding and support of our research team taking 
-            some well-deserved time off and hope you also have a nice break.
-            - The seqr team
-            """, subject='Delay in loading AnVIL in seqr', to=['test_user_manager@test.com'])
-        self.mock_api_logger.error.assert_called_with(
-            'AnVIL loading delay email error: Unable to send email', self.manager_user)
+        self.mock_add_data_utils_logger.error.assert_called_with(
+            'Uploading Pedigrees failed. Errors: Run command failed: Something wrong while moving the file.',
+            self.manager_user, detail={f'{project.guid}_pedigree': sample_data})
+        self.mock_api_logger.error.assert_not_called()
+        self.mock_add_data_utils_logger.warning.assert_called_with(
+            'Error Triggering Loading Pipeline: Loading pipeline is already running. Wait for it to complete and resubmit',
+            self.manager_user, detail=variables,
+        )
+        self.mock_airtable_logger.error.assert_called_with(
+            f'Airtable post "AnVIL Seqr Loading Requests Tracking" error: 400 Client Error: Bad Request for url: '
+            f'{MOCK_AIRTABLE_URL}/appUelDNM3BnWaR7M/AnVIL%20Seqr%20Loading%20Requests%20Tracking', self.manager_user, detail=mock.ANY)
+
+        slack_message_on_failure = f"""ERROR triggering AnVIL loading for project {project.guid}: Loading pipeline is already running. Wait for it to complete and resubmit
+Loading pipeline should be triggered with:
+```{json.dumps(variables, indent=4)}```"""
+        self.mock_slack.assert_has_calls([
+            mock.call(SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL, slack_message_on_failure),
+            mock.call(SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL, self._success_slack_message(
+                project, '3 new' if sample_type == 'WES' else '4 new and 1 re-loaded', genome_version, variables, sample_type,
+            )),
+        ])
+        self._assert_expected_requests(
+            variables, project, num_samples=num_samples or len(sample_data), status='Loading Requested',
+        )
 
 
 class NoGoogleAnvilWorkspaceAPITest(AuthenticationTestCase):

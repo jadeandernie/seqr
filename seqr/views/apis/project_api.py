@@ -1,7 +1,3 @@
-"""
-APIs for updating project metadata, as well as creating or deleting projects
-"""
-
 import json
 from collections import defaultdict
 from django.contrib.postgres.aggregates import ArrayAgg
@@ -11,40 +7,35 @@ from django.db.models.functions import JSONObject, TruncDate
 from django.utils import timezone
 from notifications.models import Notification
 
+from clickhouse_search.models.postgres_dicts import AffectedDict, SexDict, IndividualMetadataDict
 from matchmaker.models import MatchmakerSubmission
-from seqr.models import Project, Family, Individual, Sample, RnaSample, FamilyNote, PhenotypePrioritization, CAN_EDIT
+from seqr.models import Project, Family, Individual, Dataset, RnaSample, FamilyNote, PhenotypePrioritization, CAN_EDIT
+from seqr.utils.file_utils import file_iter
+from seqr.utils.logging_utils import SeqrLogger
 from seqr.views.utils.airtable_utils import AirtableSession, ANVIL_REQUEST_TRACKING_TABLE
+from seqr.views.utils.dataset_utils import post_process_rna_data, load_rna_seq, RNA_DATA_TYPE_CONFIGS
+from seqr.views.utils.file_utils import get_temp_file_path
 from seqr.views.utils.individual_utils import delete_individuals
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case, _to_camel_case
 from seqr.views.utils.json_to_orm_utils import update_project_from_json, create_model_from_json, update_model_from_json
-from seqr.views.utils.orm_to_json_utils import _get_json_for_project, get_json_for_samples, \
+from seqr.views.utils.orm_to_json_utils import _get_json_for_project, get_json_for_datasets, \
     get_json_for_project_collaborator_list, get_json_for_matchmaker_submissions, \
     get_json_for_family_notes, _get_json_for_individuals, get_json_for_project_collaborator_groups, \
-    FAMILY_ADDITIONAL_VALUES, INDIVIDUAL_GUIDS_VALUES
-from seqr.views.utils.permissions_utils import get_project_and_check_permissions, check_project_permissions, \
+    FAMILY_ADDITIONAL_VALUES
+from seqr.views.utils.permissions_utils import get_project_and_check_view_permission, get_project_and_check_edit_permission, \
     check_user_created_object_permissions, pm_required, user_is_pm, login_and_policies_required, \
-    has_workspace_perm, has_case_review_permissions, is_internal_anvil_project
+    is_valid_anvil_workspace, has_case_review_permissions, is_internal_anvil_project, get_project_and_check_pm_permissions, \
+    check_project_pm_permission, user_is_data_manager, external_anvil_project_can_edit, get_project_analysis_groups_and_check_view_permission
 from seqr.views.utils.project_context_utils import families_discovery_tags, \
     add_project_tag_type_counts, get_project_analysis_groups, get_project_locus_lists
 from seqr.views.utils.terra_api_utils import is_anvil_authenticated, anvil_enabled
 from settings import BASE_URL
 
+logger = SeqrLogger(__name__)
+
 
 @pm_required
 def create_project_handler(request):
-    """Create a new project.
-
-    HTTP POST
-        Request body - should contain json params:
-            name: Project name
-            description: Project description
-
-        Response body - will be json with the following structure, representing the ,created project:
-            {
-                'projectsByGuid':  { <projectGuid1> : { ... <project key-value pairs> ... } }
-            }
-
-    """
     request_json = json.loads(request.body)
 
     required_fields = ['name', 'genomeVersion']
@@ -57,7 +48,7 @@ def create_project_handler(request):
         error = 'Field(s) "{}" are required'.format(', '.join(missing_fields))
         return create_json_response({'error': error}, status=400, reason=error)
 
-    if has_anvil and not _is_valid_anvil_workspace(request_json, request.user):
+    if has_anvil and not is_valid_anvil_workspace(request_json, request.user):
         return create_json_response({'error': 'Invalid Workspace'}, status=400)
 
     project_args = {_to_snake_case(field): request_json[field] for field in required_fields}
@@ -69,6 +60,7 @@ def create_project_handler(request):
         project_args['is_mme_enabled'] = False
 
     project = create_model_from_json(Project, project_args, user=request.user)
+    IndividualMetadataDict.reload(request.user)
 
     return create_json_response({
         'projectsByGuid': {
@@ -77,43 +69,12 @@ def create_project_handler(request):
     })
 
 
-def _is_valid_anvil_workspace(request_json, user):
-    namespace = request_json.get('workspaceNamespace')
-    name = request_json.get('workspaceName')
-    return bool(name and namespace and has_workspace_perm(user, CAN_EDIT, namespace, name))
-
-
 @login_and_policies_required
 def update_project_handler(request, project_guid):
-    """Update project metadata - including one or more of these fields: name, description
-
-    Args:
-        project_guid (string): GUID of the project that should be updated
-
-    HTTP POST
-        Request body - should contain the following json structure:
-        {
-            'form' : {
-                'name':  <project name>,
-                'description': <project description>,
-            }
-        }
-
-        Response body - will contain the following structure, representing the updated project:
-            {
-                'projectsByGuid':  {
-                    <projectGuid1> : { ... <project key-value pairs> ... }
-                }
-            }
-
-    """
-
-    project = Project.objects.get(guid=project_guid)
-
-    check_project_permissions(project, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     request_json = json.loads(request.body)
-    updated_fields = None
+    updated_fields = set()
     consent_code = request_json.get('consentCode')
     if consent_code and consent_code != project.consent_code:
         if not user_is_pm(request.user):
@@ -122,6 +83,8 @@ def update_project_handler(request, project_guid):
         updated_fields = {'consent_code'}
 
     update_project_from_json(project, request_json, request.user, allow_unknown_keys=True, updated_fields=updated_fields)
+    if 'restrict_sharing' in updated_fields or 'vlm_contact_email' in updated_fields:
+        IndividualMetadataDict.reload(request.user)
 
     return create_json_response({
         'projectsByGuid': {
@@ -135,10 +98,10 @@ def update_project_workspace(request, project_guid):
     if not is_anvil_authenticated(request.user):
         raise PermissionDenied()
 
-    project = get_project_and_check_permissions(project_guid, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     request_json = json.loads(request.body)
-    if not _is_valid_anvil_workspace(request_json, request.user):
+    if not is_valid_anvil_workspace(request_json, request.user):
         return create_json_response({'error': 'Invalid Workspace'}, status=400)
 
     update_json = {k: request_json[k] for k in ['workspaceNamespace', 'workspaceName']}
@@ -149,12 +112,6 @@ def update_project_workspace(request, project_guid):
 
 @login_and_policies_required
 def delete_project_handler(request, project_guid):
-    """Delete project - request handler.
-
-    Args:
-        project_guid (string): GUID of the project to delete
-    """
-
     _delete_project(project_guid, request.user)
 
     return create_json_response({
@@ -166,17 +123,14 @@ def delete_project_handler(request, project_guid):
 
 @login_and_policies_required
 def project_page_data(request, project_guid):
-    """
-    Returns a JSON object containing basic project information
-
-    Args:
-        project_guid (string): GUID of the Project to retrieve data for.
-    """
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
     update_project_from_json(project, {'last_accessed_date': timezone.now()}, request.user)
     return create_json_response({
         'projectsByGuid': {
-            project.guid: _get_json_for_project(project, request.user, add_project_category_guids_field=False)
+            project.guid: {
+                'partialAccess': bool(analysis_groups),
+                **_get_json_for_project(project, request.user, add_project_category_guids_field=False),
+            }
         },
     })
 
@@ -212,9 +166,10 @@ def _get_formatted_value(value, config, *args):
 
 @login_and_policies_required
 def project_families(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
 
-    family_models = Family.objects.filter(project=project)
+    family_filter = Q(analysisgroup__in=analysis_groups) if analysis_groups else Q(project=project)
+    family_models = Family.objects.filter(family_filter)
     families = family_models.values(
         'id', 'description',
         **{_to_camel_case(field): F(field) for field in [
@@ -250,38 +205,39 @@ def project_families(request, project_guid):
             **{key: family_id in data_families for key, data_families in has_data_families.items()},
         })
 
-    response = families_discovery_tags(families, project=project)
+    response = families_discovery_tags(families, project=None if analysis_groups else project)
     return create_json_response(response)
 
 
 @login_and_policies_required
 def project_overview(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+    family_filter = {'family__analysisgroup__in': analysis_groups} if analysis_groups else {'family__project': project}
 
-    sample_load_counts, sample_models = _sample_load_counts(
-        Sample, project, 'sample_type', 'dataset_type', loadedDate=TruncDate('loaded_date'),
+    datasets = Dataset.objects.filter(
+        Q(**{f'active_individuals__{k}': v for k, v in family_filter.items()}) | Q(**{f'inactive_individuals__{k}': v for k, v in family_filter.items()})
+    ).distinct()
+    datasets_by_guid = {d['datasetGuid']: d for d in get_json_for_datasets(datasets, project_guid)}
+
+    individual_filter = {f'individual__{k}': v for k, v in family_filter.items()}
+    rna_sample_load_counts = RnaSample.objects.filter(
+        **individual_filter,
+    ).values('data_type', loadedDate=TruncDate('created_date')).order_by('loadedDate').annotate(
+        familyCounts=ArrayAgg('individual__family__guid'),
     )
-    rna_sample_load_counts, _ = _sample_load_counts(
-        RnaSample, project, sample_type=Value('RNA'), dataset_type=F('data_type'), loadedDate=TruncDate('created_date'),
-    )
-
-    first_loaded_samples = sample_models.order_by('individual__family', 'loaded_date').distinct('individual__family').values_list('id', flat=True)
-    samples = sample_models.filter(Q(is_active=True) | Q(id__in=first_loaded_samples))
-    samples_by_guid = {s['sampleGuid']: s for s in get_json_for_samples(samples, project_guid=project_guid)}
-
     grouped_sample_counts = defaultdict(list)
-    for s in sample_load_counts + rna_sample_load_counts:
+    for s in rna_sample_load_counts:
         s['familyCounts'] = {f: s['familyCounts'].count(f) for f in s['familyCounts']}
-        grouped_sample_counts[f'{s.pop("sample_type")}__{s.pop("dataset_type")}'].append(s)
+        grouped_sample_counts[s.pop('data_type')].append(s)
 
-    project_json = {'projectGuid': project_guid, 'sampleCounts': grouped_sample_counts}
+    project_json = {'projectGuid': project_guid, 'rnaSampleCounts': grouped_sample_counts}
     response = {
-        'samplesByGuid': samples_by_guid,
+        'datasetsByGuid': datasets_by_guid,
     }
 
-    add_project_tag_type_counts(project, response, project_json=project_json)
+    add_project_tag_type_counts(project, response, project_json=project_json, analysis_groups=analysis_groups)
 
-    project_mme_submissions = MatchmakerSubmission.objects.filter(individual__family__project=project)
+    project_mme_submissions = MatchmakerSubmission.objects.filter(**individual_filter)
 
     project_json = response['projectsByGuid'][project_guid]
     project_json.update({
@@ -292,16 +248,9 @@ def project_overview(request, project_guid):
     return create_json_response(response)
 
 
-def _sample_load_counts(sample_cls, project, *args, **kwargs):
-    sample_models = sample_cls.objects.filter(individual__family__project=project)
-    return list(sample_models.values(*args, **kwargs).order_by('loadedDate').annotate(
-        familyCounts=ArrayAgg('individual__family__guid'))
-    ), sample_models
-
-
 @login_and_policies_required
 def project_collaborators(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_view_permission(project_guid, request.user)
 
     return create_json_response({
         'projectsByGuid': {project_guid: {
@@ -313,10 +262,12 @@ def project_collaborators(request, project_guid):
 
 @login_and_policies_required
 def project_individuals(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+    family_q = Q(family__analysisgroup__in=analysis_groups) if analysis_groups else Q(family__project=project)
+    has_case_review_perm = False if analysis_groups else has_case_review_permissions(project, request.user)
     individuals = _get_json_for_individuals(
-        Individual.objects.filter(family__project=project), user=request.user, project_guid=project_guid,
-        add_hpo_details=True, has_case_review_perm=has_case_review_permissions(project, request.user))
+        Individual.objects.filter(family_q), user=request.user, project_guid=project_guid,
+        add_hpo_details=True, has_case_review_perm=has_case_review_perm)
 
     return create_json_response({
         'individualsByGuid': {i['individualGuid']: i for i in individuals},
@@ -324,27 +275,23 @@ def project_individuals(request, project_guid):
 
 
 @login_and_policies_required
-def project_samples(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
-    samples = Sample.objects.filter(individual__family__project=project)
-
-    return create_json_response({
-        'samplesByGuid': {s['sampleGuid']: s for s in get_json_for_samples(samples, project_guid=project_guid)},
-    })
-
-
-@login_and_policies_required
 def project_analysis_groups(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+
+    project_q = group_q = Q()
+    if analysis_groups:
+        group_q = Q(id__in=analysis_groups)
+    else:
+        project_q = Q(project=project)
 
     return create_json_response({
-        'analysisGroupsByGuid': get_project_analysis_groups([project], project_guid)
+        'analysisGroupsByGuid': get_project_analysis_groups(project_q, group_q, project_guid)
     })
 
 
 @login_and_policies_required
 def project_locus_lists(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, _ = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
     locus_list_json, _ = get_project_locus_lists([project], request.user, include_metadata=True)
 
     return create_json_response({
@@ -355,8 +302,9 @@ def project_locus_lists(request, project_guid):
 
 @login_and_policies_required
 def project_family_notes(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
-    family_notes = get_json_for_family_notes(FamilyNote.objects.filter(family__project=project), is_analyst=False)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+    family_q = Q(family__analysisgroup__in=analysis_groups) if analysis_groups else Q(family__project=project)
+    family_notes = get_json_for_family_notes(FamilyNote.objects.filter(family_q), is_analyst=False)
 
     return create_json_response({
         'familyNotesByGuid': {n['noteGuid']: n for n in family_notes},
@@ -364,9 +312,10 @@ def project_family_notes(request, project_guid):
 
 @login_and_policies_required
 def project_mme_submisssions(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+    family_filter = {'family__analysisgroup__in': analysis_groups} if analysis_groups else {'family__project': project}
     models = MatchmakerSubmission.objects.filter(
-        individual__family__project=project).prefetch_related('matchmakersubmissiongenes_set')
+        **{f'individual__{k}': v for k, v in family_filter.items()}).prefetch_related('matchmakersubmissiongenes_set')
 
     submissions_by_guid = {s['submissionGuid']: s for s in get_json_for_matchmaker_submissions(models)}
 
@@ -374,7 +323,7 @@ def project_mme_submisssions(request, project_guid):
         gene_ids = model.matchmakersubmissiongenes_set.values_list('gene_id', flat=True)
         submissions_by_guid[model.guid]['geneIds'] = list(gene_ids)
 
-    family_notes = get_json_for_family_notes(FamilyNote.objects.filter(family__project=project))
+    family_notes = get_json_for_family_notes(FamilyNote.objects.filter(**family_filter))
 
     return create_json_response({
         'mmeSubmissionsByGuid': submissions_by_guid,
@@ -384,7 +333,7 @@ def project_mme_submisssions(request, project_guid):
 
 @login_and_policies_required
 def project_notifications(request, project_guid, read_status):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_view_permission(project_guid, request.user)
     is_subscriber = project.subscribers.user_set.filter(id=request.user.id).exists()
     if not is_subscriber:
         max_loaded = _project_notifications(
@@ -419,40 +368,83 @@ def _project_notifications(project, notifications):
 
 @login_and_policies_required
 def mark_read_project_notifications(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_view_permission(project_guid, request.user)
     _project_notifications(project, request.user.notifications).mark_all_as_read()
     return create_json_response({'readCount': request.user.notifications.read().count(), 'unreadNotifications': []})
 
 
 @login_and_policies_required
 def subscribe_project_notifications(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_view_permission(project_guid, request.user)
     request.user.groups.add(project.subscribers)
     return create_json_response({'isSubscriber': True})
 
 
 def _delete_project(project_guid, user):
-    """Delete project.
-
-    Args:
-        project_guid (string): GUID of the project to delete
-        user (object): Django ORM model for the user
-    """
     project = Project.objects.get(guid=project_guid)
     check_user_created_object_permissions(project, user)
 
-    individual_guids_to_delete = Individual.objects.filter(
-        family__project__guid=project_guid).values_list('guid', flat=True)
-    delete_individuals(project, individual_guids_to_delete, user)
+    delete_individuals(project, individual_guids=None, user=user)
 
     Family.bulk_delete(user, project=project)
 
     project.delete_model(user, user_can_delete=True)
 
+    AffectedDict.reload(user)
+    SexDict.reload(user)
+    IndividualMetadataDict.reload(user)
+
     if anvil_enabled() and not is_internal_anvil_project(project):
         AirtableSession(user, base=AirtableSession.ANVIL_BASE).safe_patch_records(
             ANVIL_REQUEST_TRACKING_TABLE,
-            record_or_filters={'Status': ['Loading', 'Loading Requested', 'Available in Seqr']},
+            record_or_filters={'Status': ['Loading', 'Loading Requested', 'Loading request canceled', 'Available in Seqr']},
             record_and_filters={'AnVIL Project URL': f'{BASE_URL}project/{project_guid}/project_page'},
             update={'Status': 'Project Deleted'},
         )
+
+
+def is_data_manager_or_external_anvil_edit(project, user):
+    return user_is_data_manager(user) or external_anvil_project_can_edit(project, user)
+
+
+@login_and_policies_required
+def update_project_rna_seq(request, project_guid):
+    get_project_and_check_pm_permissions(
+        project_guid, request.user, override_permission_func=is_data_manager_or_external_anvil_edit,
+    )
+
+    request_json = json.loads(request.body)
+    response_json, status = load_rna_seq(request_json, request.user, project_guid=project_guid)
+    return create_json_response(response_json, status=status)
+
+
+@login_and_policies_required
+def load_rna_seq_sample_data(request, sample_guid):
+    sample = RnaSample.objects.get(guid=sample_guid)
+
+    check_project_pm_permission(
+        sample.individual.family.project, request.user, override_permission_func=is_data_manager_or_external_anvil_edit,
+    )
+
+    logger.info(f'Loading outlier data for {sample.individual.individual_id}', request.user)
+
+    request_json = json.loads(request.body)
+    file_name = request_json['fileName']
+    data_type = request_json['dataType']
+    config = RNA_DATA_TYPE_CONFIGS[data_type]
+
+    file_path = get_temp_file_path(f'{file_name}/{sample_guid}.json.gz')
+    try:
+        data_rows = [json.loads(line) for line in file_iter(file_path, user=request.user)]
+        data_rows, error = post_process_rna_data(sample_guid, data_rows, request.user, **config.get('post_process_kwargs', {}))
+    except FileNotFoundError:
+        logger.error(f'No saved temp data found for {sample_guid} with file prefix {file_name}', request.user)
+        error = 'Data for this sample was not properly parsed. Please re-upload the data'
+    if error:
+        return create_json_response({'error': error}, status=400)
+
+    model_cls = config['model_class']
+    model_cls.bulk_create(request.user, [model_cls(sample=sample, **data) for data in data_rows], batch_size=1000)
+    update_model_from_json(sample, {'is_active': True}, user=request.user)
+
+    return create_json_response({'success': True})

@@ -1,44 +1,15 @@
-"""APIs for setting Project categories"""
 import json
 
-from seqr.models import Project, ProjectCategory
+from seqr.models import ProjectCategory
 from seqr.views.utils.json_to_orm_utils import create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import _get_json_for_project
-from seqr.views.utils.permissions_utils import check_project_permissions, login_and_policies_required
+from seqr.views.utils.permissions_utils import get_project_and_check_edit_permission, login_and_policies_required
 
 
 @login_and_policies_required
 def update_project_categories_handler(request, project_guid):
-    """Update ProjectCategories for the given project.
-
-    Args:
-        project_guid (string): GUID of the project that should be updated
-
-    HTTP POST
-        Request body - should contain the following json structure:
-        {
-            'form' : {
-                'categories': a list of category GUIDs for the categories assigned to the given project
-            }
-        }
-
-        Response body - will contain the following structure, representing the updated project,
-            as well all categories in seqr:
-            {
-                'projectsByGuid':  {
-                    <projectGuid1> : { ... <project key-value pairs> ... }
-                }
-                'projectCategoriesByGuid':  {
-                    <projectCategoryGuid1> : { ... <category key-value pairs> ... }
-                    <projectCategoryGuid2> : { ... <category key-value pairs> ... }
-                }
-            }
-    """
-    project = Project.objects.get(guid=project_guid)
-
-    # check permissions
-    check_project_permissions(project, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     request_json = json.loads(request.body)
 
@@ -58,14 +29,6 @@ def update_project_categories_handler(request, project_guid):
 
 
 def _update_project_categories(project, user, category_guids):
-    """Updates the stored categories for the given project.
-
-    Args:
-        project (project): Django Project model
-        user (User): Django User model
-        category_guids (set): set of category GUIDs to apply to the given project
-    """
-
     category_guids = set(category_guids)
 
     project_categories_by_guid = {}  # keep track of new and removed categories so client can be updated.

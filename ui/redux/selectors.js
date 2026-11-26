@@ -1,7 +1,5 @@
 import { createSelector } from 'reselect'
-import uniqWith from 'lodash/uniqWith'
 
-import { compHetGene } from 'shared/components/panel/variants/VariantUtils'
 import { compareObjects } from 'shared/utils/sortUtils'
 import { NOTE_TAG_NAME, MME_TAG_NAME, FAMILY_FIELD_ANALYSED_BY, CATEGORY_FAMILY_FILTERS } from 'shared/utils/constants'
 
@@ -13,7 +11,7 @@ export const getFamiliesByGuid = state => state.familiesByGuid
 export const getFamilyNotesByGuid = state => state.familyNotesByGuid
 export const getFamilyDetailsLoading = state => state.familyDetailsLoading
 export const getIndividualsByGuid = state => state.individualsByGuid
-export const getSamplesByGuid = state => state.samplesByGuid
+const getDatasetsByGuid = state => state.datasetsByGuid
 export const getIgvSamplesByGuid = state => state.igvSamplesByGuid
 export const getAnalysisGroupsByGuid = state => state.analysisGroupsByGuid
 export const getAnalysisGroupIsLoading = state => state.analysisGroupsLoading.isLoading
@@ -21,11 +19,13 @@ export const getSavedVariantsByGuid = state => state.savedVariantsByGuid
 export const getVariantTagsByGuid = state => state.variantTagsByGuid
 export const getVariantNotesByGuid = state => state.variantNotesByGuid
 export const getVariantFunctionalDataByGuid = state => state.variantFunctionalDataByGuid
+export const getVariantsById = state => state.variantsById
 export const getMmeSubmissionsByGuid = state => state.mmeSubmissionsByGuid
 export const getMmeResultsByGuid = state => state.mmeResultsByGuid
 export const getGenesById = state => state.genesById
 export const getGenesIsLoading = state => state.genesLoading.isLoading
 export const getTranscriptsById = state => state.transcriptsById
+export const getTotalSampleCounts = state => state.totalSampleCounts
 export const getHpoTermsByParent = state => state.hpoTermsByParent
 export const getHpoTermsIsLoading = state => state.hpoTermsLoading.isLoading
 export const getLocusListsByGuid = state => state.locusListsByGuid
@@ -39,21 +39,14 @@ export const getUserOptionsIsLoading = state => state.userOptionsLoading.isLoadi
 export const getVersion = state => state.meta.version
 export const getOauthLoginEnabled = state => !!state.meta.oauthLoginProvider
 export const getOauthLoginProvider = state => state.meta.oauthLoginProvider
-export const getElasticsearchEnabled = state => state.meta.elasticsearchEnabled
+export const getVlmEnabled = state => state.meta.vlmEnabled
 export const getHijakEnabled = state => state.meta.hijakEnabled
 export const getWarningMessages = state => state.meta.warningMessages
-export const getAnvilLoadingDelayDate = state => state.meta.anvilLoadingDelayDate
+export const getLastFeatureUpdate = state => state.meta.lastFeatureUpdate
 export const getSavedVariantsIsLoading = state => state.savedVariantsLoading.isLoading
 export const getSavedVariantsLoadingError = state => state.savedVariantsLoading.errorMessage
 export const getSearchesByHash = state => state.searchesByHash
 export const getSearchFamiliesByHash = state => state.searchFamiliesByHash
-export const getSearchedVariants = state => state.searchedVariants
-export const getSearchedVariantsIsLoading = state => state.searchedVariantsLoading.isLoading
-export const getSearchedVariantsErrorMessage = state => state.searchedVariantsLoading.errorMessage
-export const getSearchGeneBreakdown = state => state.searchGeneBreakdown
-export const getSearchGeneBreakdownLoading = state => state.searchGeneBreakdownLoading.isLoading
-export const getSearchGeneBreakdownErrorMessage = state => state.searchGeneBreakdownLoading.errorMessage
-export const getVariantSearchDisplay = state => state.variantSearchDisplay
 
 const groupEntitiesByProjectGuid = entities => Object.entries(entities).reduce((acc, [entityGuid, entity]) => {
   if (!(entity.projectGuid in acc)) {
@@ -65,7 +58,7 @@ const groupEntitiesByProjectGuid = entities => Object.entries(entities).reduce((
 }, {})
 export const getFamiliesGroupedByProjectGuid = createSelector(getFamiliesByGuid, groupEntitiesByProjectGuid)
 export const getAnalysisGroupsGroupedByProjectGuid = createSelector(getAnalysisGroupsByGuid, groupEntitiesByProjectGuid)
-const getSamplesGroupedByProjectGuid = createSelector(getSamplesByGuid, groupEntitiesByProjectGuid)
+export const getDatasetsGroupedByProjectGuid = createSelector(getDatasetsByGuid, groupEntitiesByProjectGuid)
 
 const groupByFamilyGuid = objs => objs.reduce((acc, o) => {
   if (!acc[o.familyGuid]) {
@@ -74,6 +67,63 @@ const groupByFamilyGuid = objs => objs.reduce((acc, o) => {
   acc[o.familyGuid].push(o)
   return acc
 }, {})
+
+export const getProjectDatasetTypes = createSelector(
+  getProjectsByGuid,
+  getDatasetsByGuid,
+  (projectsByGuid, datasetsByGuid) => {
+    const projectDatasetTypes = Object.values(projectsByGuid).reduce(
+      (acc, { projectGuid, datasetTypes }) => ({ ...acc, [projectGuid]: datasetTypes }), {},
+    )
+    const sampleDatasetTypes = Object.values(datasetsByGuid).reduce(
+      (acc, { projectGuid, datasetType, activeIndividuals }) => {
+        if (projectDatasetTypes[projectGuid] || !(activeIndividuals || []).length) {
+          return acc
+        }
+        if (!acc[projectGuid]) {
+          acc[projectGuid] = new Set()
+        }
+        acc[projectGuid].add(datasetType)
+        return acc
+      }, {},
+    )
+    return { ...projectDatasetTypes, ...sampleDatasetTypes }
+  },
+)
+
+export const getDatasetsByIndividual = createSelector(
+  getDatasetsByGuid,
+  datasetsByGuid => Object.values(datasetsByGuid).sort(
+    (a, b) => a.loadedDate.localeCompare(b.loadedDate),
+  ).reduce((acc, { activeIndividuals, inactiveIndividuals, sampleType, datasetType, loadedDate }) => {
+    const parsedLoadedDate = loadedDate.split('T')[0]
+    const activeIndivs = activeIndividuals || []
+    activeIndivs.forEach((individualGuid) => {
+      if (!acc[individualGuid]) {
+        acc[individualGuid] = []
+      }
+      acc[individualGuid].push({ isActive: true, sampleType, datasetType, loadedDate: parsedLoadedDate })
+    })
+    const inactiveIndivs = inactiveIndividuals || []
+    inactiveIndivs.forEach((individualGuid) => {
+      if (!acc[individualGuid]) {
+        acc[individualGuid] = []
+      }
+      acc[individualGuid].push({ isActive: false, sampleType, datasetType, loadedDate: parsedLoadedDate })
+    })
+    return acc
+  }, {}),
+)
+
+export const getActiveDatasetsByIndividual = createSelector(
+  getDatasetsByIndividual,
+  datasetsByIndividual => Object.entries(datasetsByIndividual).reduce((acc, [individualGuid, datasets]) => ({
+    ...acc,
+    [individualGuid]: datasets.filter(({ isActive }) => isActive).map(
+      ({ sampleType, datasetType, loadedDate }) => ({ sampleType, datasetType, loadedDate, individualGuid }),
+    ),
+  }), {}),
+)
 
 export const getNotesByFamilyType = createSelector(
   getFamilyNotesByGuid,
@@ -140,23 +190,46 @@ export const getSortedIndividualsByFamily = createSelector(
   groupByFamilyGuid,
 )
 
-const getSortedSamples = createSelector(
-  getSamplesByGuid,
-  samplesByGuid => Object.values(samplesByGuid).sort((a, b) => a.loadedDate.localeCompare(b.loadedDate)),
+export const getActiveDatasetsByFamily = createSelector(
+  getFamiliesByGuid,
+  getActiveDatasetsByIndividual,
+  (familiesByGuid, activeDatasetsByIndividual) => Object.entries(familiesByGuid).reduce(
+    (acc, [familyGuid, { individualGuids = [] }]) => ({
+      ...acc,
+      [familyGuid]: individualGuids.reduce(
+        (familyAcc, individualGuid) => [...familyAcc, ...(activeDatasetsByIndividual[individualGuid] || [])], [],
+      ),
+    }),
+    {},
+  ),
 )
 
-export const getSamplesByFamily = createSelector(
-  getSortedSamples,
-  sortedSamples => groupByFamilyGuid(sortedSamples || []),
+export const getMinMaxDatasetsByFamily = createSelector(
+  getFamiliesByGuid,
+  getDatasetsByIndividual,
+  (familiesByGuid, datasetsByIndividual) => Object.entries(familiesByGuid).reduce(
+    (acc, [familyGuid, { individualGuids }]) => ({
+      ...acc,
+      [familyGuid]: individualGuids.reduce(([minLoaded, maxLoaded], individualGuid) => {
+        const individualDatasets = datasetsByIndividual[individualGuid] || []
+        if (individualDatasets.length === 0) {
+          return [minLoaded, maxLoaded]
+        }
+        const endIndex = individualDatasets.length - 1
+        return [
+          minLoaded?.loadedDate < individualDatasets[0]?.loadedDate ? minLoaded : individualDatasets[0],
+          maxLoaded?.loadedDate > individualDatasets[endIndex]?.loadedDate ? maxLoaded : individualDatasets[endIndex],
+        ]
+      }, [null, null]),
+    }),
+    {},
+  ),
 )
 
 export const getHasActiveSearchSampleByFamily = createSelector(
-  getSamplesByFamily,
-  samplesByFamily => Object.entries(samplesByFamily).reduce(
-    (acc, [familyGuid, familySamples]) => ({
-      ...acc,
-      [familyGuid]: familySamples.some(({ isActive }) => isActive),
-    }), {},
+  getActiveDatasetsByFamily,
+  activeDatasetsByFamily => Object.entries(activeDatasetsByFamily).reduce(
+    (acc, [familyGuid, familyDatasets]) => ({ ...acc, [familyGuid]: familyDatasets.length > 0 }), {},
   ),
 )
 
@@ -172,19 +245,6 @@ export const getIGVSamplesByFamilySampleIndividual = createSelector(
     acc[sample.familyGuid][sample.sampleType][sample.individualGuid] = sample
     return acc
   }, {}),
-)
-
-export const getProjectDatasetTypes = createSelector(
-  getProjectsByGuid,
-  getSamplesGroupedByProjectGuid,
-  (projectsByGuid, samplesByProjectGuid) => Object.values(projectsByGuid).reduce(
-    (acc, { projectGuid, datasetTypes }) => ({
-      ...acc,
-      [projectGuid]: datasetTypes || [...new Set(Object.values(samplesByProjectGuid[projectGuid] || {}).filter(
-        ({ isActive }) => isActive,
-      ).map(({ datasetType }) => datasetType))],
-    }), {},
-  ),
 )
 
 // Saved variant selectors
@@ -291,72 +351,6 @@ export const getParsedLocusList = createSelector(
 
     return locusList
   },
-)
-
-const getCurrentSearchHash = (state, ownProps) => ownProps.match.params.searchHash
-
-export const getCurrentSearchParams = createSelector(
-  getSearchesByHash,
-  getCurrentSearchHash,
-  (searchesByHash, searchHash) => searchesByHash[searchHash],
-)
-
-export const getTotalVariantsCount = createSelector(
-  getCurrentSearchParams,
-  searchParams => (searchParams || {}).totalResults,
-)
-
-export const getDisplayVariants = createSelector(
-  (state, ownProps) => ownProps.flattenCompoundHet,
-  getSearchedVariants,
-  (flattenCompoundHet, searchedVariants) => {
-    const shouldFlatten = Object.values(flattenCompoundHet || {}).some(val => val)
-    if (!shouldFlatten) {
-      return searchedVariants || []
-    }
-    const flattened = flattenCompoundHet.all ? searchedVariants.flat() : searchedVariants.reduce((acc, variant) => (
-      (Array.isArray(variant) && flattenCompoundHet[compHetGene(variant)]) ? [...acc, ...variant] : [...acc, variant]
-    ), [])
-    return uniqWith(flattened, (a, b) => !Array.isArray(a) && !Array.isArray(b) && a.variantId === b.variantId)
-  },
-)
-
-export const getSearchedVariantExportConfig = createSelector(
-  getCurrentSearchHash,
-  getCurrentSearchParams,
-  getProjectsByGuid,
-  (searchHash, searchParams, projectsByGuid) => {
-    const { projectFamilies } = searchParams || {}
-    if ((projectFamilies || []).some(
-      ({ projectGuid }) => projectsByGuid[projectGuid]?.isDemo && !projectsByGuid[projectGuid].allUserDemo,
-    )) {
-      // Do not allow downloads for demo projects
-      return null
-    }
-    return [{
-      name: 'Variant Search Results',
-      url: `/api/search/${searchHash}/download`,
-    }]
-  },
-)
-
-export const getSearchGeneBreakdownValues = createSelector(
-  getSearchGeneBreakdown,
-  (state, props) => props.searchHash,
-  getFamiliesByGuid,
-  getGenesById,
-  getSearchesByHash,
-  (geneBreakdowns, searchHash, familiesByGuid, genesById, searchesByHash) => Object.entries(
-    geneBreakdowns[searchHash] || {},
-  ).map(([geneId, counts]) => ({
-    numVariants: counts.total,
-    numFamilies: Object.keys(counts.families).length,
-    families: Object.entries(counts.families).map(
-      ([familyGuid, count]) => ({ family: familiesByGuid[familyGuid], count }),
-    ),
-    search: searchesByHash[searchHash].search,
-    ...(genesById[geneId] || { geneId, geneSymbol: geneId, omimPhenotypes: [], constraints: {} }),
-  })),
 )
 
 const groupDataNestedByChrom = (initialData, groupedData, nestedKey) => groupedData.reduce(
@@ -516,8 +510,8 @@ const isAnalysedBy = (family, analysedByFilter, user, analysedByOptions) => {
 
 export const familyPassesFilters = createSelector(
   getUser,
-  getSamplesByFamily,
-  (user, samplesByFamily) => (
+  getActiveDatasetsByFamily,
+  (user, activeDatasetsByFamily) => (
     family, groupedFilters, analysedByOptions, categoryFilters = CATEGORY_FAMILY_FILTERS,
   ) => {
     if (groupedFilters.analysedBy && !isAnalysedBy(family, groupedFilters.analysedBy, user, analysedByOptions)) {
@@ -527,7 +521,7 @@ export const familyPassesFilters = createSelector(
       const filters = categoryFilters[key]?.filter(
         opt => groupVals.includes(opt.value) && opt.createFilter,
       ).map(opt => opt.createFilter)
-      return !filters?.length || filters.some(filter => filter(family, user, samplesByFamily))
+      return !filters?.length || filters.some(filter => filter(family, user, activeDatasetsByFamily))
     })
   },
 )

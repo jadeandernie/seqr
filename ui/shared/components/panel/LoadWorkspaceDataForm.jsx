@@ -1,11 +1,11 @@
 import React from 'react'
 import PropTypes from 'prop-types'
-import { Header, Segment, Message } from 'semantic-ui-react'
+import { Header, Segment, List } from 'semantic-ui-react'
 import { connect } from 'react-redux'
 
 import {
   FILE_FIELD_NAME,
-  PROJECT_DESC_FIELD,
+  OPTIONAL_PROJECT_FIELDS,
   GENOME_VERSION_FIELD,
   FAMILY_FIELD_ID,
   INDIVIDUAL_FIELD_ID,
@@ -26,7 +26,6 @@ import { validators } from 'shared/components/form/FormHelpers'
 import { BooleanCheckbox, RadioGroup } from 'shared/components/form/Inputs'
 import PhiWarningUploadField from 'shared/components/form/PhiWarningUploadField'
 import { RECEIVE_DATA } from 'redux/utils/reducerUtils'
-import { getAnvilLoadingDelayDate } from 'redux/selectors'
 import AnvilFileSelector from 'shared/components/form/AnvilFileSelector'
 
 export const WORKSPACE_REQUIREMENTS = [
@@ -122,6 +121,42 @@ const AGREE_CHECKBOX = {
   validate: validators.required,
 }
 
+const ACCEPT_POLICIES_CHECKBOX = {
+  name: 'agreeSeqrPolicies',
+  component: BooleanCheckbox,
+  label: (
+    <label>
+      By proceeding with seqr loading, I agree that:
+      <br />
+      <List bulleted relaxed>
+        <List.Item>
+          I have read and agree to seqr’s policies documented in the &nbsp;
+          <a href="/faq" target="_blank" rel="noreferrer">FAQ</a>
+          , &nbsp;
+          <a href="/terms_of_service" target="_blank" rel="noreferrer">Terms of Service</a>
+          , &nbsp;
+          and &nbsp;
+          <a href="/privacy_policy" target="_blank" rel="noreferrer">Privacy Policy</a>
+        </List.Item>
+        <List.Item>
+          The data I will load does not contain duplicate samples (i.e., the sample has not been previously loaded into
+          a different project in seqr), except in cases where the previously loaded sample was an exome and this is now
+          a genome, or vice versa
+        </List.Item>
+        <List.Item>The data I will load does not contain unrelated control samples</List.Item>
+        <List.Item>
+          The information I will provide such as pedigree details and HPO terms is accurate to the best of my knowledge
+        </List.Item>
+        <List.Item>
+          Nonadherence to the stated policies or to guidance provided by the seqr team may result in permanent
+          suspension of access to the platform
+        </List.Item>
+      </List>
+    </label>
+  ),
+  validate: validators.required,
+}
+
 const SAMPLE_TYPE_FIELD = {
   name: 'sampleType',
   label: 'Sample Type',
@@ -157,17 +192,21 @@ const onAddDataFromWorkspace = responseJson => (dispatch) => {
 }
 
 const GRANT_ACCESS_PAGE = {
-  fields: [AGREE_CHECKBOX], formatSubmitUrl: formatWorkspaceUrl('grant_access'),
+  fields: [AGREE_CHECKBOX, ACCEPT_POLICIES_CHECKBOX], formatSubmitUrl: formatWorkspaceUrl('grant_access'),
 }
 const VALIDATE_VCF_PAGE = {
   fields: [DATA_BUCK_FIELD, SAMPLE_TYPE_FIELD, REQUIRED_GENOME_FIELD],
   formatSubmitUrl: formatWorkspaceUrl('validate_vcf'),
 }
 
+const CREATE_PROJECT_FIELDS = OPTIONAL_PROJECT_FIELDS.map(
+  ({ validate, ...field }) => ({ validate: validate && validators.requiredEmail, ...field }),
+)
+
 const NEW_PROJECT_WIZARD_PAGES = [
   GRANT_ACCESS_PAGE,
   VALIDATE_VCF_PAGE,
-  { fields: [PROJECT_DESC_FIELD, UPLOAD_PEDIGREE_FIELD] },
+  { fields: [...CREATE_PROJECT_FIELDS, UPLOAD_PEDIGREE_FIELD] },
 ]
 
 const ADD_DATA_WIZARD_PAGES = [
@@ -176,36 +215,13 @@ const ADD_DATA_WIZARD_PAGES = [
   { fields: [UPLOAD_PEDIGREE_FIELD] },
 ]
 
-const LoadWorkspaceDataForm = React.memo(({ params, onAddData, createProject, anvilLoadingDelayDate, ...props }) => (
+const LoadWorkspaceDataForm = React.memo(({ params, onAddData, createProject, ...props }) => (
   <div>
     <Header size="large" textAlign="center">
       {`Load data to seqr from AnVIL Workspace "${params.workspaceNamespace}/${params.workspaceName}"`}
     </Header>
     <Segment basic textAlign="center">
       <LoadDataVCFMessage isAnvil />
-      {anvilLoadingDelayDate ? (
-        <Message
-          error
-          compact
-          header="Planned Data Loading Delay"
-          content={
-            <span>
-              The Broad Institute is currently having an internal retreat or is closed for winter break.
-              <br />
-              As a result, any requests for data to be loaded as of &nbsp;
-              <b>{new Date(`${anvilLoadingDelayDate}T00:00`).toDateString()}</b>
-              &nbsp; may be delayed until the &nbsp;
-              <b>
-                2nd week of January &nbsp;
-                {new Date(`${anvilLoadingDelayDate}T00:00`).getFullYear() + 1}
-              </b>
-              <br />
-              We appreciate your understanding and support of our research team taking some well-deserved time off
-              and hope you also have a nice break.
-            </span>
-          }
-        />
-      ) : null}
     </Segment>
     <FormWizard
       {...props}
@@ -230,17 +246,12 @@ const LoadWorkspaceDataForm = React.memo(({ params, onAddData, createProject, an
 
 LoadWorkspaceDataForm.propTypes = {
   params: PropTypes.object.isRequired,
-  anvilLoadingDelayDate: PropTypes.string,
   createProject: PropTypes.bool,
   onAddData: PropTypes.func,
 }
-
-const mapStateToProps = state => ({
-  anvilLoadingDelayDate: getAnvilLoadingDelayDate(state),
-})
 
 const mapDispatchToProps = {
   onAddData: onAddDataFromWorkspace,
 }
 
-export default connect(mapStateToProps, mapDispatchToProps)(LoadWorkspaceDataForm)
+export default connect(null, mapDispatchToProps)(LoadWorkspaceDataForm)

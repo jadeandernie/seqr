@@ -2,6 +2,57 @@
 
 ## dev
 
+## 11/24/26
+* Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)
+  * Note that for users with Clickhouse already enabled, this migration will enqueue tasks in the loading pipeline.
+  You may want to monitor the pipeline for any failures and re-trigger them in the event of any failures.
+
+## 3/1/26
+* Deprecate Elasticsearch support
+
+## 2/25/26
+* Switches clickhouse to use new variant tables and deprecate old annotations tables (REQUIRES DB MIGRATION)
+  * Note that for users with Clickhouse already enabled, this requires a manual intervention. 
+See the [seqr-helm documentation](https://github.com/broadinstitute/seqr-helm/blob/main/README.md#migrating-seqr-from-the-annotations-and-transcripts-schema-to-the-reference_data-variants-and-variantsdetails-schema-2xx---3xx-breaking-release)
+for more details.
+
+## 2/11/26
+* Adds eigen reference data to clickhouse (REQUIRES DB MIGRATION)
+  * Note that for users with Clickhouse already enabled, this migration will enqueue tasks in the loading pipeline. 
+  You may want to monitor the pipeline for any failures and re-trigger them in the event of any failures.
+* Updates VLM to the finalized v1 schema
+
+## 1/8/26
+* Moves PanelApp updates from their own manage command into the main `update_all_reference_data` command.
+May require changes to custom cron jobs (REQUIRES DB MIGRATION)
+* Adds variant-level reference data to clickhouse (REQUIRES DB MIGRATION)
+  * Note that for users with Clickhouse already enabled, this migration will enqueue tasks in the loading pipeline. 
+  You may want to monitor the pipeline for any failures and re-trigger them in the event of any failures.
+* Deprecates the "Gene Variant Lookup" page in favor of an "Include External Projects" option on the main search page
+
+## 11/12/25
+* Changes support for RNA loading to accept unprocessed output from RNA callers, and moves loading to the project page. 
+See [documentation](deploy/LOCAL_INSTALL_HELM.md) for more details.
+
+## 10/27/25
+* Adds affected status to the gt stats views/dicts in Clickhouse (REQUIRES DB MIGRATION)
+  * Note that for users with Clickhouse already enabled, this migration will enqueue tasks in the loading pipeline to 
+    refresh existing data. You may want to monitor the pipeline for any failures and re-trigger them in the event of any
+    failures. seqr will contiunue to function normally if these steps are skipped, but in the long run this may result 
+    in inaccurate search results
+
+## 9/18/25
+* Store gene ids on SavedVariant model (REQUIRES DB MIGRATION)
+
+## 9/29/25
+* Deprecate hail backend support
+
+## 8/7/25
+* Deprecate support for lifting existing projects from GRCH37 to GRCh38
+
+## 4/4/25
+* Refactor manage commands to update reference data. May require changes to custom cron jobs. (REQUIRES DB MIGRATION)
+
 ## 11/21/24
 * Migrate "Submit to Clinvar" to generic report flag for Variant Notes (REQUIRES DB MIGRATION)
 

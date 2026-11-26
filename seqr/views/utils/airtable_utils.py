@@ -75,8 +75,10 @@ class AirtableSession(object):
                 and_filters=record_and_filters,
                 page_size=max_records + 1,
             )
-            if not records or len(records) > max_records:
-                error = f'''Unable to identify Airtable "{record_type}" record to update
+        except Exception:
+            records = []
+        if not records or len(records) > max_records:
+            error = f'''Unable to identify Airtable "{record_type}" record to update
 
 Record lookup criteria:
 ```
@@ -88,17 +90,15 @@ Desired update:
 ```
 {json.dumps(update)}
 ```'''
-                safe_post_to_slack(SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL, error)
-                return
+            safe_post_to_slack(SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL, error)
+            return
 
-            self.safe_patch_records_by_id(record_type, list(records.keys()), update, error_detail=error_detail)
-        except Exception as e:
-            logger.error(f'Airtable patch "{record_type}" error: {e}', self._user, detail=error_detail)
+        self.safe_patch_records_by_id(record_type, list(records.keys()), update, error_detail=error_detail)
 
     def safe_patch_records_by_id(self, record_type, record_ids, update, error_detail=None):
         self._safe_bulk_update_records(
             'patch', record_type, [{'id': record_id, 'fields': update} for record_id in sorted(record_ids)],
-            error_detail=error_detail or {'record_ids': record_ids, 'update': update},
+            error_detail=error_detail or {'record_ids': sorted(record_ids), 'update': update},
         )
 
     def _safe_bulk_update_records(self, update_type, record_type, records, error_detail=None):
@@ -171,15 +171,22 @@ Desired update:
             records_by_id.update(self._get_samples_for_id_field(missing, 'SeqrCollaboratorSampleID', fields))
         return records_by_id
 
-    def get_samples_for_matched_pdos(self, pdo_statuses, pdo_fields=None, project_guid=None, required_sample_field=None):
+    def get_samples_for_matched_pdos(self, pdo_statuses, pdo_fields=None, sample_fields=None, additional_sample_filters=None, project_guid=None, required_sample_fields=None, allow_invalid_pdos=False):
         pdo_fields = pdo_fields or []
+        additional_and_filters = [
+            f'LEN({{{required_sample_field}}})>0' for required_sample_field in required_sample_fields or []
+        ]
+        for key, values in (additional_sample_filters or {}).items():
+            sample_filters = [f"{key}='{value}'" for value in values]
+            additional_and_filters.append(f'OR({",".join(sample_filters)})')
         sample_records = self.fetch_records(
             'Samples', fields=[
                 'CollaboratorSampleID', 'SeqrCollaboratorSampleID', 'PDOStatus', 'SeqrProject', *pdo_fields,
+                *(sample_fields or []), *(additional_sample_filters or {}).keys(),
             ],
             or_filters={'PDOStatus': pdo_statuses},
             and_filters={'SeqrProject': f'{BASE_URL}project/{project_guid}/project_page'} if project_guid else {},
-            additional_and_filters=[f'LEN({{{required_sample_field}}})>0'] if required_sample_field else None,
+            additional_and_filters=additional_and_filters,
             # Filter for array contains value instead of exact match
             filter_query_template="SEARCH('{value}',ARRAYJOIN({key},';'))",
         )
@@ -191,13 +198,16 @@ Desired update:
                 for url in sample.get('SeqrProject', []) if url
             ]
             if any(pm is None for pm in project_matches) or (len(project_matches) < len(sample['PDOStatus']) and len(project_matches) != 1):
-                invalid_pdo_samples.append(sample_id)
-                continue
+                if allow_invalid_pdos:
+                    project_matches = [None]
+                else:
+                    invalid_pdo_samples.append(sample_id)
+                    continue
 
-            project_guids = [match.group(1) for match in project_matches]
+            project_guids = [match and match.group(1) for match in project_matches]
             pdos = [{
                 'project_guid': project_guids[i] if len(project_guids) > 1 else project_guids[0],
-                **{field: sample[field][i] for field in pdo_fields}
+                **{field: sample[field][i] if len(sample[field]) == len(sample['PDOStatus']) else None for field in pdo_fields}
             } for i, status in enumerate(sample['PDOStatus']) if status in pdo_statuses]
             if project_guid:
                 pdos = [pdo for pdo in pdos if pdo['project_guid'] == project_guid]
@@ -210,4 +220,4 @@ Desired update:
             samples = ', '.join(sorted(invalid_pdo_samples))
             raise ValueError(f'The following samples are associated with misconfigured PDOs in Airtable: {samples}')
 
-        return {record_id: sample for record_id, sample in sample_records.items() if sample['pdos']}
+        return {record_id: sample for record_id, sample in sample_records.items() if sample.get('pdos')}

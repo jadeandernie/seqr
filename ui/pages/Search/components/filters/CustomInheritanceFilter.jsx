@@ -2,12 +2,13 @@ import React from 'react'
 import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import { FormSpy } from 'react-final-form'
-import { Table, Header, Popup, Loader } from 'semantic-ui-react'
+import { Table, Header, Popup, Loader, Divider } from 'semantic-ui-react'
 
 import { loadFamilyDetails } from 'redux/rootReducer'
-import { getFamiliesByGuid, getIndividualsByGuid, getFamilyDetailsLoading } from 'redux/selectors'
+import { getFamiliesByGuid, getIndividualsByGuid, getFamilyDetailsLoading, getActiveDatasetsByIndividual } from 'redux/selectors'
 import DataLoader from 'shared/components/DataLoader'
-import { Select } from 'shared/components/form/Inputs'
+import { helpLabel } from 'shared/components/form/FormHelpers'
+import { Select, InlineToggle } from 'shared/components/form/Inputs'
 import PedigreeIcon from 'shared/components/icons/PedigreeIcon'
 import PedigreeImagePanel from 'shared/components/panel/view-pedigree-image/PedigreeImagePanel'
 import { AFFECTED, UNAFFECTED, AFFECTED_OPTIONS } from 'shared/utils/constants'
@@ -18,7 +19,9 @@ const CUSTOM_FILTERS = [
   { filterField: 'genotype', options: NUM_ALT_OPTIONS, placeholder: 'Allele count' },
 ]
 
-const CustomInheritanceFilterContent = React.memo(({ value, onChange, family, individualsByGuid }) => {
+const CustomInheritanceFilterContent = React.memo((
+  { value, onChange, family, individualsByGuid, activeDatasetsByIndividual },
+) => {
   const individuals = (family.individualGuids || []).map(individualGuid => individualsByGuid[individualGuid]).filter(
     individual => individual,
   )
@@ -69,7 +72,7 @@ const CustomInheritanceFilterContent = React.memo(({ value, onChange, family, in
                 <Table.Cell key={filterField}>
                   <Select
                     {...fieldProps}
-                    disabled={!individual.sampleGuids.length}
+                    disabled={!activeDatasetsByIndividual[individual.individualGuid]?.length}
                     value={individualFilters[individual.individualGuid][filterField]}
                     onChange={handleChange(individual, filterField)}
                   />
@@ -83,7 +86,7 @@ const CustomInheritanceFilterContent = React.memo(({ value, onChange, family, in
               ) : <Table.Cell collapsing />}
             </Table.Row>
           )
-          return individual.sampleGuids.length ? row : (
+          return activeDatasetsByIndividual[individual.individualGuid]?.length ? row : (
             <Popup
               key={individual.individualGuid}
               trigger={row}
@@ -101,22 +104,52 @@ CustomInheritanceFilterContent.propTypes = {
   onChange: PropTypes.func,
   family: PropTypes.object,
   individualsByGuid: PropTypes.object,
+  activeDatasetsByIndividual: PropTypes.object,
 }
 
-const CustomInheritanceFilter = React.memo(({ load, loading, family, ...props }) => {
-  if (!family) {
-    return <Header disabled content="Custom inheritance search is disabled for multi-family searches" />
-  }
-  return (
+const NO_CALL_FIELD = 'allowNoCall'
+
+const handleChange = (onChange, value) => update => onChange({ ...value, [NO_CALL_FIELD]: update })
+
+const NoCallToggle = ({ name, value, onChange, ...props }) => (
+  <InlineToggle
+    name={`${name}.${NO_CALL_FIELD}`}
+    value={value && value[NO_CALL_FIELD]}
+    onChange={handleChange(onChange, value)}
+    label={helpLabel(
+      'Allow No-Call for Unaffected Individuals',
+      'By default, inheritance-based searches require all individuals to be called for a given variant. This overrides that requirement for unaffected individuals, allowing variants where unaffected individuals are no-call to be included in results.',
+    )}
+    color="grey"
+    {...props}
+  />
+)
+
+NoCallToggle.propTypes = {
+  name: PropTypes.string.isRequired,
+  value: PropTypes.object,
+  onChange: PropTypes.func.isRequired,
+}
+
+const CustomInheritanceFilter = React.memo(({ load, loading, family, individualsByGuid, ...props }) => {
+  const content = family ? (
     <DataLoader load={load} contentId={family.familyGuid} content={family && family.detailsLoaded} loading={loading}>
-      <CustomInheritanceFilterContent family={family} {...props} />
+      <CustomInheritanceFilterContent family={family} individualsByGuid={individualsByGuid} {...props} />
     </DataLoader>
+  ) : <Header disabled content="Custom inheritance search is disabled for multi-family searches" />
+  return (
+    <div>
+      {content}
+      <Divider />
+      <NoCallToggle {...props} />
+    </div>
   )
 })
 
 const mapStateToProps = (state, ownProps) => ({
   family: getFamiliesByGuid(state)[ownProps.familyGuid],
   individualsByGuid: getIndividualsByGuid(state),
+  activeDatasetsByIndividual: getActiveDatasetsByIndividual(state),
   loading: !!getFamilyDetailsLoading(state)[ownProps.familyGuid],
 })
 
@@ -127,6 +160,7 @@ const mapDispatchToProps = {
 CustomInheritanceFilter.propTypes = {
   load: PropTypes.func,
   family: PropTypes.object,
+  individualsByGuid: PropTypes.object,
   loading: PropTypes.bool,
 }
 

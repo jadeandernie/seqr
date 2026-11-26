@@ -1,4 +1,3 @@
-from abc import abstractmethod
 import uuid
 import json
 import random
@@ -7,14 +6,18 @@ from django.contrib.auth.models import User, Group
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
-from django.db.models import base, options, ForeignKey, JSONField, prefetch_related_objects
+from django.db.models import base, options, prefetch_related_objects
 from django.utils import timezone
 from django.utils.text import slugify as __slugify
 
 from guardian.shortcuts import assign_perm
 
+from seqr.utils.constants import SEX_MALE, SEX_FEMALE, SEX_UNKNOWN, FEMALE_ANEUPLOIDIES, MALE_ANEUPLOIDIES, \
+    FEMALE_SEXES, MALE_SEXES, AFFECTED_STATUS_AFFECTED, AFFECTED_STATUS_UNAFFECTED, AFFECTED_STATUS_UNKNOWN, \
+    SAMPLE_TYPE_WES, SAMPLE_TYPE_WGS, DATASET_TYPE_VARIANT_CALLS, DATASET_TYPE_SV_CALLS, DATASET_TYPE_MITO_CALLS
 from seqr.utils.logging_utils import log_model_update, log_model_bulk_update, SeqrLogger
 from seqr.utils.xpos_utils import get_chrom_pos
+from seqr.views.utils.json_utils import DjangoJSONEncoderWithSets
 from seqr.views.utils.terra_api_utils import anvil_enabled
 from reference_data.models import GENOME_VERSION_GRCh37, GENOME_VERSION_CHOICES
 from settings import MME_DEFAULT_CONTACT_NAME, MME_DEFAULT_CONTACT_HREF, MME_DEFAULT_CONTACT_INSTITUTION, \
@@ -85,16 +88,12 @@ class ModelWithGUID(models.Model, metaclass=CustomModelBase):
         return self.guid
 
     def __str__(self):
-        """Magix function for str() and %s."""
         return self.__unicode__()
 
     def json(self):
-        """Utility method that returns a json {field-name: value-as-string} mapping for all fields."""
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
     def save(self, *args, **kwargs):
-        """Create a GUID at object creation time."""
-
         being_created = not self.pk
         current_time = timezone.now()
 
@@ -113,11 +112,11 @@ class ModelWithGUID(models.Model, metaclass=CustomModelBase):
             self.created_date = kwargs.pop('created_date', current_time)
             super(ModelWithGUID, self).save(*args, **kwargs)
 
+            # Create a GUID at object creation time
             self.guid = self._compute_guid()
             super(ModelWithGUID, self).save()
 
     def delete_model(self, user, user_can_delete=False):
-        """Helper delete method that logs the deletion"""
         if not (user_can_delete or self.created_by == user):
             raise PermissionDenied('User does not have permission to delete this {}'.format(type(self).__name__))
         self.delete()
@@ -125,7 +124,6 @@ class ModelWithGUID(models.Model, metaclass=CustomModelBase):
 
     @classmethod
     def bulk_create(cls, user, new_models, **kwargs):
-        """Helper bulk create method that logs the creation"""
         for model in new_models:
             model.created_by = user
             model.created_date = timezone.now()
@@ -136,7 +134,6 @@ class ModelWithGUID(models.Model, metaclass=CustomModelBase):
 
     @classmethod
     def bulk_update(cls, user, update_json, queryset=None, **filter_kwargs):
-        """Helper bulk update method that logs the update"""
         if queryset is None:
             queryset = cls.objects.filter(**filter_kwargs).exclude(**update_json)
 
@@ -149,13 +146,11 @@ class ModelWithGUID(models.Model, metaclass=CustomModelBase):
 
     @classmethod
     def bulk_update_models(cls, user, models, fields):
-        """Helper bulk update method that logs the update and allows different update data for each model"""
         log_model_bulk_update(logger, models, user, 'update', update_fields=fields)
         cls.objects.bulk_update(models, fields)
 
     @classmethod
     def bulk_delete(cls, user, queryset=None, **filter_kwargs):
-        """Helper bulk delete method that logs the deletion"""
         if queryset is None:
             queryset = cls.objects.filter(**filter_kwargs)
         log_model_bulk_update(logger, queryset, user, 'delete')
@@ -199,7 +194,9 @@ class Project(ModelWithGUID):
     mme_contact_institution = models.TextField(null=True, blank=True, default=MME_DEFAULT_CONTACT_INSTITUTION)
 
     vlm_contact_email = models.TextField(null=True, blank=True, default=VLM_DEFAULT_CONTACT_EMAIL)
+    recovery_email = models.TextField(null=True, blank=True)
 
+    restrict_sharing = models.BooleanField(default=False)
     has_case_review = models.BooleanField(default=False)
     enable_hgmd = models.BooleanField(default=False)
     all_user_demo = models.BooleanField(default=False)
@@ -217,10 +214,6 @@ class Project(ModelWithGUID):
     GUID_PRECISION = 4
 
     def save(self, *args, **kwargs):
-        """Override the save method and create user permissions groups + add the created_by user.
-
-        This could be done with signals, but seems cleaner to do it this way.
-        """
         being_created = not self.pk
         anvil_disabled = not anvil_enabled()
 
@@ -247,8 +240,6 @@ class Project(ModelWithGUID):
             user.groups.add(*[getattr(self, group) for group in groups])
 
     def delete(self, *args, **kwargs):
-        """Override the delete method to also delete the project-specific user groups"""
-
         super(Project, self).delete(*args, **kwargs)
 
         if self.can_edit_group:
@@ -265,7 +256,7 @@ class Project(ModelWithGUID):
             'name', 'description', 'created_date', 'last_modified_date', 'genome_version', 'mme_contact_institution',
             'last_accessed_date', 'is_mme_enabled', 'mme_primary_data_owner', 'mme_contact_url', 'guid', 'consent_code',
             'workspace_namespace', 'workspace_name', 'has_case_review', 'enable_hgmd', 'is_demo', 'all_user_demo',
-            'vlm_contact_email',
+            'vlm_contact_email', 'recovery_email', 'restrict_sharing',
         ]
 
 
@@ -286,6 +277,7 @@ class Family(ModelWithGUID):
     ANALYSIS_STATUS_PARTIAL_SOLVE = 'P'
     ANALYSIS_STATUS_PROBABLE_SOLVE = 'PB'
     ANALYSIS_STATUS_WAITING_FOR_DATA='Q'
+    ANALYSIS_STATUS_LOADING_FAILED = 'F'
     SOLVED_ANALYSIS_STATUS_CHOICES = (
         ('S', 'Solved'),
         ('S_kgfp', 'Solved - known gene for phenotype'),
@@ -308,6 +300,7 @@ class Family(ModelWithGUID):
         (ANALYSIS_STATUS_PARTIAL_SOLVE, 'Partial Solve - Analysis in Progress'),
         (ANALYSIS_STATUS_ANALYSIS_IN_PROGRESS, 'Analysis in Progress'),
         (ANALYSIS_STATUS_WAITING_FOR_DATA, 'Waiting for data'),
+        (ANALYSIS_STATUS_LOADING_FAILED, 'Loading failed'),
         ('N', 'No data expected'),
     )
     SOLVED_ANALYSIS_STATUSES = [status for status, _ in SOLVED_ANALYSIS_STATUS_CHOICES]
@@ -339,7 +332,7 @@ class Family(ModelWithGUID):
     description = models.TextField(null=True, blank=True)
 
     pedigree_image = models.ImageField(null=True, blank=True, upload_to='pedigree_images')
-    pedigree_dataset = JSONField(null=True, blank=True)
+    pedigree_dataset = models.JSONField(null=True, blank=True)
 
     assigned_analyst = models.ForeignKey(User, null=True, on_delete=models.SET_NULL,
                                     related_name='assigned_families')  # type: ForeignKey
@@ -444,13 +437,13 @@ class YearField(models.PositiveSmallIntegerField):
 
 
 class Individual(ModelWithGUID):
-    SEX_MALE = 'M'
-    SEX_FEMALE = 'F'
-    SEX_UNKNOWN = 'U'
-    FEMALE_ANEUPLOIDIES = ['XXX', 'X0']
-    MALE_ANEUPLOIDIES = ['XXY', 'XYY']
-    FEMALE_SEXES = [SEX_FEMALE] + FEMALE_ANEUPLOIDIES
-    MALE_SEXES = [SEX_MALE] + MALE_ANEUPLOIDIES
+    SEX_MALE = SEX_MALE
+    SEX_FEMALE = SEX_FEMALE
+    SEX_UNKNOWN = SEX_UNKNOWN
+    FEMALE_ANEUPLOIDIES = FEMALE_ANEUPLOIDIES
+    MALE_ANEUPLOIDIES = MALE_ANEUPLOIDIES
+    FEMALE_SEXES = FEMALE_SEXES
+    MALE_SEXES = MALE_SEXES
     SEX_CHOICES = (
         (SEX_MALE, 'Male'),
         ('F', 'Female'),
@@ -459,9 +452,9 @@ class Individual(ModelWithGUID):
         *[(sex, sex) for sex in FEMALE_ANEUPLOIDIES],
     )
 
-    AFFECTED_STATUS_AFFECTED = 'A'
-    AFFECTED_STATUS_UNAFFECTED = 'N'
-    AFFECTED_STATUS_UNKNOWN = 'U'
+    AFFECTED_STATUS_AFFECTED = AFFECTED_STATUS_AFFECTED
+    AFFECTED_STATUS_UNAFFECTED = AFFECTED_STATUS_UNAFFECTED
+    AFFECTED_STATUS_UNKNOWN = AFFECTED_STATUS_UNKNOWN
     AFFECTED_STATUS_CHOICES = (
         (AFFECTED_STATUS_AFFECTED, 'Affected'),
         (AFFECTED_STATUS_UNAFFECTED, 'Unaffected'),
@@ -612,7 +605,6 @@ class Individual(ModelWithGUID):
     sex = models.CharField(max_length=3, choices=SEX_CHOICES, default='U')
     affected = models.CharField(max_length=1, choices=AFFECTED_STATUS_CHOICES, default=AFFECTED_STATUS_UNKNOWN)
 
-    # TODO once sample and individual ids are fully decoupled no reason to maintain this field
     display_name = models.TextField(default="", blank=True)
 
     notes = models.TextField(blank=True, null=True)
@@ -638,19 +630,19 @@ class Individual(ModelWithGUID):
     expected_inheritance = ArrayField(models.CharField(max_length=1, choices=INHERITANCE_CHOICES), null=True)
 
     # features are objects with an id field for HPO id and optional notes and qualifiers fields
-    features = JSONField(null=True)
-    absent_features = JSONField(null=True)
+    features = models.JSONField(null=True)
+    absent_features = models.JSONField(null=True)
     # nonstandard_features are objects with an id field for a free text label and optional
     # notes, qualifiers, and categories fields
-    nonstandard_features = JSONField(null=True)
-    absent_nonstandard_features = JSONField(null=True)
+    nonstandard_features = models.JSONField(null=True)
+    absent_nonstandard_features = models.JSONField(null=True)
 
     # Disorders are a list of MIM IDs
     disorders = ArrayField(models.CharField(max_length=10), null=True)
 
     # genes are objects with required key gene (may be blank) and optional key comments
-    candidate_genes = JSONField(null=True)
-    rejected_genes = JSONField(null=True)
+    candidate_genes = models.JSONField(null=True)
+    rejected_genes = models.JSONField(null=True)
 
     ar_fertility_meds = models.BooleanField(null=True)
     ar_iui = models.BooleanField(null=True)
@@ -660,10 +652,10 @@ class Individual(ModelWithGUID):
     ar_donoregg = models.BooleanField(null=True)
     ar_donorsperm = models.BooleanField(null=True)
 
-    filter_flags = JSONField(null=True)
-    pop_platform_filters = JSONField(null=True)
+    filter_flags = models.JSONField(null=True)
+    pop_platform_filters = models.JSONField(null=True)
     population = models.CharField(max_length=5, null=True)
-    sv_flags = JSONField(null=True)
+    sv_flags = models.JSONField(null=True)
 
     def __unicode__(self):
         return self.individual_id.strip()
@@ -691,25 +683,18 @@ class Individual(ModelWithGUID):
         audit_fields = {'case_review_status'}
 
 
-class Sample(ModelWithGUID):
-    """This model represents a single data type (eg. Variant Calls, or SV Calls) that's generated from a single
-    biological sample (eg. WES, WGS).
-
-    It stores metadata on both the dataset (fields: dataset_type, loaded_date, etc.) and the underlying sample
-    (fields: sample_type, sample_id etc.)
-    """
-
-    SAMPLE_TYPE_WES = 'WES'
-    SAMPLE_TYPE_WGS = 'WGS'
+class Dataset(ModelWithGUID):
+    SAMPLE_TYPE_WES = SAMPLE_TYPE_WES
+    SAMPLE_TYPE_WGS = SAMPLE_TYPE_WGS
     SAMPLE_TYPE_CHOICES = (
         (SAMPLE_TYPE_WES, 'Exome'),
         (SAMPLE_TYPE_WGS, 'Whole Genome'),
     )
     SAMPLE_TYPE_LOOKUP = dict(SAMPLE_TYPE_CHOICES)
 
-    DATASET_TYPE_VARIANT_CALLS = 'SNV_INDEL'
-    DATASET_TYPE_SV_CALLS = 'SV'
-    DATASET_TYPE_MITO_CALLS = 'MITO'
+    DATASET_TYPE_VARIANT_CALLS = DATASET_TYPE_VARIANT_CALLS
+    DATASET_TYPE_SV_CALLS = DATASET_TYPE_SV_CALLS
+    DATASET_TYPE_MITO_CALLS = DATASET_TYPE_MITO_CALLS
     DATASET_TYPE_CHOICES = (
         (DATASET_TYPE_VARIANT_CALLS, 'Variant Calls'),
         (DATASET_TYPE_SV_CALLS, 'SV Calls'),
@@ -717,31 +702,22 @@ class Sample(ModelWithGUID):
     )
     DATASET_TYPE_LOOKUP = dict(DATASET_TYPE_CHOICES)
 
-    individual = models.ForeignKey('Individual', on_delete=models.PROTECT)
+    active_individuals = models.ManyToManyField('Individual', related_name='active_datasets')
+    inactive_individuals = models.ManyToManyField('Individual', related_name='inactive_datasets')
 
     sample_type = models.CharField(max_length=10, choices=SAMPLE_TYPE_CHOICES)
     dataset_type = models.CharField(max_length=13, choices=DATASET_TYPE_CHOICES)
 
-    # The sample's id in the underlying dataset (eg. the VCF Id for variant callsets).
-    sample_id = models.TextField(db_index=True)
-
-    elasticsearch_index = models.TextField(db_index=True, null=True)
-    data_source = models.TextField(null=True)
-
-    # sample status
-    is_active = models.BooleanField(default=False)
+    data_source = models.TextField()
     loaded_date = models.DateTimeField()
 
     def __unicode__(self):
-        return self.sample_id.strip()
+        return f'{self.dataset_type}_{self.sample_type}_{self.loaded_date}'
 
-    GUID_PREFIX = 'S'
-    GUID_PRECISION = 10
+    GUID_PREFIX = 'D'
 
     class Meta:
-       json_fields = [
-           'guid', 'created_date', 'sample_type', 'dataset_type', 'sample_id', 'is_active', 'loaded_date',
-       ]
+       json_fields = ['guid', 'sample_type', 'dataset_type', 'loaded_date']
 
 
 class RnaSample(ModelWithGUID):
@@ -763,12 +739,21 @@ class RnaSample(ModelWithGUID):
         ('L', 'lymphocytes'),
         ('A', 'airway_cultured_epithelium'),
         ('B', 'brain'),
+        ('LV', 'liver'),
+        ('S', 'skin'),
+    )
+
+    SEQUENCING_CHOICES = (
+        ('K', 'Kinnex'),
+        ('T', 'Tru-Seq'),
+        ('W', 'Watchmaker'),
     )
 
     individual = models.ForeignKey('Individual', on_delete=models.PROTECT)
 
     data_type = models.CharField(max_length=1, choices=DATA_TYPE_CHOICES)
     tissue_type = models.CharField(max_length=2, choices=TISSUE_TYPE_CHOICES)
+    sequencing_type = models.CharField(max_length=1, choices=SEQUENCING_CHOICES)
     data_source = models.TextField()
     is_active = models.BooleanField(default=False)
 
@@ -782,9 +767,6 @@ class RnaSample(ModelWithGUID):
 
 
 class IgvSample(ModelWithGUID):
-    """This model represents a single data type that can be displayed in IGV (eg. Read Alignments) that's generated from
-    a single biological sample (eg. WES, WGS, RNA, Array).
-    """
     SAMPLE_TYPE_ALIGNMENT = 'alignment'
     SAMPLE_TYPE_COVERAGE = 'wig'
     SAMPLE_TYPE_JUNCTION = 'spliceJunctions'
@@ -821,6 +803,13 @@ class IgvSample(ModelWithGUID):
 
 
 class SavedVariant(ModelWithGUID):
+    DATASET_TYPE_CHOICES = (
+        (Dataset.DATASET_TYPE_VARIANT_CALLS, 'Variant Calls'),
+        (Dataset.DATASET_TYPE_MITO_CALLS, 'Mitochondria calls'),
+        (f'{Dataset.DATASET_TYPE_SV_CALLS}_{Dataset.SAMPLE_TYPE_WGS}', 'SV WGS Calls'),
+        (f'{Dataset.DATASET_TYPE_SV_CALLS}_{Dataset.SAMPLE_TYPE_WES}', 'gCNV Calls'),
+    )
+
     family = models.ForeignKey('Family', on_delete=models.CASCADE)
 
     xpos = models.BigIntegerField()
@@ -828,11 +817,16 @@ class SavedVariant(ModelWithGUID):
     ref = models.TextField(null=True)
     alt = models.TextField(null=True)
     variant_id = models.TextField(db_index=True)
+    key = models.PositiveBigIntegerField(null=True, blank=True)
 
     selected_main_transcript_id = models.CharField(max_length=20, null=True)
-    saved_variant_json = JSONField(default=dict)
+    genotypes = models.JSONField(default=dict)
+    main_transcript = models.JSONField(default=dict, encoder=DjangoJSONEncoderWithSets)
+    gene_ids = ArrayField(models.CharField(max_length=20), null=True, blank=True)
+    sv_type = models.CharField(max_length=15, null=True)
+    dataset_type = models.CharField(max_length=13, choices=DATASET_TYPE_CHOICES, null=True, blank=True)
 
-    acmg_classification = JSONField(null=True) # ACMG based classification
+    acmg_classification = models.JSONField(null=True) # ACMG based classification
 
     def __unicode__(self):
         chrom, pos = get_chrom_pos(self.xpos)
@@ -843,24 +837,11 @@ class SavedVariant(ModelWithGUID):
     class Meta:
         unique_together = ('xpos', 'xpos_end', 'variant_id', 'family')
 
-        json_fields = ['guid', 'xpos', 'ref', 'alt', 'variant_id', 'selected_main_transcript_id', 'acmg_classification']
+        json_fields = ['guid', 'key', 'xpos', 'ref', 'alt', 'variant_id', 'selected_main_transcript_id', 'acmg_classification',
+                        'sv_type', 'gene_ids', 'genotypes']
 
 
 class VariantTagType(ModelWithGUID):
-    """
-    Previous color choices:
-        '#1f78b4',
-        '#a6cee3',
-        '#b2df8a',
-        '#33a02c',
-        '#fdbf6f',
-        '#ff7f00',
-        '#ff0000',
-        '#cab2d6',
-        '#6a3d9a',
-        '#8F754F',
-        '#383838',
-    """
     project = models.ForeignKey('Project', null=True, blank=True, on_delete=models.CASCADE)
 
     name = models.TextField()
@@ -1035,8 +1016,6 @@ class GeneNote(ModelWithGUID):
 
 
 class LocusList(ModelWithGUID):
-    """List of gene ids or regions"""
-
     name = models.TextField(db_index=True)
     description = models.TextField(null=True, blank=True)
 
@@ -1095,6 +1074,9 @@ class AnalysisGroup(ModelWithGUID):
     project = models.ForeignKey('Project', on_delete=models.CASCADE)
     families = models.ManyToManyField(Family)
 
+    workspace_namespace = models.TextField(null=True, blank=True)
+    workspace_name = models.TextField(null=True, blank=True)
+
     def __unicode__(self):
         return self.name.strip()
 
@@ -1103,13 +1085,13 @@ class AnalysisGroup(ModelWithGUID):
     class Meta:
         unique_together = ('project', 'name')
 
-        json_fields = ['guid', 'name', 'description']
+        json_fields = ['guid', 'name', 'description', 'workspace_namespace', 'workspace_name']
 
 
 class DynamicAnalysisGroup(ModelWithGUID):
     project = models.ForeignKey('Project', on_delete=models.CASCADE, null=True, blank=True)
     name = models.TextField()
-    criteria = JSONField()
+    criteria = models.JSONField()
 
     def __unicode__(self):
         return self.name.strip()
@@ -1125,7 +1107,7 @@ class DynamicAnalysisGroup(ModelWithGUID):
 class VariantSearch(ModelWithGUID):
     name = models.CharField(max_length=200, null=True)
     order = models.FloatField(null=True, blank=True)
-    search = JSONField()
+    search = models.JSONField()
 
     def __unicode__(self):
         return self.name or str(self.id)
@@ -1166,7 +1148,6 @@ class BulkOperationBase(models.Model):
 
     @classmethod
     def bulk_create(cls, user, new_models, **kwargs):
-        """Helper bulk create method that logs the creation"""
         for model in new_models:
             model.created_by = user
         models = cls.objects.bulk_create(new_models, **kwargs)
@@ -1174,10 +1155,7 @@ class BulkOperationBase(models.Model):
         return models
 
     @classmethod
-    def bulk_delete(cls, user, queryset=None, **filter_kwargs):
-        """Helper bulk delete method that logs the deletion"""
-        if queryset is None:
-            queryset = cls.objects.filter(**filter_kwargs)
+    def bulk_delete(cls, user, queryset):
         cls.log_model_no_guid_bulk_update(queryset, user, 'delete')
         return queryset.delete()
 
@@ -1245,8 +1223,8 @@ class RnaSeqSpliceOutlier(DeletableRnaSampleMetadataModel):
     mean_counts = models.FloatField()
     total_counts = models.IntegerField()
     mean_total_counts = models.FloatField()
-    rare_disease_samples_with_this_junction = models.IntegerField()
-    rare_disease_samples_total = models.IntegerField()
+    rare_disease_samples_with_this_junction = models.IntegerField(null=True, blank=True)
+    rare_disease_samples_total = models.IntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ('sample', 'gene_id', 'chrom', 'start', 'end', 'strand', 'type')

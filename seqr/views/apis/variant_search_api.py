@@ -2,48 +2,43 @@ import json
 import jmespath
 from collections import defaultdict
 from copy import deepcopy
+from datetime import timedelta
 from django.utils import timezone
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.core.exceptions import MultipleObjectsReturned, PermissionDenied
 from django.db.utils import IntegrityError
-from django.db.models import Q, F, Value
+from django.db.models import Q, F, Value, Count, prefetch_related_objects
 from django.db.models.functions import JSONObject
+from django.shortcuts import redirect
 from math import ceil
+import re
 
-from reference_data.models import GENOME_VERSION_GRCh37, GENOME_VERSION_GRCh38
-from seqr.models import Project, Family, Individual, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory
-from seqr.utils.search.utils import query_variants, get_single_variant, get_variant_query_gene_counts, get_search_samples, \
-    variant_lookup, sv_variant_lookup, parse_variant_id
-from seqr.utils.search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY
-from seqr.utils.xpos_utils import get_xpos
+from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY
+from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
+    get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
+from reference_data.models import HumanPhenotypeOntology, GENOME_VERSION_GRCh38, GENOME_VERSION_LOOKUP
+from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
+from seqr.utils.logging_utils import SeqrLogger
+from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_get_wildcard_json, safe_redis_set_json
+from seqr.utils.xpos_utils import parse_variant_id
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case
 from seqr.views.utils.json_to_orm_utils import update_model_from_json, get_or_create_model_from_json, \
     create_model_from_json
 from seqr.views.utils.orm_to_json_utils import get_json_for_saved_variants_with_tags, get_json_for_saved_search,\
-    get_json_for_saved_searches, add_individual_hpo_details, FAMILY_ADDITIONAL_VALUES
-from seqr.views.utils.permissions_utils import check_project_permissions, get_project_guids_user_can_view, \
-    user_is_analyst, login_and_policies_required, check_user_created_object_permissions, check_projects_view_permission
-from seqr.views.utils.project_context_utils import get_projects_child_entities
-from seqr.views.utils.variant_utils import get_variant_key, get_variants_response
+    get_json_for_saved_searches, FAMILY_ADDITIONAL_VALUES
+from seqr.views.utils.permissions_utils import check_family_view_permission, get_project_analysis_group_guids_user_can_view, \
+    login_and_policies_required, check_user_created_object_permissions, check_families_view_permission, user_is_analyst
+from seqr.views.utils.project_context_utils import get_project_analysis_groups, get_project_locus_lists
+from seqr.views.utils.variant_utils import get_variants_response, variant_dataset_type
+from seqr.views.utils.vlm_utils import vlm_lookup
 
-
-GENOTYPE_AC_LOOKUP = {
-    'ref_ref': [0, 0],
-    'has_ref': [0, 1],
-    'ref_alt': [1, 1],
-    'has_alt': [1, 2],
-    'alt_alt': [2, 2],
-}
-AFFECTED = Individual.AFFECTED_STATUS_AFFECTED
-UNAFFECTED = Individual.AFFECTED_STATUS_UNAFFECTED
+logger = SeqrLogger(__name__)
 
 
 @login_and_policies_required
 def query_variants_handler(request, search_hash):
-    """Search variants.
-    """
     page = int(request.GET.get('page') or 1)
     per_page = int(request.GET.get('per_page') or 100)
     sort = request.GET.get('sort') or XPOS_SORT_KEY
@@ -57,16 +52,41 @@ def query_variants_handler(request, search_hash):
         return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
     _check_results_permission(results_model, request.user)
-    skip_genotype_filter = bool(_all_project_family_search_genome(search_context))
 
-    variants, total_results = query_variants(results_model, sort=sort, page=page, num_results=per_page,
-                                             skip_genotype_filter=skip_genotype_filter, user=request.user)
+    all_variants = _get_variants_with_cache(
+        _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
+    )
+    variants = all_variants[(page-1)*per_page:page*per_page]
 
-    response = _process_variants(variants or [], results_model.families.all(), request)
+    response = _process_variants(variants or [], results_model.families.all(), request,
+                                 genome_version=results_model.variant_search.search.get('no_access_project_genome_version'))
     response['search'] = _get_search_context(results_model)
-    response['search']['totalResults'] = total_results
+    response['search']['totalResults'] = len(all_variants)
 
     return create_json_response(response)
+
+
+def _get_variants_with_cache(get_cache_key, get_variants, *args, **kwargs):
+    cache_key = get_cache_key(*args, **kwargs)
+    variants = safe_redis_get_json(cache_key)
+    if variants is None:
+        variants = get_variants(*args, **kwargs)
+        safe_redis_set_json(cache_key, variants, expire=timedelta(weeks=2))
+    return variants
+
+
+def _get_search_cache_key(results_model, user, sort=XPOS_SORT_KEY):
+    return 'search_results__{}__{}'.format(results_model.guid, sort)
+
+
+def _query_variants(results_model, user, sort=XPOS_SORT_KEY):
+    families = results_model.families.all()
+    wildcard_cache_key = _get_search_cache_key(results_model, user, sort='*')
+    unsorted_variants = safe_redis_get_wildcard_json(wildcard_cache_key)
+    if unsorted_variants:
+        return get_sorted_search_results(unsorted_variants, sort, families)
+
+    return get_clickhouse_variants(families, user, sort=sort, **results_model.variant_search.search)
 
 
 def _all_project_family_search_genome(search_context):
@@ -74,12 +94,11 @@ def _all_project_family_search_genome(search_context):
 
 
 def _all_genome_version_families(genome_version, user):
-    omit_projects = [p.guid for p in Project.objects.filter(is_demo=True).only('guid')]
-    project_guids = [
-        project_guid for project_guid in get_project_guids_user_can_view(user, limit_data_manager=True)
-        if project_guid not in omit_projects
-    ]
-    return Family.objects.filter(project__guid__in=project_guids, project__genome_version=genome_version)
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(user, limit_data_manager=True)
+    access_filter = Q(project__guid__in=project_guids)
+    if analysis_group_guids:
+        access_filter |= Q(analysisgroup__guid__in=analysis_group_guids)
+    return Family.objects.filter(project__genome_version=genome_version).filter(access_filter).exclude(project__is_demo=True)
 
 
 def _get_or_create_results_model(search_hash, search_context, user):
@@ -89,10 +108,11 @@ def _get_or_create_results_model(search_hash, search_context, user):
             raise Exception('Invalid search hash: {}'.format(search_hash))
 
         all_project_genome_version = _all_project_family_search_genome(search_context)
+        include_no_access_projects = search_context.get('includeNoAccessProjects')
         if all_project_genome_version:
             families = _all_genome_version_families(all_project_genome_version, user)
-        elif search_context.get('projectGuids'):
-            families = Family.objects.filter(project__guid__in=search_context['projectGuids'])
+            if not (families or include_no_access_projects):
+                raise Exception(f'No data available for genome version "{GENOME_VERSION_LOOKUP[all_project_genome_version]}"')
         elif search_context.get('projectFamilies'):
             all_families = set()
             for project_family in search_context['projectFamilies']:
@@ -104,9 +124,17 @@ def _get_or_create_results_model(search_hash, search_context, user):
         if search_context.get('unsolvedFamiliesOnly'):
             families = families.exclude(analysis_status__in=Family.SOLVED_ANALYSIS_STATUSES)
         if search_context.get('trioFamiliesOnly'):
-            families = families.filter(individual__mother__isnull=False, individual__father__isnull=False).distinct()
+            families = families.annotate(search_sample_count=Count('individual__id', filter=Q(
+                individual__active_datasets__dataset_type=Dataset.DATASET_TYPE_VARIANT_CALLS,
+            ))).filter(
+                search_sample_count__gte=3, individual__mother__isnull=False, individual__father__isnull=False,
+            ).distinct()
 
         search_dict = search_context.get('search', {})
+        if search_context.get('previousSearchHash') and (search_dict.get('exclude') or {}).get('previousSearch'):
+            search_dict.update(_get_exclude_keys(search_context['previousSearchHash'], user))
+        if include_no_access_projects:
+            search_dict['no_access_project_genome_version'] = all_project_genome_version
         search_model = VariantSearch.objects.filter(search=search_dict).filter(
             Q(created_by=user) | Q(name__isnull=False)).first()
         if not search_model:
@@ -123,35 +151,57 @@ def _get_or_create_results_model(search_hash, search_context, user):
     return results_model
 
 
+def _get_exclude_keys(search_hash, user):
+    previous_results_model = VariantSearchResults.objects.get(search_hash=search_hash)
+    results = _get_variants_with_cache(_get_search_cache_key, _query_variants, previous_results_model, user)
+    exclude_keys = defaultdict(list)
+    exclude_key_pairs = defaultdict(list)
+    for variant in results:
+        if isinstance(variant, list):
+            dt1= variant_dataset_type(variant[0])
+            dt2 = variant_dataset_type(variant[1])
+            dataset_type = dt1 if dt1 == dt2 else ','.join(sorted([dt1, dt2]))
+            exclude_key_pairs[dataset_type].append(sorted([variant[0]['key'], variant[1]['key']]))
+        else:
+            dataset_type = variant_dataset_type(variant)
+            exclude_keys[dataset_type].append(variant['key'])
+    return {'exclude_keys': dict(exclude_keys), 'exclude_key_pairs': dict(exclude_key_pairs)}
+
+
 @login_and_policies_required
 def query_single_variant_handler(request, variant_id):
-    """Search variants.
-    """
     families = Family.objects.filter(guid=request.GET.get('familyGuid'))
-    check_project_permissions(families.first().project, request.user)
+    family = families.first()
+    check_family_view_permission(family, request.user)
 
-    variant = get_single_variant(families, variant_id, user=request.user)
+    variants = get_clickhouse_variants(families, request.user, raw_variant_items=variant_id, variant_ids=[variant_id])
+    if not variants:
+        raise InvalidSearchException('Variant {} not found'.format(variant_id))
 
-    response = _process_variants([variant], families, request, add_all_context=True, add_locus_list_detail=True)
+    response = _process_variants(variants, families, request, add_all_context=True, add_locus_list_detail=True)
 
     return create_json_response(response)
 
 
-def _process_variants(variants, families, request, add_all_context=False, add_locus_list_detail=False):
+def _process_variants(variants, families, request, add_all_context=False, add_locus_list_detail=False, genome_version=None):
     if not variants:
-        return {'searchedVariants': variants}
+        return {'searchedVariantIds': [], 'variantsById': {}}
 
+    variants = format_clickhouse_results(variants)
     flat_variants = _flatten_variants(variants)
-    saved_variants, variants_by_id = _get_saved_variant_models(flat_variants, families)
+    variants_by_id = {v['variantId']: v for v in flat_variants}
+    saved_variants = _get_saved_variant_models(flat_variants)
 
     response_json = get_variants_response(
         request, saved_variants, response_variants=flat_variants, add_all_context=add_all_context,
-        add_locus_list_detail=add_locus_list_detail)
-    response_json['searchedVariants'] = variants
+        add_locus_list_detail=add_locus_list_detail, genome_version=genome_version or families[0].project.genome_version)
+    response_json['searchedVariantIds'] = [
+        [v['variantId'] for v in variant] if isinstance(variant, list) else variant['variantId'] for variant in variants
+    ]
 
     for saved_variant in response_json['savedVariantsByGuid'].values():
         family_guids = saved_variant['familyGuids']
-        searched_variant = variants_by_id.get(get_variant_key(**saved_variant))
+        searched_variant = variants_by_id.get(saved_variant['variantId'])
         if not searched_variant:
             # This can occur when an hg38 family has a saved variant that did not successfully lift from hg37
             continue
@@ -163,19 +213,6 @@ def _process_variants(variants, families, request, add_all_context=False, add_lo
     return response_json
 
 
-PREDICTION_MAP = {
-    'D': 'damaging',
-    'T': 'tolerated',
-}
-
-
-POLYPHEN_MAP = {
-    'D': 'probably_damaging',
-    'P': 'possibly_damaging',
-    'B': 'benign',
-}
-
-
 MUTTASTR_MAP = {
     'A': 'disease_causing',
     'D': 'disease_causing',
@@ -184,28 +221,15 @@ MUTTASTR_MAP = {
 }
 
 
-def _get_prediction_val(prediction):
-    try:
-        return float(prediction or '')
-    except ValueError:
-        return PREDICTION_MAP.get(prediction[0]) if prediction else None
-
-
-def _get_variant_main_transcript_field_val(parsed_variant):
-    return next(
-        (t for t in parsed_variant['transcripts'] if t['transcriptId'] == parsed_variant['mainTranscriptId']), {}
-    ).get('value')
-
-
 VARIANT_EXPORT_DATA = [
     {'header': 'chrom'},
     {'header': 'pos'},
     {'header': 'ref'},
     {'header': 'alt'},
-    {'header': 'gene', 'value_path': '{transcripts: transcripts.*[].{value: geneSymbol || geneId, transcriptId: transcriptId}, mainTranscriptId: mainTranscriptId}', 'process': _get_variant_main_transcript_field_val},
-    {'header': 'worst_consequence', 'value_path': '{transcripts: transcripts.*[].{value: majorConsequence, transcriptId: transcriptId}, mainTranscriptId: mainTranscriptId}', 'process': _get_variant_main_transcript_field_val},
-    {'header': 'callset_freq', 'value_path': 'populations.callset.af || populations.seqr.af'},
-    {'header': 'exac_freq', 'value_path': 'populations.exac.af'},
+    {'header': 'gene', 'value_path': 'mainTranscript.geneId'},
+    {'header': 'gene_symbol', 'value_path': 'geneSymbol'},
+    {'header': 'worst_consequence', 'value_path': 'mainTranscript.majorConsequence'},
+    {'header': 'seqr_ac', 'value_path': 'populations.seqr.ac'},
     {'header': 'gnomad_genomes_freq', 'value_path': 'populations.gnomad_genomes.af'},
     {'header': 'gnomad_exomes_freq', 'value_path': 'populations.gnomad_exomes.af'},
     {'header': 'topmed_freq', 'value_path': 'populations.topmed.af'},
@@ -213,14 +237,14 @@ VARIANT_EXPORT_DATA = [
     {'header': 'revel', 'value_path': 'predictions.revel'},
     {'header': 'eigen', 'value_path': 'predictions.eigen'},
     {'header': 'splice_ai', 'value_path': 'predictions.splice_ai'},
-    {'header': 'polyphen', 'value_path': 'predictions.polyphen', 'process': _get_prediction_val},
-    {'header': 'sift', 'value_path': 'predictions.sift', 'process': _get_prediction_val},
-    {'header': 'muttaster', 'value_path': 'predictions.mut_taster', 'process': _get_prediction_val},
-    {'header': 'fathmm', 'value_path': 'predictions.fathmm', 'process': _get_prediction_val},
+    {'header': 'polyphen', 'value_path': 'predictions.polyphen'},
+    {'header': 'sift', 'value_path': 'predictions.sift'},
+    {'header': 'muttaster', 'value_path': 'predictions.mut_taster', 'process': MUTTASTR_MAP.get},
+    {'header': 'fathmm', 'value_path': 'predictions.fathmm'},
     {'header': 'rsid', 'value_path': 'rsid'},
-    {'header': 'hgvsc', 'value_path': '{transcripts: transcripts.*[].{value: hgvsc, transcriptId: transcriptId}, mainTranscriptId: mainTranscriptId}', 'process': _get_variant_main_transcript_field_val},
-    {'header': 'hgvsp', 'value_path': '{transcripts: transcripts.*[].{value: hgvsp, transcriptId: transcriptId}, mainTranscriptId: mainTranscriptId}', 'process': _get_variant_main_transcript_field_val},
-    {'header': 'clinvar_clinical_significance', 'value_path': 'clinvar.clinicalSignificance || clinvar.pathogenicity'},
+    {'header': 'hgvsc', 'value_path': 'mainTranscript.hgvsc'},
+    {'header': 'hgvsp', 'value_path': 'mainTranscript.hgvsp'},
+    {'header': 'clinvar_clinical_significance', 'value_path': 'clinvar.pathogenicity'},
     {'header': 'clinvar_gold_stars', 'value_path': 'clinvar.goldStars'},
 ]
 
@@ -239,23 +263,35 @@ VARIANT_FAMILY_EXPORT_DATA = [
 VARIANT_SAMPLE_DATA = [
     {'header': 'sample', 'value_path': 'sampleId'},
     {'header': 'num_alt_alleles', 'value_path': 'numAlt'},
-    {'header': 'filters', 'process': lambda val: ';'.join(val or []), 'variant_value_path': '[genotypeFilters][*]'},
+    {'header': 'filters', 'process': lambda val: ';'.join(val or [])},
     {'header': 'gq'},
     {'header': 'ab'},
 ]
 
+MAX_EXPORT_VARIANTS = 1000
 MAX_FAMILIES_PER_ROW = 1000
 
 
 @login_and_policies_required
 def get_variant_gene_breakdown(request, search_hash):
     results_model = VariantSearchResults.objects.get(search_hash=search_hash)
-    projects = _check_results_permission(results_model, request.user)
+    genome_version = _check_results_permission(results_model, request.user)
 
-    gene_counts = get_variant_query_gene_counts(results_model, user=request.user)
+    results = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
+    flat_variants = [
+        v for variants in results for v in (variants if isinstance(variants, list) else [variants])
+    ]
+    gene_counts = defaultdict(lambda: {'total': 0, 'families': defaultdict(int)})
+    for var in flat_variants:
+        gene_ids = var['transcripts'].keys() if 'transcripts' in var else {t['geneId'] for t in var['sortedTranscriptConsequences']}
+        for gene_id in gene_ids:
+            gene_counts[gene_id]['total'] += 1
+            for family_guid in var.get('familyGuids', []):
+                gene_counts[gene_id]['families'][family_guid] += 1
+
     return create_json_response({
         'searchGeneBreakdown': {search_hash: gene_counts},
-        'genesById': get_genes_for_variant_display(list(gene_counts.keys()), projects.first().genome_version),
+        'genesById': get_genes_for_variant_display(list(gene_counts.keys()), genome_version),
     })
 
 
@@ -269,33 +305,32 @@ def export_variants_handler(request, search_hash):
     families = results_model.families.all()
     family_ids_by_guid = {family.guid: family.family_id for family in families}
 
-    variants, _ = query_variants(results_model, page=1, load_all=True, user=request.user)
-    variants = _flatten_variants(variants)
+    variants = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
+    total_variants = len(variants)
+    if total_variants > MAX_EXPORT_VARIANTS:
+        raise InvalidSearchException(f'Unable to export more than {MAX_EXPORT_VARIANTS} variants ({total_variants} requested)')
 
-    saved_variants, variants_by_id = _get_saved_variant_models(variants, families)
-    json_saved_variants = get_json_for_saved_variants_with_tags(saved_variants, add_details=True)
+    variants = format_clickhouse_export_results(variants)
+
+    saved_variants = _get_saved_variant_models(variants)
+    json_saved_variants = get_json_for_saved_variants_with_tags(saved_variants)
 
     saved_variants_by_variant_family = {}
     for saved_variant in json_saved_variants['savedVariantsByGuid'].values():
-        variant_key = get_variant_key(**saved_variant)
-        searched_variant = variants_by_id.get(variant_key)
-        if searched_variant:
-            # Handles lifted over variant matching
-            variant_key = get_variant_key(**searched_variant)
-        saved_variants_by_variant_family[variant_key] = {
+        saved_variants_by_variant_family[saved_variant['variantId']] = {
             family_guid: saved_variant['variantGuid'] for family_guid in saved_variant['familyGuids']
         }
 
-    if any(len(variant['familyGuids']) > MAX_FAMILIES_PER_ROW for variant in variants):
+    if any(len(variant.get('familyGuids', [])) > MAX_FAMILIES_PER_ROW for variant in variants):
         split_variants = []
         for variant in variants:
-            if len(variant['familyGuids']) <= MAX_FAMILIES_PER_ROW:
+            if len(variant.get('familyGuids', [])) <= MAX_FAMILIES_PER_ROW:
                 split_variants.append(variant)
                 continue
 
-            num_split = ceil(len(variant['familyGuids']) / MAX_FAMILIES_PER_ROW)
+            num_split = ceil(len(variant.get('familyGuids', [])) / MAX_FAMILIES_PER_ROW)
             gens_per_row = ceil(len(variant['genotypes']) / num_split)
-            gen_keys = list(variant['genotypes'].keys())
+            gen_keys = sorted(variant['genotypes'].keys())
             for i in range(num_split):
                 split_var = deepcopy(variant)
                 split_var['familyGuids'] = variant['familyGuids'][i*MAX_FAMILIES_PER_ROW:(i+1)*MAX_FAMILIES_PER_ROW]
@@ -305,15 +340,15 @@ def export_variants_handler(request, search_hash):
 
         variants = split_variants
 
-    max_families_per_variant = max([len(variant['familyGuids']) for variant in variants])
-    max_samples_per_variant = max([len(variant['genotypes']) for variant in variants])
+    max_families_per_variant = max([len(variant.get('familyGuids', [1])) for variant in variants] or [0])
+    max_samples_per_variant = max([len(variant.get('genotypes', {})) for variant in variants] or [0])
 
     rows = []
     for variant in variants:
         row = [_get_field_value(variant, config) for config in VARIANT_EXPORT_DATA]
 
-        family_saved_variants = saved_variants_by_variant_family.get(get_variant_key(**variant), {})
-        for family_guid in variant['familyGuids']:
+        family_saved_variants = saved_variants_by_variant_family.get(variant['variantId'], {})
+        for family_guid in variant.get('familyGuids', []):
             variant_guid = family_saved_variants.get(family_guid, '')
             family_tags = {
                 'family_id': family_ids_by_guid.get(family_guid),
@@ -321,11 +356,15 @@ def export_variants_handler(request, search_hash):
                 'notes': [note for note in json_saved_variants['variantNotesByGuid'].values() if variant_guid in note['variantGuids']],
             }
             row += [_get_field_value(family_tags, config) for config in VARIANT_FAMILY_EXPORT_DATA]
-        row += ['' for i in range(len(VARIANT_FAMILY_EXPORT_DATA) * (max_families_per_variant - len(variant['familyGuids'])))]
+        num_blank_cols = len(VARIANT_FAMILY_EXPORT_DATA) * (max_families_per_variant - len(variant.get('familyGuids', [])))
+        if 'familyGuids' not in variant:
+            row.append(f"{variant['numFamilies']} Families")
+            num_blank_cols -= 1
+        row += ['' for i in range(num_blank_cols)]
 
-        genotypes = list(variant['genotypes'].values())
+        genotypes = [genotype for _, genotype in sorted(variant.get('genotypes', {}).items())]
         for genotype in genotypes:
-            row += [_get_field_value(genotype, config, variant=variant) for config in VARIANT_SAMPLE_DATA]
+            row += [_get_field_value(genotype, config) for config in VARIANT_SAMPLE_DATA]
         row += ['' for i in range(len(VARIANT_SAMPLE_DATA) * (max_samples_per_variant - len(genotypes)))]
         rows.append(row)
 
@@ -340,10 +379,8 @@ def export_variants_handler(request, search_hash):
     return export_table('search_results_{}'.format(search_hash), header, rows, file_format, titlecase_header=False)
 
 
-def _get_field_value(value, config, variant=None):
+def _get_field_value(value, config):
     field_value = jmespath.search(config.get('value_path', config['header']), value)
-    if config.get('variant_value_path') and not field_value:
-        field_value = jmespath.search(config['variant_value_path'], variant)
     if config.get('process'):
         field_value = config['process'](field_value)
     return field_value
@@ -351,51 +388,61 @@ def _get_field_value(value, config, variant=None):
 
 @login_and_policies_required
 def search_context_handler(request):
-    """Search variants.
-    """
     response = _get_saved_searches(request.user)
     context = json.loads(request.body)
 
-    projects = None
+    families = None
     if context.get('projectGuid'):
-        projects = Project.objects.filter(guid=context.get('projectGuid'))
+        families = Family.objects.filter(project__guid=context.get('projectGuid'))
     elif context.get('familyGuid'):
-        projects = Project.objects.filter(family__guid=context.get('familyGuid'))
+        families = Family.objects.filter(guid=context.get('familyGuid'))
     elif context.get('analysisGroupGuid'):
-        projects = Project.objects.filter(analysisgroup__guid=context.get('analysisGroupGuid'))
+        families = Family.objects.filter(analysisgroup__guid=context.get('analysisGroupGuid'))
     elif context.get('projectCategoryGuid'):
-        projects = Project.objects.filter(projectcategory__guid=context.get('projectCategoryGuid'))
+        families = Family.objects.filter(project__projectcategory__guid=context.get('projectCategoryGuid'))
     elif context.get('searchHash'):
         search_context = context.get('searchParams')
         try:
             results_model = _get_or_create_results_model(context['searchHash'], search_context, request.user)
         except Exception as e:
             return create_json_response({'error': str(e)}, status=400, reason=str(e))
-        projects = Project.objects.filter(family__in=results_model.families.all()).distinct()
+        families = results_model.families.all()
 
-    if not projects:
+    if not families:
         error = 'Invalid context params: {}'.format(json.dumps(context))
         return create_json_response({'error': error}, status=400, reason=error)
 
-    check_projects_view_permission(projects, request.user)
+    check_families_view_permission(families, request.user)
 
-    project_guid = projects[0].guid if len(projects) == 1 else None
-    response.update(get_projects_child_entities(projects, project_guid, request.user))
+    family_project_guids = families.values_list('project__guid', flat=True)
+    project_guid = family_project_guids[0] if len(family_project_guids) == 1 else None
 
-    response['familiesByGuid'] = {f['familyGuid']: f for f in Family.objects.filter(project__in=projects).values(
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user, limit_data_manager=False)
+    full_access_projects = set(family_project_guids).intersection(project_guids)
+    partial_access_projects = set(family_project_guids) - set(project_guids)
+    family_q = group_project_q = Q(project__guid__in=full_access_projects)
+    group_q = Q()
+    if partial_access_projects:
+        family_q |= Q(project__guid__in=partial_access_projects, analysisgroup__guid__in=analysis_group_guids)
+        group_q = Q(project__guid__in=partial_access_projects, guid__in=analysis_group_guids)
+
+    response['analysisGroupsByGuid'] = get_project_analysis_groups(group_project_q, group_q, project_guid)
+    _add_projects_response_context(response, family_project_guids, project_guid, request.user)
+
+    response['familiesByGuid'] = {f['familyGuid']: f for f in Family.objects.filter(family_q).values(
         projectGuid=Value(project_guid) if project_guid else F('project__guid'),
         familyGuid=F('guid'),
         analysisStatus=F('analysis_status'),
+        sampleTypes=ArrayAgg(
+            JSONObject(sampleType='individual__active_datasets__sample_type', datasetType='individual__active_datasets__dataset_type', isActive=Value(True)),
+            distinct=True, filter=Q(individual__active_datasets__dataset_type__isnull=False),
+        ),
         **FAMILY_ADDITIONAL_VALUES,
     )}
 
-    family_sample_types = get_search_samples(projects).values('individual__family__guid').annotate(
-        samples=ArrayAgg(JSONObject(sampleType='sample_type', datasetType='dataset_type', isActive=Value(True)), distinct=True))
     project_dataset_types = defaultdict(set)
-    for agg in family_sample_types:
-        family = response['familiesByGuid'][agg['individual__family__guid']]
-        family['sampleTypes'] = agg['samples']
-        project_dataset_types[family['projectGuid']].update([s['datasetType'] for s in agg['samples']])
+    for family in response['familiesByGuid'].values():
+        project_dataset_types[family['projectGuid']].update([s['datasetType'] for s in family['sampleTypes']])
     for project_guid, dataset_types in project_dataset_types.items():
         response['projectsByGuid'][project_guid]['datasetTypes'] = list(dataset_types)
 
@@ -406,6 +453,37 @@ def search_context_handler(request):
         }
 
     return create_json_response(response)
+
+
+def _add_projects_response_context(response, project_guids, project_guid, user):
+    projects = Project.objects.filter(guid__in=project_guids).distinct()
+    projects_by_guid = {p.guid: {'projectGuid': p.guid, 'name': p.name} for p in projects}
+
+    locus_list_json, locus_lists_models = get_project_locus_lists(projects, user)
+
+    response.update({
+        'projectsByGuid': projects_by_guid,
+        'locusListsByGuid': locus_list_json,
+    })
+
+    if project_guid:
+        response['projectsByGuid'][project_guid]['locusListGuids'] = list(locus_list_json.keys())
+        response['projectsByGuid'][project_guid]['analysisGroupsLoaded'] = True
+    else:
+        project_id_to_guid = {project.id: project.guid for project in projects}
+        for group in response['analysisGroupsByGuid'].values():
+            group['projectGuid'] = project_id_to_guid.get(group.pop('projectId'))
+
+        for project in response['projectsByGuid'].values():
+            project['locusListGuids'] = []
+            project['analysisGroupsLoaded'] = True
+        prefetch_related_objects(locus_lists_models, 'projects')
+        for locus_list in locus_lists_models:
+            for project in locus_list.projects.all():
+                if project.guid in response['projectsByGuid']:
+                    response['projectsByGuid'][project.guid]['locusListGuids'].append(locus_list.guid)
+
+    return response
 
 
 @login_and_policies_required
@@ -475,13 +553,14 @@ def delete_saved_search_handler(request, saved_search_guid):
 
 
 def _check_results_permission(results_model, user, project_perm_check=None):
-    projects = Project.objects.filter(family__variantsearchresults=results_model)
-    check_projects_view_permission(projects, user)
+    families = Family.objects.filter(variantsearchresults=results_model)
+    check_families_view_permission(families, user)
     if project_perm_check:
-        for project in projects:
+        for project in {f.project for f in families.prefetch_related('project')}:
             if not project_perm_check(project):
                 raise PermissionDenied()
-    return projects
+    family = families.first()
+    return family.project.genome_version if family else None
 
 
 def _get_search_context(results_model):
@@ -507,29 +586,25 @@ def _get_saved_searches(user):
     return {'savedSearchesByGuid': {search['savedSearchGuid']: search for search in saved_searches}}
 
 
-def _get_saved_variant_models(variants, families):
-    hg37_family_guids = families.filter(project__genome_version=GENOME_VERSION_GRCh37).values_list('guid', flat=True) if families else []
-
-    variant_q = Q()
-    variants_by_id = {}
+def _get_saved_variant_models(variants):
+    variant_qs = []
     variant_ids_by_family = defaultdict(set)
     for variant in variants:
-        variants_by_id[get_variant_key(**variant)] = variant
-        for family_guid in variant['familyGuids']:
+        for family_guid in variant.get('familyGuids', []):
             variant_ids_by_family[family_guid].add(variant['variantId'])
-        if variant.get('liftedOverGenomeVersion') == GENOME_VERSION_GRCh37 and hg37_family_guids:
-            variant_hg37_families = [family_guid for family_guid in variant['familyGuids'] if family_guid in hg37_family_guids]
-            if variant_hg37_families:
-                lifted_xpos = get_xpos(variant['liftedOverChrom'], variant['liftedOverPos'])
-                variant_q |= Q(xpos=lifted_xpos, ref=variant['ref'], alt=variant['alt'], family__guid__in=variant_hg37_families)
-                variants_by_id[get_variant_key(
-                    xpos=lifted_xpos, ref=variant['ref'], alt=variant['alt'], genomeVersion=variant['liftedOverGenomeVersion']
-                )] = variant
 
     for family_guid, variant_ids in variant_ids_by_family.items():
-        variant_q |= Q(variant_id__in=variant_ids, family__guid=family_guid)
+        variant_qs.append(Q(variant_id__in=variant_ids, family__guid=family_guid))
 
-    return SavedVariant.objects.filter(variant_q), variants_by_id
+    if variant_qs:
+        variant_q = variant_qs[0]
+        for q in variant_qs[1:]:
+            variant_q |= q
+        saved_variants = SavedVariant.objects.filter(variant_q)
+    else:
+        saved_variants = SavedVariant.objects.none()
+
+    return saved_variants
 
 def _flatten_variants(variants):
     flattened_variants = []
@@ -544,80 +619,153 @@ def _flatten_variants(variants):
 
 @login_and_policies_required
 def variant_lookup_handler(request):
-    kwargs = {_to_snake_case(k): v for k, v in request.GET.items()}
+    variant_id = request.GET.get('variantId')
+    genome_version = request.GET.get('genomeVersion') or GENOME_VERSION_GRCh38
+    bool_kwargs = {_to_snake_case(field): bool(request.GET.get(field)) for field in ['affectedOnly', 'homOnly']}
+    variants = _get_variants_with_cache(
+        _get_lookup_cache_key, clickhouse_variant_lookup,
+        request.user, variant_id, sample_type=request.GET.get('sampleType'), genome_version=genome_version, **bool_kwargs,
+    )
 
-    variant_id = kwargs.pop('variant_id')
-    parsed_variant_id = parse_variant_id(variant_id)
-    is_sv = not parsed_variant_id
-    if is_sv:
-        families = _all_genome_version_families(
-            kwargs.get('genome_version', GENOME_VERSION_GRCh38), request.user,
-        )
-        if not families:
-            raise PermissionDenied()
-        variants = sv_variant_lookup(request.user, variant_id, families, **kwargs)
-    else:
-        variant = variant_lookup(request.user, parsed_variant_id, **kwargs)
-        variants = [variant]
-        families = Family.objects.filter(
-            guid__in=variant['familyGenotypes'],
-            project__guid__in=get_project_guids_user_can_view(request.user, limit_data_manager=True),
-        )
-        variant['familyGuids'] = list(families.values_list('guid', flat=True))
+    family_guids = set()
+    for variant in variants:
+        family_guids.update(variant['familyGenotypes'].keys())
+        family_guids.update(variant['discoveryFamilies'])
+        family_guids.update(variant['excludedTagFamilies'])
 
-    saved_variants, _ = _get_saved_variant_models(variants, None) if families else (None, None)
+    project_guids, analysis_group_guids = get_project_analysis_group_guids_user_can_view(request.user, limit_data_manager=True)
+    access_filter = Q(project__guid__in=project_guids)
+    if analysis_group_guids:
+        access_filter |= Q(analysisgroup__guid__in=analysis_group_guids)
+    family_guids = set(Family.objects.filter(access_filter).filter(
+        guid__in=family_guids,
+    ).values_list('guid', flat=True))
+    for variant in variants:
+        variant['familyGuids'] = family_guids.intersection(variant['familyGenotypes'].keys())
+        variant['discoveryTagFamilies'] = set(variant['discoveryFamilies']) - family_guids
+        variant['excludedTagFamilies'] = set(variant['excludedTagFamilies']) - family_guids
+
+    saved_variants = _get_saved_variant_models(variants) if family_guids else None
     response = get_variants_response(
         request, saved_variants=saved_variants, response_variants=variants,
-        add_all_context=True, add_locus_list_detail=True,
+        add_all_context=True, add_locus_list_detail=True, genome_version=genome_version,
     )
-    response['variants'] = variants
 
-    if not is_sv:
-        _update_lookup_variant(variant, response)
+    individual_guid_map = {
+        (i['familyGuid'], i['individualId']): i['individualGuid'] for i in response['individualsByGuid'].values()
+    }
+    for variant in variants:
+        _update_lookup_variant(variant, response, individual_guid_map, request.user)
 
     return create_json_response(response)
 
 
-def _update_lookup_variant(variant, response):
-    individual_guid_map = {
-        (i['familyGuid'], i['individualId']): i['individualGuid'] for i in response['individualsByGuid'].values()
-    }
+def _get_lookup_cache_key(user, variant_id, sample_type, genome_version, affected_only, hom_only):
+    cache_fields = ['variant_lookup_results', variant_id, genome_version]
+    if affected_only:
+        cache_fields.append('affected')
+    if hom_only:
+        cache_fields.append('hom')
+    return '__'.join(cache_fields)
 
-    no_access_families = set(variant['familyGenotypes']) - set(variant['familyGuids'])
-    individual_summary_map = {
-        (i.pop('family__guid'), i.pop('individual_id')): i
-        for i in Individual.objects.filter(family__guid__in=no_access_families).values(
-            'family__guid', 'individual_id', 'affected', 'sex', 'features',
-            vlmContactEmail=F('family__project__vlm_contact_email'),
-        )
-    }
-    add_individual_hpo_details(individual_summary_map.values())
 
+def _update_lookup_variant(variant, response, individual_guid_map, user):
     variant['genotypes'] = {}
-    variant['lookupFamilyGuids'] = variant.pop('familyGuids')
+    variant['lookupFamilyGuids'] = sorted([guid for guid in variant.pop('familyGuids') if guid in variant['familyGenotypes']])
     variant['familyGuids'] = []
+    variant.pop('noAccessDiscoveryFamilies', None)
     for family_guid in variant['lookupFamilyGuids']:
-        variant['genotypes'].update({
-            individual_guid_map[(family_guid, genotype['sampleId'])]: genotype
-            for genotype in variant['familyGenotypes'].pop(family_guid)
-        })
+        for genotype in variant['familyGenotypes'].pop(family_guid):
+            genotype.pop('metadata', None)
+            individual_guid = individual_guid_map.get((family_guid, genotype['sampleId']))
+            if not individual_guid:
+                logger.error(
+                    f'Unable to map sample {genotype["sampleId"]} in family {family_guid} to an individual for variant {variant["variantId"]}',
+                    user,
+                )
+                continue
+            genotype = {**genotype, 'individualGuid': individual_guid}
+            if individual_guid in variant['genotypes']:
+                genotype = [variant['genotypes'][individual_guid], genotype]
+            variant['genotypes'][individual_guid] = genotype
 
-    for i, genotypes in enumerate(variant.pop('familyGenotypes').values()):
+    all_feature_ids = set()
+    family_guid_map = {}
+    for i, (unmapped_family_guid, genotypes) in enumerate(sorted(variant.pop('familyGenotypes').items())):
         family_guid = f'F{i}_{variant["variantId"]}'
+        family_guid_map[unmapped_family_guid] = family_guid
         variant['lookupFamilyGuids'].append(family_guid)
+        if unmapped_family_guid in variant.get('liftedFamilyGuids', []):
+            variant['liftedFamilyGuids'][variant['liftedFamilyGuids'].index(unmapped_family_guid)] = family_guid
+        individual_key_map = {}
         for j, genotype in enumerate(genotypes):
+            individual_key = (genotype.pop('familyGuid'), genotype.pop('sampleId'))
+            individual = genotype.pop('metadata', {})
+            if individual_key in individual_key_map:
+                individual_guid = individual_key_map[individual_key]
+                variant['genotypes'][individual_guid] = [variant['genotypes'][individual_guid], genotype]
+                continue
             individual_guid = f'I{j}_{family_guid}'
-            individual = individual_summary_map[(genotype.pop('familyGuid'), genotype.pop('sampleId'))]
-            feature_category_count = defaultdict(int)
-            for feature in individual['features'] or []:
-                feature_category_count[feature.get('category', 'Other')] += 1
+            individual_key_map[individual_key] = individual_guid
+            features = json.loads(individual['features']) if individual.get('features') else []
+            all_feature_ids.update([feature['id'] for feature in features])
+            omim_id = individual.pop('omim_id')
+            mondo_id = individual.pop('mondo_id')
+            if individual.get('restrict_sharing'):
+                individual.pop('isSolved')
+            else:
+                individual['disease'] = f'OMIM:{omim_id}' if omim_id else mondo_id
             response['individualsByGuid'][individual_guid] = {
                 **individual,
                 'familyGuid': family_guid,
                 'individualGuid': individual_guid,
-                'features': [
-                    {'category': category, 'label': f'{count} terms'}
-                    for category, count in feature_category_count.items()
-                ],
+                'features': features,
             }
             variant['genotypes'][individual_guid] = genotype
+
+    variant['discoveryTagFamilies'] = sorted([
+        family_guid_map[family_guid] for family_guid in variant['discoveryTagFamilies'] if family_guid in family_guid_map
+    ])
+    variant['excludedTagFamilies'] = sorted([
+        family_guid_map[family_guid] for family_guid in variant['excludedTagFamilies'] if family_guid in family_guid_map
+    ])
+
+    _parse_hpo_terms(all_feature_ids, response['individualsByGuid'].values())
+
+
+def _parse_hpo_terms(all_feature_ids, individuals):
+    hpo_terms_by_id = {
+        hpo.pop('hpo_id'): hpo for hpo in HumanPhenotypeOntology.objects.filter(hpo_id__in=all_feature_ids).values(
+            'hpo_id', category=F('category_id'), label=F('name'),
+        )
+    }
+    for individual in individuals:
+        for feature in individual['features'] or []:
+            feature.update(hpo_terms_by_id.get(feature['id'], {}))
+        if individual.pop('restrict_sharing', False) and individual['features']:
+            feature_category_count = defaultdict(int)
+            for feature in individual['features']:
+                feature_category_count[feature.get('category', 'Other')] += 1
+            individual['features'] = [
+                {'category': category, 'label': f'{count} terms'}
+                for category, count in feature_category_count.items()
+            ]
+
+
+@login_and_policies_required
+def vlm_lookup_handler(request):
+    kwargs = {_to_snake_case(k): v for k, v in request.GET.items()}
+    variant_id = kwargs.pop('variant_id')
+    parsed_variant_id = parse_variant_id(variant_id)
+    if not parsed_variant_id:
+        raise InvalidSearchException('VLM lookup is not supported for SVs')
+    invalid_alleles = [f'"{allele}"' for allele in parsed_variant_id[2:] if not re.fullmatch(r'[ATCG]+', allele)]
+    if invalid_alleles:
+        raise InvalidSearchException(f'Unable to search VLM for invalid allele(s): {", ".join(invalid_alleles)}')
+    if any(len(allele) > 1 for allele in parsed_variant_id[2:]):
+        raise InvalidSearchException('VLM lookup is not supported for InDels')
+
+    return create_json_response({'vlmMatches': vlm_lookup(request.user, *parsed_variant_id, **kwargs)})
+
+def search_results_redirect(request):
+    return redirect(request.get_full_path().replace('/report/custom_search', '/variant_search/results'), permanent=True)

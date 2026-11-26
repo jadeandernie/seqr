@@ -1,19 +1,22 @@
 import logging
 import json
+
+from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 
+from clickhouse_search.models.postgres_dicts import DiscoveryVariantDict, ExcludedVariantDict
 from seqr.models import SavedVariant, VariantTagType, VariantTag, VariantNote, VariantFunctionalData,\
-    Family, GeneNote, Project
-from seqr.utils.search.utils import backend_specific_call
+    Family, GeneNote, Dataset
+from seqr.utils.xpos_utils import get_xpos
 from seqr.views.utils.json_to_orm_utils import update_model_from_json, get_or_create_model_from_json, \
     create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import get_json_for_saved_variants_with_tags, get_json_for_variant_note, \
     get_json_for_saved_variants_child_entities, get_json_for_gene_notes_by_gene_id, STRUCTURED_METADATA_TAG_TYPES
-from seqr.views.utils.permissions_utils import get_project_and_check_permissions, check_project_permissions, \
-    login_and_policies_required
-from seqr.views.utils.variant_utils import update_project_saved_variant_json, reset_cached_search_results, \
-    get_variants_response, parse_saved_variant_json
+from seqr.views.utils.permissions_utils import get_project_analysis_groups_and_check_view_permission, check_project_edit_permission, \
+    login_and_policies_required, check_family_view_permission, check_user_created_object_permissions, \
+    has_project_edit_permission
+from seqr.views.utils.variant_utils import get_variants_response, parse_saved_variant_json, DISCOVERY_CATEGORY
 
 
 logger = logging.getLogger(__name__)
@@ -22,23 +25,28 @@ INCLUDE_LOCUS_LISTS_PARAM = 'includeLocusLists'
 
 @login_and_policies_required
 def saved_variant_data(request, project_guid, variant_guids=None):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
     family_guids = request.GET['families'].split(',') if request.GET.get('families') else None
     variant_guids = variant_guids.split(',') if variant_guids else None
 
-    variant_query = SavedVariant.objects.filter(family__project=project)
+    variant_query = SavedVariant.objects.filter(family__analysisgroup__in=analysis_groups) \
+        if analysis_groups else SavedVariant.objects.filter(family__project=project)
     if variant_guids:
         variant_query = variant_query.filter(guid__in=variant_guids)
         if variant_query.count() < 1:
             return create_json_response({}, status=404, reason='Variant {} not found'.format(', '.join(variant_guids)))
     elif family_guids:
+        if analysis_groups:
+            family_guids = analysis_groups.filter(families__guid__in=family_guids).values_list('families__guid').distinct()
+            if not family_guids:
+                raise PermissionDenied(f'{request.user} does not have sufficient permissions for requested families')
         variant_query = variant_query.filter(family__guid__in=family_guids)
     else:
         get_note_only = bool(request.GET.get('includeNoteVariants'))
         variant_query = variant_query.filter(varianttag__isnull=get_note_only).distinct()
 
     add_locus_list_detail = request.GET.get(INCLUDE_LOCUS_LISTS_PARAM) == 'true'
-    response = get_variants_response(request, variant_query, add_locus_list_detail=add_locus_list_detail)
+    response = get_variants_response(request, variant_query, add_locus_list_detail=add_locus_list_detail, genome_version= project.genome_version)
     if 'individualsByGuid' in response and not family_guids:
         if 'projectsByGuid' not in response:
             response['projectsByGuid'] = {project_guid: {}}
@@ -48,12 +56,56 @@ def saved_variant_data(request, project_guid, variant_guids=None):
 
 
 @login_and_policies_required
+def create_manual_saved_variant_handler(request, family_guid):
+    family = Family.objects.get(guid=family_guid)
+    check_family_view_permission(family, request.user)
+
+    variant_json = json.loads(request.body)
+    tags = variant_json.pop('tags', [])
+    saved_variant_guids = {guid for guid, is_selected in variant_json.pop('variants', {}).items() if is_selected}
+
+    try:
+        xpos = get_xpos(variant_json['chrom'], variant_json['pos'])
+        variant_id = variant_json.get('svName') or f"{variant_json['chrom']}-{variant_json['pos']}-{variant_json['ref']}-{variant_json['alt']}"
+    except (KeyError, ValueError) as e:
+        return create_json_response({'error': str(e)}, status=400)
+
+    gene_id = variant_json.pop('geneId', None)
+    main_transcript = {}
+    if variant_json.get('mainTranscriptId'):
+        main_transcript = {
+            'transcriptId': variant_json['mainTranscriptId'],
+            'hgvsc': variant_json.pop('hgvsc', None),
+            'hgvsp': variant_json.pop('hgvsp', None),
+        }
+
+    variant_json.update({
+        'variantId': variant_id,
+        'xpos': xpos,
+        'key': None,
+        'dataset_type': Dataset.DATASET_TYPE_SV_CALLS if variant_json.get('svName') else Dataset.DATASET_TYPE_VARIANT_CALLS,
+        'gene_ids': [gene_id] if gene_id else [],
+        'main_transcript': main_transcript,
+    })
+
+    model_json = parse_saved_variant_json(variant_json, family.id)
+    saved_variant = create_model_from_json(SavedVariant, model_json, request.user)
+    saved_variant_guids.add(saved_variant.guid)
+
+    saved_variants = SavedVariant.objects.filter(family=family, guid__in=saved_variant_guids)
+    _update_tags(saved_variants, {'tags': tags}, request.user)
+
+    response = get_json_for_saved_variants_with_tags(saved_variants)
+    return create_json_response(response)
+
+
+@login_and_policies_required
 def create_saved_variant_handler(request):
     variant_json = json.loads(request.body)
     family_guid = variant_json['familyGuid']
 
     family = Family.objects.get(guid=family_guid)
-    check_project_permissions(family.project, request.user)
+    check_family_view_permission(family, request.user)
 
     variants_json = variant_json['variant']
     if not isinstance(variant_json['variant'], list):
@@ -61,12 +113,10 @@ def create_saved_variant_handler(request):
 
     saved_variant_guids = []
     for single_variant_json in variants_json:
-        try:
-            create_json, update_json = parse_saved_variant_json(single_variant_json, family.id)
-        except ValueError as e:
-            return create_json_response({'error': str(e)}, status=400)
+        parsed_json = parse_saved_variant_json(single_variant_json, family.id)
+        create_json = {field: parsed_json[field] for field in ['key', 'xpos', 'variant_id', 'family_id']}
         saved_variant, _ = get_or_create_model_from_json(
-            SavedVariant, create_json=create_json, update_json=update_json,
+            SavedVariant, create_json=create_json, update_json=parsed_json,
             user=request.user, update_on_create_only=True)
         saved_variant_guids.append(saved_variant.guid)
     saved_variants = SavedVariant.objects.filter(guid__in=saved_variant_guids)
@@ -77,7 +127,7 @@ def create_saved_variant_handler(request):
     elif variant_json.get('tags'):
         _update_tags(saved_variants, variant_json, request.user)
 
-    response.update(get_json_for_saved_variants_with_tags(saved_variants, add_details=True))
+    response.update(get_json_for_saved_variants_with_tags(saved_variants))
     return create_json_response(response)
 
 
@@ -87,7 +137,7 @@ def create_variant_note_handler(request, variant_guids):
 
     family_guid = request_json.pop('familyGuid')
     family = Family.objects.get(guid=family_guid)
-    check_project_permissions(family.project, request.user)
+    check_family_view_permission(family, request.user)
 
     all_variant_guids = variant_guids.split(',')
     saved_variants = SavedVariant.objects.filter(guid__in=all_variant_guids)
@@ -123,13 +173,9 @@ def _create_variant_note(saved_variants, note_json, user):
 
     response = {}
     if note_json.get('saveAsGeneNote'):
-        main_transcript_id = saved_variants[0].selected_main_transcript_id or saved_variants[0].saved_variant_json.get('mainTranscriptId')
-        if main_transcript_id:
-            gene_id = next(
-                gene_id for gene_id, transcripts in saved_variants[0].saved_variant_json['transcripts'].items()
-                if any(t['transcriptId'] == main_transcript_id for t in transcripts))
-        else:
-            gene_id = next(gene_id for gene_id in sorted(saved_variants[0].saved_variant_json['transcripts']))
+        variant = saved_variants[0]
+        gene_id = variant.gene_ids[0] if len(variant.gene_ids) == 1 or not variant.selected_main_transcript_id \
+            else variant.main_transcript.get('geneId')
         create_model_from_json(GeneNote, {'note': note_json.get('note'), 'gene_id': gene_id}, user)
         response['genesById'] = {gene_id: {
             'notes': get_json_for_gene_notes_by_gene_id([gene_id], user)[gene_id],
@@ -138,12 +184,17 @@ def _create_variant_note(saved_variants, note_json, user):
     return note, response
 
 
+def _check_user_can_edit_object(family, user, obj):
+    check_family_view_permission(family, user)
+    if not has_project_edit_permission(family.project, user):
+        check_user_created_object_permissions(obj, user)
+
+
 @login_and_policies_required
 def update_variant_note_handler(request, variant_guids, note_guid):
     note = VariantNote.objects.get(guid=note_guid)
-    projects = {saved_variant.family.project for saved_variant in note.saved_variants.all()}
-    for project in projects:
-        check_project_permissions(project, request.user)
+    family = Family.objects.get(id__in=note.saved_variants.values_list('family_id', flat=True))
+    _check_user_can_edit_object(family, request.user, note)
     request_json = json.loads(request.body)
     update_model_from_json(note, request_json, user=request.user, allow_unknown_keys=True)
 
@@ -159,9 +210,8 @@ def update_variant_note_handler(request, variant_guids, note_guid):
 def delete_variant_note_handler(request, variant_guids, note_guid):
     variant_guids = variant_guids.split(',')
     note = VariantNote.objects.get(guid=note_guid)
-    projects = {saved_variant.family.project for saved_variant in note.saved_variants.all()}
-    for project in projects:
-        check_project_permissions(project, request.user)
+    family = Family.objects.get(id__in=note.saved_variants.values_list('family_id', flat=True))
+    _check_user_can_edit_object(family, request.user, note)
     note.delete_model(request.user, user_can_delete=True)
 
     saved_variants_by_guid = {}
@@ -199,7 +249,7 @@ def update_variant_acmg_classification_handler(request, variant_guid):
 
 def _update_variant_acmg_classification(request, variant_guid):
     saved_variant = SavedVariant.objects.get(guid=variant_guid)
-    check_project_permissions(saved_variant.family.project, request.user)
+    _check_user_can_edit_object(saved_variant.family, request.user, saved_variant)
 
     request_json = json.loads(request.body)
     variant = request_json.get('variant')
@@ -224,8 +274,9 @@ def _update_variant_tag_models(request, variant_guids, tag_key, model_cls, get_t
     request_json = json.loads(request.body)
 
     family_guid = request_json.pop('familyGuid')
-    project = Project.objects.get(family__guid=family_guid)
-    check_project_permissions(project, request.user)
+    family = Family.objects.get(guid=family_guid)
+    check_family_view_permission(family, request.user)
+    can_edit = has_project_edit_permission(family.project, request.user)
 
     all_variant_guids = set(variant_guids.split(','))
     saved_variants = SavedVariant.objects.filter(guid__in=all_variant_guids)
@@ -236,9 +287,9 @@ def _update_variant_tag_models(request, variant_guids, tag_key, model_cls, get_t
 
     tag_type = tag_key.lower().rstrip('s')
     updated_data = request_json.get(tag_key, [])
-    deleted_guids = _delete_removed_tags(saved_variants, all_variant_guids, updated_data, request.user, tag_type, protected_tag_types)
+    deleted_guids, has_discovery_update, has_excluded_update = _delete_removed_tags(saved_variants, all_variant_guids, updated_data, request.user, can_edit, tag_type, protected_tag_types)
 
-    _update_tags(saved_variants, request_json, request.user, tag_key, model_cls, get_tag_create_data)
+    _update_tags(saved_variants, request_json, request.user, tag_key, model_cls, get_tag_create_data, has_discovery_update=has_discovery_update, has_excluded_update=has_excluded_update, can_edit=can_edit)
 
     saved_variant_id_map = {sv.id: sv.guid for sv in saved_variants}
     tags, variant_tag_map = get_json_for_saved_variants_child_entities(model_cls, saved_variant_id_map)
@@ -266,29 +317,45 @@ def _get_tag_set(saved_variant, tag_type):
     return getattr(saved_variant, 'variant{}_set'.format(tag_type))
 
 
-def _delete_removed_tags(saved_variants, all_variant_guids, tag_updates, user, tag_type, protected_tag_types):
+def _delete_removed_tags(saved_variants, all_variant_guids, tag_updates, user, can_edit, tag_type, protected_tag_types):
     existing_tag_guids = [tag['tagGuid'] for tag in tag_updates if tag.get('tagGuid')]
     deleted_tag_guids = []
     tag_set = _get_tag_set(saved_variants[0], tag_type)
-    remove_tags = tag_set.exclude(guid__in=existing_tag_guids)
+    remove_tags = tag_set.order_by('id').exclude(guid__in=existing_tag_guids)
     if protected_tag_types:
         remove_tags = remove_tags.exclude(variant_tag_type__name__in=protected_tag_types)
+    if not can_edit:
+        remove_tags = remove_tags.filter(created_by=user)
+    track_updates = tag_type == 'tag'
+    has_discovery_update = False
+    has_excluded_update = False
     for tag in remove_tags:
         tag_variant_guids = {sv.guid for sv in tag.saved_variants.all()}
         if tag_variant_guids == all_variant_guids:
+            if track_updates:
+                if tag.variant_tag_type.category == DISCOVERY_CATEGORY:
+                    has_discovery_update = True
+                elif tag.variant_tag_type.name == 'Excluded':
+                    has_excluded_update = True
             deleted_tag_guids.append(tag.guid)
             tag.delete_model(user, user_can_delete=True)
-    return deleted_tag_guids
+    return deleted_tag_guids, has_discovery_update, has_excluded_update
 
 
-def _update_tags(saved_variants, tags_json, user, tag_key='tags', model_cls=VariantTag, get_tag_create_data=_get_tag_type_create_data):
+def _update_tags(saved_variants, tags_json, user, tag_key='tags', model_cls=VariantTag, get_tag_create_data=_get_tag_type_create_data, has_discovery_update=False, has_excluded_update=False, can_edit=False):
     tags = tags_json.get(tag_key, [])
     for tag in tags:
         if tag.get('tagGuid'):
             model = model_cls.objects.get(guid=tag.get('tagGuid'))
-            update_model_from_json(model, tag, user=user, allow_unknown_keys=True)
+            if can_edit or model.created_by == user:
+                update_model_from_json(model, tag, user=user, allow_unknown_keys=True)
         else:
             create_data = get_tag_create_data(tag, saved_variants=saved_variants)
+            if 'variant_tag_type' in create_data:
+                if create_data['variant_tag_type'].category == DISCOVERY_CATEGORY:
+                    has_discovery_update = True
+                elif create_data['variant_tag_type'].name == 'Excluded':
+                    has_excluded_update = True
             create_data.update({
                 'metadata': tag.get('metadata'),
                 'search_hash': tags_json.get('searchHash'),
@@ -296,30 +363,20 @@ def _update_tags(saved_variants, tags_json, user, tag_key='tags', model_cls=Vari
             model = create_model_from_json(model_cls, create_data, user)
             model.saved_variants.set(saved_variants)
 
-
-@login_and_policies_required
-def update_saved_variant_json(request, project_guid):
-    backend_specific_call(lambda: True, _hail_backend_error)()
-    project = get_project_and_check_permissions(project_guid, request.user, can_edit=True)
-    reset_cached_search_results(project)
-    try:
-        updated_saved_variant_guids = update_project_saved_variant_json(project.id, project.genome_version, user=request.user)
-    except Exception as e:
-        logger.error('Unable to reset saved variant json for {}: {}'.format(project_guid, e))
-        updated_saved_variant_guids = []
-
-    return create_json_response({variant_guid: None for variant_guid in updated_saved_variant_guids or []})
-
-
-def _hail_backend_error(*args, **kwargs):
-    raise ValueError('Endpoint is disabled for the hail backend')
+    if has_discovery_update:
+        DiscoveryVariantDict.reload(user)
+    if has_excluded_update:
+        ExcludedVariantDict.reload(user)
 
 
 @login_and_policies_required
 def update_variant_main_transcript(request, variant_guid, transcript_id):
     saved_variant = SavedVariant.objects.get(guid=variant_guid)
-    check_project_permissions(saved_variant.family.project, request.user, can_edit=True)
+    check_project_edit_permission(saved_variant.family.project, request.user)
 
-    update_model_from_json(saved_variant, {'selected_main_transcript_id': transcript_id}, request.user)
+    update_model_from_json(saved_variant, {
+        'selected_main_transcript_id': transcript_id,
+        'main_transcript': json.loads(request.body),
+    }, request.user)
 
     return create_json_response({'savedVariantsByGuid': {variant_guid: {'selectedMainTranscriptId': transcript_id}}})

@@ -1,0 +1,1983 @@
+[
+{
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 1,
+    "fields": {
+      "key": 1,
+      "sorted_transcript_consequences": [],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 2,
+    "fields": {
+      "key": 2,
+      "sorted_transcript_consequences": [
+        [0.99779, 1, ["missense_variant"], false, null, "ENSG00000177000", true],
+        [null, null, ["5_prime_UTR_variant"], false, "5_prime_UTR_stop_codon_loss_variant", "ENSG00000177000", false],
+        [null, null, ["5_prime_UTR_variant"], false, "5_prime_UTR_stop_codon_loss_variant", "ENSG00000177000", false],
+        [0.99779, null, ["missense_variant", "NMD_transcript_variant"], false, null, "ENSG00000277258", true],
+        [null, null, ["missense_variant"], false, null, "ENSG00000177000", false],
+        [null, null, ["non_coding_transcript_exon_variant"], false, null, "ENSG00000177000", false],
+        [null, null, ["non_coding_transcript_exon_variant"], false, null, "ENSG00000177000", false]
+      ],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 3,
+    "fields": {
+      "key": 3,
+      "sorted_transcript_consequences": [
+        [null, 1, ["intron_variant"], false, null, "ENSG00000097046", false],
+        [null, null, ["intron_variant"], false, null, "ENSG00000177000", false],
+        [null, null, ["intron_variant"], false, null, "ENSG00000097046", false],
+        [null, null, ["non_coding_transcript_exon_variant"], false, null, "ENSG00000097046", true]
+      ],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": [
+        [[2]]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 4,
+    "fields": {
+      "key": 4,
+      "sorted_transcript_consequences": [
+        [null, null, ["splice_donor_variant"], true, null, "ENSG00000097046", true],
+        [0.1, 1, ["missense_variant"], false, null, "ENSG00000097046", false],
+        [null, null, ["missense_variant"], false, null, "ENSG00000097046", false]
+      ],
+      "sorted_motif_feature_consequences": [
+        [[2]],
+        [[2]]
+      ],
+      "sorted_regulatory_feature_consequences": [
+        [[2]]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 5,
+    "fields": {
+      "key": 5,
+      "sorted_transcript_consequences": [],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 6,
+    "fields": {
+      "key": 6,
+      "sorted_transcript_consequences": [],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+},  {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 22,
+    "fields": {
+      "key": 22,
+      "sorted_transcript_consequences": [
+        [null, 1, ["missense_variant"], false, null, "ENSG00000171621", false]
+      ],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+}, {
+    "model": "clickhouse_search.variantssnvindel",
+    "pk": 23,
+    "fields": {
+      "key": 23,
+      "sorted_transcript_consequences": [
+        [null, 1, ["missense_variant"], false, null, "ENSG00000227232", false],
+        [null, 1, ["intron_variant"], false, null, "ENSG00000268903", false]
+      ],
+      "sorted_motif_feature_consequences": [],
+      "sorted_regulatory_feature_consequences": []
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-10439-AC-A",
+    "fields": {
+      "key": 1
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "key": 2
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "key": 3
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-91511686-T-G",
+    "fields": {
+      "key": 4
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-10146-ACC-A",
+    "fields": {
+      "key": 5
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "key": 22
+    }
+}, {
+    "model": "clickhouse_search.keylookupsnvindel",
+    "pk": "21-3343353-GAGA-G",
+    "fields": {
+      "key": 23
+    }
+},{
+    "model": "clickhouse_search.clinvarallvariantssnvindel",
+    "pk": "1-10439-AC-A",
+    "fields": {
+      "version": "2025-06-23",
+      "allele_id": 19473,
+      "conflicting_pathogenicities": [],
+      "gold_stars": null,
+      "submitters": [],
+      "conditions": [],
+      "assertions": [],
+      "pathogenicity": "Likely_pathogenic"
+    }
+}, {
+    "model": "clickhouse_search.clinvarallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "version": "2025-06-23",
+      "allele_id": 18560,
+      "conflicting_pathogenicities": [
+        ["Likely_pathogenic", 1],
+        ["Uncertain_significance", 1],
+        ["Likely_benign", 1],
+        ["Benign", 5]
+      ],
+      "gold_stars": 1,
+      "submitters": [
+        "Broad Center for Mendelian Genomics, Broad Institute of MIT and Harvard",
+        "Illumina Laboratory Services, Illumina",
+        "Blueprint Genetics",
+        "GenomeConnect, ClinGen"
+      ],
+      "conditions": [
+        "ABCA4-Related Disorders",
+        "Severe early-childhood-onset retinal dystrophy",
+        "not specified",
+        "not provided"
+      ],
+      "assertions": [
+        "other"
+      ],
+      "pathogenicity": "Conflicting_classifications_of_pathogenicity"
+    }
+}, {
+    "model": "clickhouse_search.hgmdallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "accession": "CM981315",
+      "classification": 3
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-10439-AC-A",
+    "fields": {
+      "cadd": 4.668,
+      "fathmm": null,
+      "mpc": null,
+      "mut_pred": null,
+      "mut_taster": null,
+      "primate_ai": null,
+      "polyphen": null,
+      "revel": null,
+      "sift": null,
+      "vest": null
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "cadd": 25.9,
+      "fathmm": 0,
+      "mpc": 0.28205,
+      "mut_pred": null,
+      "mut_taster": "P",
+      "primate_ai": 0.46558,
+      "polyphen": 0.1,
+      "revel":  0.197,
+      "sift": 0.05,
+      "vest": 0.211
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "cadd": 28.754,
+      "fathmm": null,
+      "mpc": null,
+      "mut_pred": null,
+      "mut_taster": null,
+      "primate_ai": null,
+      "polyphen": null,
+      "revel":  null,
+      "sift": null,
+      "vest": null
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-91511686-T-G",
+    "fields": {
+      "cadd": 29.9,
+      "fathmm": 0,
+      "mpc": 0.83268,
+      "mut_pred": 0.687,
+      "mut_taster": "N",
+      "primate_ai": 0.69959,
+      "polyphen": 0,
+      "revel":  0.526,
+      "sift": 0,
+      "vest": 0.858
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-10146-ACC-A",
+    "fields": {
+      "cadd": 4.65299,
+      "fathmm": null,
+      "mpc": null,
+      "mut_pred": null,
+      "mut_taster": null,
+      "primate_ai": null,
+      "polyphen": null,
+      "revel": null,
+      "sift": null,
+      "vest": null
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantssnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "cadd": 1.92299,
+      "fathmm": null,
+      "mpc": null,
+      "mut_pred": null,
+      "mut_taster": null,
+      "primate_ai": null,
+      "polyphen": null,
+      "revel": null,
+      "sift": null,
+      "vest": null
+    }
+}, {
+    "model": "clickhouse_search.eigenallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 2.001
+    }
+}, {
+    "model": "clickhouse_search.eigenallvariantssnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "score": 1.378
+    }
+}, {
+    "model": "clickhouse_search.eigenallvariantssnvindel",
+    "pk": "1-91511686-T-G",
+    "fields": {
+      "score": 9.491
+    }
+}, {
+    "model": "clickhouse_search.eigenallvariantssnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "score": 2.24799
+    }
+}, {
+    "model": "clickhouse_search.spliceaiallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 0,
+      "consequence": 4
+    }
+}, {
+    "model": "clickhouse_search.spliceaiallvariantssnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "score": 0.01,
+      "consequence": 2
+    }
+}, {
+    "model": "clickhouse_search.spliceaiallvariantssnvindel",
+    "pk": "1-91511686-T-G",
+    "fields": {
+      "score": 0,
+      "consequence": 4
+    }
+}, {
+    "model": "clickhouse_search.spliceaiallvariantssnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "score": 0.01,
+      "consequence": 4
+    }
+}, {
+    "model": "clickhouse_search.pextallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 0.03
+    }
+}, {
+    "model": "clickhouse_search.promoteraiallvariants",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 0.64
+    }
+}, {
+    "model": "clickhouse_search.absplice2allvariants",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 0.11
+    }
+}, {
+    "model": "clickhouse_search.alphagenomeallvariants",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "score": 18.6
+    }
+}, {
+    "model": "clickhouse_search.gnomadnoncodingconstraintallvariantssnvindel",
+    "pk": 1,
+    "fields": {
+      "chrom": "1",
+      "score": 5.86851,
+      "start": 38720000,
+      "end": 38730000
+    }
+}, {
+    "model": "clickhouse_search.gnomadnoncodingconstraintallvariantssnvindel",
+    "pk": 2,
+    "fields": {
+      "chrom": "1",
+      "score": 0.73896,
+      "start": 91502000,
+      "end": 91503000
+    }
+}, {
+    "model": "clickhouse_search.gnomadnoncodingconstraintallvariantssnvindel",
+    "pk": 3,
+    "fields": {
+      "chrom": "1",
+      "score": 0.23005,
+      "start": 91511000,
+      "end": 91512000
+    }
+}, {
+    "model": "clickhouse_search.screenallvariantssnvindel",
+    "pk": 3,
+    "fields": {
+      "chrom": "1",
+      "start": 91511000,
+      "end": 91512000,
+      "region_type": "CTCF-only"
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-10439-AC-A",
+    "fields": {
+      "af": 0.03444932,
+      "ac": 927,
+      "an": 26912,
+      "hom": 48,
+      "hemi": 0,
+      "filter_af": 0.04027665
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "af": 0.00344493,
+      "ac": 927,
+      "an": 26912,
+      "hom": 0,
+      "hemi": 0,
+      "filter_af": 0.00402766
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "af": 0.00380411,
+      "ac": 57757,
+      "an": 151828,
+      "hom": 1,
+      "hemi": 0,
+      "filter_af": 0.00479778
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-91511686-T-G",
+    "fields": {
+      "af": 0.00026519,
+      "ac": 39,
+      "an": 147062,
+      "hom": 0,
+      "hemi": 0,
+      "filter_af": 0.00150301
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-10146-ACC-A",
+    "fields": {
+      "af": 0.0001243,
+      "ac": 2,
+      "an": 16090,
+      "hom": 0,
+      "hemi": 0,
+      "filter_af": 0.00233
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantssnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "af": 0.00004,
+      "ac": 13,
+      "an": 264690,
+      "hom": 13,
+      "hemi": 0,
+      "filter_af": 0.0002
+    }
+}, {
+    "model": "clickhouse_search.gnomadexomesallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "af": 0.00288997,
+      "ac": 72672,
+      "an": 251462,
+      "hom": 1,
+      "hemi": 0,
+      "filter_af": 0.0041164
+    }
+}, {
+    "model": "clickhouse_search.gnomadexomesallvariantssnvindel",
+    "pk": "1-9310123-T-C",
+    "fields": {
+      "af": 0.00004,
+      "ac": 4,
+      "an": 90386,
+      "hom": 0,
+      "hemi": 0,
+      "filter_af": 0.0001
+    }
+}, {
+    "model": "clickhouse_search.topmedallvariantssnvindel",
+    "pk": "1-10439-AC-A",
+    "fields": {
+      "af": 0.07842,
+      "ac": 20757,
+      "an": 264690,
+      "hom": 0,
+      "het": 20757
+    }
+}, {
+    "model": "clickhouse_search.topmedallvariantssnvindel",
+    "pk": "1-38724419-T-G",
+    "fields": {
+      "af": 0.246152,
+      "ac": 65154,
+      "an": 264690,
+      "hom": 8775,
+      "het": 47604
+    }
+}, {
+    "model": "clickhouse_search.topmedallvariantssnvindel",
+    "pk": "1-91502721-G-A",
+    "fields": {
+      "af": 0.362681,
+      "ac": 95998,
+      "an": 264690,
+      "hom": 19369,
+      "het": 57260
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 1,
+    "fields": {
+      "key": 1,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 1000010439,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 20, 0, 60],
+        ["HG00732", 0, 0, 0, 24],
+        ["HG00731", 1, 99, 0.5, 10]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 2,
+    "fields": {
+      "key": 2,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 1038724419,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [60, 72],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 40, 0, 33],
+        ["HG00732", 1, 99, 0.625, 32],
+        ["HG00731", 2, 99, 1, 36]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 3,
+    "fields": {
+      "key": 3,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 1091502721,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61, 60],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 1, 99, 0.40741, 27],
+        ["HG00732", 0, 99, 0.45946, 37],
+        ["HG00731", 1, 99, 1, 40]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 4,
+    "fields": {
+      "key": 4,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 1091511686,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61],
+      "filters": [
+        "VQSRTrancheSNP99.95to100.00"
+      ],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 30, 0, 45],
+        ["HG00732", 0, 30, 0, 24],
+        ["HG00731", 1, 58, 0.27241, 29]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 52,
+    "fields": {
+      "key": 2,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "sample_type": "WES",
+      "xpos": 1038724419,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [60, 72],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 40, 0, 33],
+        ["HG00732", 1, 99, 0.625, 32],
+        ["HG00731", 2, 99, 1, 36]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 53,
+    "fields": {
+      "key": 3,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "sample_type": "WES",
+      "xpos": 1091502721,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61, 60],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 1, 99, 0.40741, 27],
+        ["HG00732", 0, 99, 0.45946, 37],
+        ["HG00731", 1, 99, 1, 40]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 54,
+    "fields": {
+      "key": 4,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "sample_type": "WES",
+      "xpos": 1091511686,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61],
+      "filters": [
+        "VQSRTrancheSNP99.95to100.00"
+      ],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 0, 0, 45],
+        ["HG00732", 0, 0, 0, 24],
+        ["HG00731", 1, 58, 0.17241, 29]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 5,
+    "fields": {
+      "key": 3,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000003_3",
+      "sample_type": "WES",
+      "xpos": 1091502721,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61, 60],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20870", 1, 99, 0.6785714285714286, 28]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 6,
+    "fields": {
+      "key": 1,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WES",
+      "xpos": 1000010439,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 2, 16, 1, 6]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 7,
+    "fields": {
+      "key": 2,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WES",
+      "xpos": 1038724419,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [60, 72],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 1, 99, 0.5, 28]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 8,
+    "fields": {
+      "key": 5,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WES",
+      "xpos": 1000010146,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 1, 14, 0.875, 8]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 9,
+    "fields": {
+      "key": 1,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WGS",
+      "xpos": 1000010439,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 2, 16, 1, 6]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 10,
+    "fields": {
+      "key": 2,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WGS",
+      "xpos": 1038724419,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [60, 72],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 1, 99, 0.5, 28]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 11,
+    "fields": {
+      "key": 5,
+      "project_guid": "R0003_test",
+      "family_guid": "F000011_11",
+      "sample_type": "WGS",
+      "xpos": 1000010146,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20885", 1, 14, 0.875, 8]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 12,
+    "fields": {
+      "key": 1,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WGS",
+      "xpos": 1000010439,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 20, 0, 60],
+        ["HG00732", 1, 99, 0, 24],
+        ["HG00731", 2, 99, 0.5, 10]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 13,
+    "fields": {
+      "key": 2,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WGS",
+      "xpos": 1038724419,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [60, 72],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 0, 40, 0, 33],
+        ["HG00732", 0, 99, 0.625, 32],
+        ["HG00731", 2, 99, 1, 36]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 14,
+    "fields": {
+      "key": 3,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WGS",
+      "xpos": 1091502721,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61, 60],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 1, 99, 0.40741, 27],
+        ["HG00732", 0, 99, 0.45946, 37],
+        ["HG00731", 1, 99, 1, 40]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 15,
+    "fields": {
+      "key": 4,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WGS",
+      "xpos": 1091511686,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [61],
+      "filters": [
+        "VQSRTrancheSNP99.95to100.00"
+      ],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 2, 0, 0, 45],
+        ["HG00732", 0, 0, 0, 24],
+        ["HG00731", 1, 58, 0.17241, 29]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 22,
+    "fields": {
+      "key": 22,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "sample_type": "WGS",
+      "xpos": 1009310123,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [71],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 2, 0, 0, 45],
+        ["NA21987", 1, 58, 0.17241, 29],
+        ["NA21654", 0, 0, 0, 24]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriessnvindel",
+    "pk": 23,
+    "fields": {
+      "key": 23,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000001_1",
+      "sample_type": "WES",
+      "xpos": 21003343353,
+      "is_gnomad_gt_5_percent": false,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [2],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA19678", 1, 0, 0.16, 45]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantsgrch37snvindel",
+    "pk": 10,
+    "fields": {
+      "key": 11,
+      "sorted_transcript_consequences": [
+        [1, ["missense_variant"], "ENSG00000271079"],
+        [1, ["non_coding_transcript_exon_variant", "non_coding_transcript_variant"], "ENSG00000176227"]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgrch37snvindel",
+    "pk": 20,
+    "fields": {
+      "key": 11,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 7143270172,
+      "is_gnomad_gt_5_percent": true,
+      "is_annotated_in_any_gene": true,
+      "geneId_ids": [73, 74],
+      "filters": [
+        "VQSRTrancheSNP99.90to99.95"
+      ],
+      "sign": 1,
+      "calls": [
+        ["HG00733", null, 0, null, null],
+        ["HG00731", 2, 48, 1, 16]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgrch37snvindel",
+    "pk": 21,
+    "fields": {
+      "key": 21,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "sample_type": "WGS",
+      "xpos": 1000010439,
+      "is_gnomad_gt_5_percent": true,
+      "is_annotated_in_any_gene": false,
+      "geneId_ids": [],
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 1, 87, 0.531, 27]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.keylookupgrch37snvindel",
+    "pk": 1,
+    "fields": {
+      "key": 21,
+      "variant_id": "1-10439-AC-A"
+    }
+}, {
+    "model": "clickhouse_search.keylookupgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "key": 11
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "cadd": 13.02,
+      "fathmm": null,
+      "mpc": null,
+      "mut_pred": null,
+      "mut_taster": null,
+      "primate_ai": 0.49064,
+      "polyphen": null,
+      "revel": null,
+      "sift": null,
+      "vest": null
+    }
+}, {
+    "model": "clickhouse_search.eigenallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "score": 3.951
+    }
+}, {
+    "model": "clickhouse_search.spliceaiallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "score": 0,
+      "consequence": 4
+    }
+}, {
+    "model": "clickhouse_search.gnomadgenomesallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "af": 0.61364776,
+      "ac": 14649,
+      "an": 23872,
+      "hom": 4584,
+      "hemi": 0,
+      "filter_af": 0.82843894
+    }
+}, {
+    "model": "clickhouse_search.gnomadexomesallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "af": 0.63542193,
+      "ac": 137532,
+      "an": 216442,
+      "hom": 45869,
+      "hemi": 0,
+      "filter_af": 0.82261163
+    }
+}, {
+    "model": "clickhouse_search.topmedallvariantsgrch37snvindel",
+    "pk": "7-143270172-A-G",
+    "fields": {
+      "af": 0.52131897,
+      "ac": 65461,
+      "an": 125568,
+      "hom": 16156,
+      "het": 33149
+    }
+}, {
+    "model": "clickhouse_search.variantsmito",
+    "pk": 6,
+    "fields": {
+      "key": 6,
+      "variant_id": "M-4429-G-A",
+      "rsid": "rs1603219456",
+      "lifted_over_pos": 4429,
+      "common_low_heteroplasmy": false,
+      "mitotip": "likely_pathogenic",
+      "haplogroup_defining": null,
+      "sorted_transcript_consequences": [
+        [
+          null, "Mt_tRNA", 1, null, ["non_coding_transcript_exon_variant"], "ENSG00000210112", "ENST00000387377.1:n.28G>A",
+          null, [null, []], "non_coding_transcript_exon_variant", "ENST00000387377", 0
+        ]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantsmito",
+    "pk": 7,
+    "fields": {
+      "key": 7,
+      "variant_id": "M-11597-A-G",
+      "rsid": null,
+      "lifted_over_pos": 11597,
+      "common_low_heteroplasmy": false,
+      "mitotip": null,
+      "haplogroup_defining": null,
+      "sorted_transcript_consequences": [
+        [
+          "T/A", "protein_coding", 1, "Aca/Gca", ["missense_variant"], "ENSG00000198886", "ENST00000361381.2:c.838A>G",
+          "ENSP00000354961.2:p.Thr280Ala", [null, []], "missense_variant", "ENST00000361381", 0
+        ]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantsmito",
+    "pk": 8,
+    "fields": {
+      "key": 8,
+      "variant_id": "M-14783-T-C",
+      "rsid": "rs193302982",
+      "lifted_over_pos": 14783,
+      "common_low_heteroplasmy": true,
+      "mitotip": null,
+      "haplogroup_defining": true,
+      "sorted_transcript_consequences": [
+        [
+          "L", "protein_coding", 1, "Tta/Cta", ["synonymous_variant"], "ENSG00000198727", "ENST00000361789.2:c.37T>C",
+          "ENSP00000354554.2:p.Leu13=", [null, []], "synonymous_variant", "ENST00000361789", 0
+        ]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.keylookupmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "key": 6
+    }
+}, {
+    "model": "clickhouse_search.keylookupmito",
+    "pk": "M-11597-A-G",
+    "fields": {
+      "key": 7
+    }
+}, {
+    "model": "clickhouse_search.keylookupmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "key": 8
+    }
+}, {
+    "model": "clickhouse_search.clinvarallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "version": "2025-06-23",
+      "allele_id": 677748,
+      "conflicting_pathogenicities": [],
+      "gold_stars": 1,
+      "submitters": [],
+      "conditions": [],
+      "assertions": [],
+      "pathogenicity": "Uncertain_significance"
+    }
+}, {
+    "model": "clickhouse_search.clinvarallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "version": "2025-06-23",
+      "allele_id": 150280,
+      "conflicting_pathogenicities": [],
+      "gold_stars": 0,
+      "submitters": [],
+      "conditions": [],
+      "assertions": [],
+      "pathogenicity": "Likely_pathogenic"
+    }
+}, {
+    "model": "clickhouse_search.dbnsfpallvariantsmito",
+    "pk": "M-11597-A-G",
+    "fields": {
+      "mut_taster": "N",
+      "sift": 0
+    }
+}, {
+    "model": "clickhouse_search.hmtvarallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "score": 0.05
+    }
+}, {
+    "model": "clickhouse_search.hmtvarallvariantsmito",
+    "pk": "M-11597-A-G",
+    "fields": {
+      "score": 0.75
+    }
+}, {
+    "model": "clickhouse_search.pextallvariantsmito",
+    "pk": "M-11597-A-G",
+    "fields": {
+      "score": 0.13
+    }
+}, {
+    "model": "clickhouse_search.localconstraintmitoallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "score": 3.38874
+    }
+}, {
+    "model": "clickhouse_search.localconstraintmitoallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "score": 0.7514
+    }
+},{
+    "model": "clickhouse_search.mitimpactallvariantsmito",
+    "pk": "M-11597-A-G",
+    "fields": {
+      "score": 0.58
+    }
+}, {
+    "model": "clickhouse_search.mitomapallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "pathogenic": true
+    }
+}, {
+    "model": "clickhouse_search.gnomadmitoallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "af": 0,
+      "ac": 0,
+      "an": 56419
+    }
+}, {
+    "model": "clickhouse_search.gnomadmitoheteroplasmyallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "af": 0,
+      "ac": 0,
+      "an": 56419,
+      "max_hl": 0
+    }
+}, {
+    "model": "clickhouse_search.helixmitoallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "af": 0,
+      "ac": 0,
+      "an": 195983
+    }
+}, {
+    "model": "clickhouse_search.helixmitoheteroplasmyallvariantsmito",
+    "pk": "M-4429-G-A",
+    "fields": {
+      "af": 0.00001531,
+      "ac": 3,
+      "an": 195983,
+      "max_hl": 0.20635
+    }
+}, {
+    "model": "clickhouse_search.gnomadmitoallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "af": 0.00553464,
+      "ac": 3118,
+      "an": 56336
+    }
+}, {
+    "model": "clickhouse_search.gnomadmitoheteroplasmyallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "af": 0.00005325,
+      "ac": 3,
+      "an": 56336,
+      "max_hl": 1
+    }
+}, {
+    "model": "clickhouse_search.helixmitoallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "af": 0.04884607,
+      "ac": 9573,
+      "an": 195983
+    }
+}, {
+    "model": "clickhouse_search.helixmitoheteroplasmyallvariantsmito",
+    "pk": "M-14783-T-C",
+    "fields": {
+      "af": 0.00009184,
+      "ac": 18,
+      "an": 195983,
+      "max_hl": 0.96269
+    }
+}, {
+    "model": "clickhouse_search.entriesmito",
+    "pk": 21,
+    "fields": {
+      "key": 6,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 25000004429,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3955, 0.083, 253, 0]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesmito",
+    "pk": 22,
+    "fields": {
+      "key": 7,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 25000011597,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3845, 0.029, 247, 0.015]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesmito",
+    "pk": 23,
+    "fields": {
+      "key": 8,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "sample_type": "WES",
+      "xpos": 25000014783,
+      "filters": ["artifact_prone_site"],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 2, 3943, 1, 214, 0]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.variantsgatksv",
+    "pk": 12,
+    "fields": {
+      "key": 12,
+      "xpos": 1009310023,
+      "chrom": "1",
+      "end_chrom": null,
+      "pos": 9310023,
+      "end": 9310127,
+      "variant_id": "phase2_DEL_chr1_625",
+      "lifted_over_chrom": "1",
+      "lifted_over_pos": 9370082,
+      "rg37_locus_end": ["1", 9370186],
+      "bothsides_support": false,
+      "algorithms": "manta",
+      "predictions": [null],
+      "populations": [
+        [0, 0, 0, ""]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000171621", "INTRONIC"]
+      ],
+      "sv_type": "DEL",
+      "sv_type_detail": null,
+      "cpx_intervals": [],
+      "sv_source_detail": [null]
+    }
+}, {
+    "model": "clickhouse_search.variantsgatksv",
+    "pk": 13,
+    "fields": {
+      "key": 13,
+      "xpos": 1009380254,
+      "chrom": "1",
+      "end_chrom": null,
+      "pos": 9380254,
+      "end": 9380286,
+      "variant_id": "cohort_2911.chr1.final_cleanup_INS_chr1_160",
+      "lifted_over_chrom": "1",
+      "lifted_over_pos": 9440313,
+      "rg37_locus_end": ["4", 9382012],
+      "bothsides_support": true,
+      "algorithms": "manta",
+      "predictions": [null],
+      "populations": [
+        [0.005423, 35634, 10359, "gnomAD-SV_v3_INS_1_299"]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000171621", "NEAREST_TSS"]
+      ],
+      "sv_type": "INS",
+      "sv_type_detail": null,
+      "cpx_intervals": [],
+      "sv_source_detail": [4]
+    }
+}, {
+    "model": "clickhouse_search.variantsgatksv",
+    "pk": 14,
+    "fields": {
+      "key": 14,
+      "xpos": 13063036002,
+      "chrom": "13",
+      "end_chrom": "17",
+      "pos": 63036002,
+      "end": 63036041,
+      "variant_id": "phase2_CPX_chr13_35",
+      "lifted_over_chrom": "13",
+      "lifted_over_pos": 63610135,
+      "rg37_locus_end": ["17", 61113402],
+      "bothsides_support": false,
+      "algorithms": "manta",
+      "predictions": [null],
+      "populations": [
+        [0, 0, 0, ""]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000083544", "NEAREST_TSS"],
+        [null, "NEAREST_TSS"]
+      ],
+      "sv_type": "CPX",
+      "sv_type_detail": "dDUP",
+      "cpx_intervals": [["17", 22150735, 22151179, "DUP"]],
+      "sv_source_detail": [null]
+    }
+}, {
+    "model": "clickhouse_search.variantsgatksv",
+    "pk": 15,
+    "fields": {
+      "key": 15,
+      "xpos": 17038719997,
+      "chrom": "17",
+      "end_chrom": null,
+      "pos": 38719997,
+      "end": 38737237,
+      "variant_id": "phase2_DEL_chr14_4640",
+      "lifted_over_chrom": "17",
+      "lifted_over_pos": 107150261,
+      "rg37_locus_end": [null, null],
+      "bothsides_support": false,
+      "algorithms": "depth,manta",
+      "predictions": [0.161],
+      "populations": [
+        [0, 0, 0, ""]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000184986", "NEAREST_TSS"]
+      ],
+      "sv_type": "DEL",
+      "sv_type_detail": null,
+      "cpx_intervals": [],
+      "sv_source_detail": [null]
+    }
+}, {
+    "model": "clickhouse_search.entriesgatksv",
+    "pk": 24,
+    "fields": {
+      "key": 12,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "xpos": 1009310023,
+      "filters": ["HIGH_SR_BACKGROUND"],
+      "geneId_ids": [71],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 1, 2, 0, false, true, null],
+        ["NA21987", 0, 2, 6, false, true, null],
+        ["NA21654", 0, 2, 99, false, true, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgatksv",
+    "pk": 25,
+    "fields": {
+      "key": 13,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "xpos": 1009380254,
+      "filters": ["HIGH_SR_BACKGROUND"],
+      "geneId_ids": [71],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 1, null, 0, true, false, null],
+        ["NA21987", 0, null, 99, true, false, null],
+        ["NA21654", 1, null, 0, true, false, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgatksv",
+    "pk": 26,
+    "fields": {
+      "key": 14,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "xpos": 13063036002,
+      "filters": ["HIGH_SR_BACKGROUND"],
+      "geneId_ids": [75],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 1, null, 62, false, true, null],
+        ["NA21987", 2, null, 42, false, true, null],
+        ["NA21654", 1, null, 79, false, true, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgatksv",
+    "pk": 27,
+    "fields": {
+      "key": 15,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "xpos": 14106694244,
+      "filters": [],
+      "geneId_ids": [76],
+      "sign": 1,
+      "calls": [
+        ["NA21987", 1, 1, 99, false, false, 2],
+        ["NA21654", 1, 1, 99, false, false, 2],
+        ["NA21234", 2, 0, 99, false, true, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.keylookupgatksv",
+    "pk": 1,
+    "fields": {
+      "key": 15,
+      "variant_id": "phase2_DEL_chr14_4640"
+    }
+}, {
+    "model": "clickhouse_search.variantsgcnv",
+    "pk": 16,
+    "fields": {
+      "key": 16,
+      "xpos": 14022417556,
+      "chrom": "14",
+      "pos": 22417556,
+      "end": 22589322,
+      "variant_id": "suffix_95340_DUP",
+      "lifted_over_chrom": "14",
+      "lifted_over_pos": 22886546,
+      "rg37_locus_end": [14, 23058228],
+      "num_exon": 4,
+      "predictions": [0.181],
+      "populations": [
+        [1763, 0.07649254, 23048, 0, 0]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000129562", "COPY_GAIN"]
+      ],
+      "sv_type": "DUP"
+    }
+}, {
+    "model": "clickhouse_search.variantsgcnv",
+    "pk": 17,
+    "fields": {
+      "key": 17,
+      "xpos": 16029802672,
+      "chrom": "16",
+      "pos": 29820440,
+      "end": 29815990,
+      "variant_id": "suffix_124520_DUP",
+      "lifted_over_chrom": "16",
+      "lifted_over_pos": 29813993,
+      "rg37_locus_end": [16, 29831761],
+      "num_exon": 26,
+      "predictions": [0.548],
+      "populations": [
+        [284, 0.01232211, 23047, 0, 0]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000013364", "LOF"],
+        ["ENSG00000079616", "LOF"],
+        ["ENSG00000103495", "COPY_GAIN"],
+        ["ENSG00000167371", "COPY_GAIN"],
+        ["ENSG00000280789", "LOF"],
+        ["ENSG00000280893", "COPY_GAIN"],
+        ["ENSG00000281348", "LOF"]
+      ],
+      "sv_type": "DUP"
+    }
+}, {
+    "model": "clickhouse_search.variantsgcnv",
+    "pk": 18,
+    "fields": {
+      "key": 18,
+      "xpos": 17038717327,
+      "chrom": "17",
+      "pos": 38717327,
+      "end": 38719993,
+      "variant_id": "suffix_140593_DUP",
+      "lifted_over_chrom": "17",
+      "lifted_over_pos": 36873580,
+      "rg37_locus_end": [17, 36876246],
+      "num_exon": 3,
+      "predictions": [0.786],
+      "populations": [
+        [35, 0.00151857, 23048, 0, 0]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000275023", "LOF"]
+      ],
+      "sv_type": "DUP"
+    }
+}, {
+    "model": "clickhouse_search.variantsgcnv",
+    "pk": 19,
+    "fields": {
+      "key": 19,
+      "xpos": 17038721781,
+      "chrom": "17",
+      "pos": 38721781,
+      "end": 38736268,
+      "variant_id": "suffix_140608_DUP",
+      "lifted_over_chrom": "17",
+      "lifted_over_pos": 36878034,
+      "rg37_locus_end": [17, 36892521],
+      "num_exon": 8,
+      "predictions": [0.71],
+      "populations": [
+        [115, 0.00498959, 23048, 0, 0]
+      ],
+      "sorted_gene_consequences": [
+        ["ENSG00000275023", "LOF"],
+        ["ENSG00000277258", "LOF"],
+        ["ENSG00000277972", "COPY_GAIN"]
+      ],
+      "sv_type": "DEL"
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 28,
+    "fields": {
+      "key": 16,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "xpos": 14022417556,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3, 38, false, 22438910, 22469796, 0, [], false, true, false],
+        ["HG00732", null, null, null, null, null, null, null, [], null, null, null],
+        ["HG00733", null, null, null, null, null, null, null, [], null, null, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 29,
+    "fields": {
+      "key": 17,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "xpos": 16029802672,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3, 29, false, 29809156, 29815990, 8, ["ENSG00000103495", "ENSG00000167371", "ENSG00000280893"], false, true, false],
+        ["HG00732", 1, 3, 46, false, 29809156, 29815990, 8, ["ENSG00000103495", "ENSG00000167371", "ENSG00000280893"], false, true, false],
+        ["HG00733", 1, 3, 37, false, 29809156, 29815990, 8, ["ENSG00000103495", "ENSG00000167371", "ENSG00000280893"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 30,
+    "fields": {
+      "key": 18,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "xpos": 17038717327,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 2, 4, 130, true, 38717327, 38719636, 3, ["ENSG00000275023"], true, false, false],
+        ["HG00732", 1, 3, 70, false, 38717327, 38719636, 3, ["ENSG00000275023"], false, false, true],
+        ["HG00733", null, null, null, null, null, null, null, [], null, null, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 31,
+    "fields": {
+      "key": 19,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2",
+      "xpos": 17038721781,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00733", 1, 3, 290, false, 38721781, 38734440, 7, ["ENSG00000275023", "ENSG00000277258", "ENSG00000277972"], false, true, false],
+        ["HG00732", null, null, null, null, null, null, null, [], null, null, null],
+        ["HG00731", 1, 3, 280, false, 38721781, 38735703, 7, ["ENSG00000275023", "ENSG00000277258", "ENSG00000277972"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 48,
+    "fields": {
+      "key": 16,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "xpos": 14022417556,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3, 38, false, 22438910, 22469796, 0, [], false, true, false],
+        ["HG00733", null, null, null, null, null, null, null, [], null, null, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 49,
+    "fields": {
+      "key": 17,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "xpos": 16029802672,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3, 29, false, 29809156, 29815990, 8, ["ENSG00000103495", "ENSG00000167371", "ENSG00000280893"], false, true, false],
+        ["HG00733", 1, 3, 37, false, 29809156, 29815990, 8, ["ENSG00000103495", "ENSG00000167371", "ENSG00000280893"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 40,
+    "fields": {
+      "key": 18,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "xpos": 17038717327,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 2, 4, 13, true, 38717327, 38719636, 3, ["ENSG00000275023"], true, false, false],
+        ["HG00733", null, null, null, null, null, null, null, [], null, null, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 41,
+    "fields": {
+      "key": 19,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000002_2_x",
+      "xpos": 17038721781,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["HG00731", 1, 3, 280, false, 38721781, 38735703, 7, ["ENSG00000275023", "ENSG00000277258", "ENSG00000277972"], false, true, false],
+        ["HG00733", 1, 3, 290, false, 38721781, 38734440, 7, ["ENSG00000275023", "ENSG00000277258", "ENSG00000277972"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 32,
+    "fields": {
+      "key": 16,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000003_3",
+      "xpos": 14022417556,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20870", 1, 3, 164, false, 22418039, 22507821, 0, ["ENSG00000129562"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 33,
+    "fields": {
+      "key": 17,
+      "project_guid": "R0001_1kg",
+      "family_guid": "F000003_3",
+      "xpos": 16029802672,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA20870", 1, 3, 40, false, 29809156, 29815990, 26, ["ENSG00000013364", "ENSG00000079616", "ENSG00000103495", "ENSG00000167371", "ENSG00000280789", "ENSG00000280893", "ENSG00000281348"], false, true, false]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.entriesgcnv",
+    "pk": 34,
+    "fields": {
+      "key": 18,
+      "project_guid": "R0004_non_analyst_project",
+      "family_guid": "F000014_14",
+      "xpos": 17038717327,
+      "filters": [],
+      "sign": 1,
+      "calls": [
+        ["NA21234", 2, 4, 27, true, 38717327, 38719636, 3, ["ENSG00000275023"], true, false, false],
+        ["NA21987", 2, 3, 51, false, 38717327, 38719636, 3, ["ENSG00000275023"], false, false, true],
+        ["NA21654", null, null, null, null, null, null, null, [], null, null, null]
+      ]
+    }
+}, {
+    "model": "clickhouse_search.keylookupgcnv",
+    "pk": 1,
+    "fields": {
+      "key": 18,
+      "variant_id": "suffix_140593_DUP"
+    }
+}, {
+    "model": "clickhouse_search.keylookupgcnv",
+    "pk": 2,
+    "fields": {
+      "key": 19,
+      "variant_id": "suffix_140608_DUP"
+    }
+}, {
+  "model": "reference_data.omim",
+  "pk": 100,
+  "fields": {
+      "gene": 60,
+      "mim_number": 147572,
+      "gene_description": "ISG15 ubiquitin-like modifier",
+      "comments": "",
+      "phenotype_inheritance": "Autosomal recessive",
+      "phenotype_mim_number": 616126,
+      "phenotype_description": "Immunodeficiency 38",
+      "chrom": "1",
+      "start": 11869,
+      "end": 14409,
+      "phenotype_map_method": "3"
+  }
+}, {
+  "model": "reference_data.omim",
+  "pk": 101,
+  "fields": {
+      "gene": 61,
+      "mim_number": 147573,
+      "gene_description": "ISG15 ubiquitin-like modifier",
+      "comments": "",
+      "phenotype_inheritance": "Autosomal recessive",
+      "phenotype_mim_number": 616126,
+      "phenotype_description": "Immunodeficiency 38",
+      "chrom": "1",
+      "start": 11869,
+      "end": 14409,
+      "phenotype_map_method": "3"
+  }
+}, {
+  "model": "reference_data.omim",
+  "pk": 102,
+  "fields": {
+      "gene": 70,
+      "mim_number": 147574,
+      "gene_description": "ISG15 ubiquitin-like modifier",
+      "comments": "",
+      "phenotype_inheritance": "Autosomal recessive",
+      "phenotype_mim_number": 616127,
+      "phenotype_description": "Immunodeficiency 38",
+      "chrom": "1",
+      "start": 11869,
+      "end": 14409,
+      "phenotype_map_method": "3"
+  }
+}, {
+    "model": "reference_data.geneconstraint",
+    "pk": 100,
+    "fields": {
+        "gene": 60,
+        "mis_z": -0.7773,
+        "mis_z_rank": 1,
+        "louef": 1.606,
+        "louef_rank": 0,
+        "pLI": 0.00090576,
+        "pLI_rank": 1
+    }
+}, {
+    "model": "reference_data.geneconstraint",
+    "pk": 101,
+    "fields": {
+        "gene": 61,
+        "mis_z": -0.7773,
+        "mis_z_rank": 3,
+        "louef": 1.606,
+        "louef_rank": 0,
+        "pLI": 0.00090576,
+        "pLI_rank": 1
+    }
+}, {
+    "model": "reference_data.geneconstraint",
+    "pk": 102,
+    "fields": {
+        "gene": 70,
+        "mis_z": -0.7773,
+        "mis_z_rank": 2,
+        "louef": 1.606,
+        "louef_rank": 0,
+        "pLI": 0.00090576,
+        "pLI_rank": 1
+    }
+}, {
+    "model": "seqr.phenotypeprioritization",
+    "pk": 100,
+    "fields": {
+        "guid": "PP000100_NA19675_1ENSG00000268",
+        "created_date": "2024-05-02T06:42:55.397Z",
+        "created_by": null,
+        "individual": 4,
+        "gene_id": "ENSG00000177000",
+        "tool": "exomiser",
+        "rank": 5,
+        "disease_id": "OMIM:618460",
+        "disease_name": "Khan-Khan-Katsanis syndrome",
+        "scores": {
+            "exomiser_score": 0.977923765,
+            "phenotype_score": 0.603998205,
+            "variant_score": 1
+        }
+    }
+}, {
+    "model": "seqr.phenotypeprioritization",
+    "pk": 101,
+    "fields": {
+        "guid": "PP000101_NA19675_1ENSG00000268",
+        "created_date": "2024-05-02T06:42:55.397Z",
+        "created_by": null,
+        "individual": 5,
+        "gene_id": "ENSG00000177000",
+        "tool": "exomiser",
+        "rank": 3,
+        "disease_id": "OMIM:618460",
+        "disease_name": "Khan-Khan-Katsanis syndrome",
+        "scores": {
+            "exomiser_score": 0.977923765,
+            "phenotype_score": 0.603998205,
+            "variant_score": 1
+        }
+    }
+}, {
+    "model": "reference_data.geneinfo",
+    "pk": 70,
+    "fields": {
+        "gene_id": "ENSG00000275023",
+        "gene_symbol": "CDC9",
+        "chrom_grch38": "17",
+        "start_grch38": 38717636,
+        "end_grch38": 38724781,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+},
+  {
+    "model": "reference_data.geneinfo",
+    "pk": 71,
+    "fields": {
+      "gene_id": "ENSG00000171621",
+      "gene_symbol": "CDC10",
+      "chrom_grch38": "1",
+      "start_grch38": 9292894,
+      "end_grch38": 9369532,
+      "strand_grch38": "+",
+      "coding_region_size_grch38": 0,
+      "gencode_gene_type": "protein_coding",
+      "gencode_release": 27
+    }
+}, {
+    "model": "reference_data.geneinfo",
+    "pk": 72,
+    "fields": {
+        "gene_id": "ENSG00000277258",
+        "gene_symbol": "CXC7",
+        "chrom_grch38": "1",
+        "start_grch38": 38717636,
+        "end_grch38": 38724781,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+},
+{
+    "model": "reference_data.geneinfo",
+    "pk": 73,
+    "fields": {
+        "gene_id": "ENSG00000271079",
+        "gene_symbol": "CTAGE15",
+        "chrom_grch38": "7",
+        "start_grch38": 143571801,
+        "end_grch38": 143574387,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+},
+{
+    "model": "reference_data.geneinfo",
+    "pk": 74,
+    "fields": {
+        "gene_id": "ENSG00000176227",
+        "gene_symbol": "CTAGE6",
+        "chrom_grch38": "7",
+        "start_grch38": 91500851,
+        "end_grch38": 91525764,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+},
+{
+    "model": "reference_data.geneinfo",
+    "pk": 75,
+    "fields": {
+        "gene_id": "ENSG00000083544",
+        "gene_symbol": "CTAGE6",
+        "chrom_grch38": "7",
+        "start_grch38": 91500851,
+        "end_grch38": 91525764,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+},
+{
+    "model": "reference_data.geneinfo",
+    "pk": 76,
+    "fields": {
+        "gene_id": "ENSG00000184986",
+        "gene_symbol": "CTAGE6",
+        "chrom_grch38": "7",
+        "start_grch38": 91500851,
+        "end_grch38": 91525764,
+        "strand_grch38": "+",
+        "coding_region_size_grch38": 0,
+        "gencode_gene_type": "protein_coding",
+        "gencode_release": 27
+    }
+}
+]

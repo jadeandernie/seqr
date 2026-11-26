@@ -1,11 +1,5 @@
-"""seqr URL Configuration
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/1.9/topics/http/urls/
-"""
 from seqr.views.react_app import main_app, no_login_main_app
 from seqr.views.status import status_view
-from seqr.views.apis.dataset_api import add_variants_dataset_handler
 from settings import ENABLE_DJANGO_DEBUG_TOOLBAR, MEDIA_ROOT, API_LOGIN_REQUIRED_URL, LOGIN_URL, DEBUG, \
     API_POLICY_REQUIRED_URL
 from django.conf.urls import include
@@ -53,14 +47,14 @@ from seqr.views.apis.case_review_api import \
 from seqr.views.apis.saved_variant_api import \
     saved_variant_data, \
     create_saved_variant_handler, \
+    create_manual_saved_variant_handler, \
     update_variant_tags_handler, \
     update_variant_acmg_classification_handler, \
     update_variant_functional_data_handler, \
     create_variant_note_handler, \
     update_variant_note_handler, \
     delete_variant_note_handler, \
-    update_variant_main_transcript, \
-    update_saved_variant_json
+    update_variant_main_transcript
 
 from seqr.views.apis.dashboard_api import dashboard_page_data
 
@@ -92,6 +86,7 @@ from matchmaker.views.matchmaker_api import \
     update_mme_result_status, \
     update_mme_contact_note, \
     update_mme_project_contact, \
+    send_vlm_email, \
     send_mme_contact_email
 
 from seqr.views.apis.variant_search_api import \
@@ -104,6 +99,8 @@ from seqr.views.apis.variant_search_api import \
     create_saved_search_handler,\
     update_saved_search_handler, \
     variant_lookup_handler, \
+    vlm_lookup_handler, \
+    search_results_redirect, \
     delete_saved_search_handler
 
 from seqr.views.apis.users_api import \
@@ -120,17 +117,18 @@ from seqr.views.apis.users_api import \
     update_user, \
     forgot_password
 
-from seqr.views.apis.data_manager_api import elasticsearch_status, upload_qc_pipeline_output, delete_index, \
-    update_rna_seq, load_rna_seq_sample_data, proxy_to_kibana, load_phenotype_prioritization_data, \
-    validate_callset, get_loaded_projects, load_data, proxy_to_luigi
+from seqr.views.apis.data_manager_api import update_rna_seq, load_phenotype_prioritization_data, \
+    validate_callset, get_loaded_projects, load_data, loading_vcfs, proxy_to_luigi, \
+    trigger_delete_project, trigger_delete_family
 from seqr.views.apis.report_api import \
     anvil_export, \
     family_metadata, \
     variant_metadata, \
     gregor_export, \
+    sample_stats_download, \
     seqr_stats
 from seqr.views.apis.summary_data_api import success_story, saved_variants_page, mme_details, hpo_summary_data, \
-    bulk_update_family_external_analysis, individual_metadata, send_vlm_email
+    bulk_update_family_external_analysis, individual_metadata
 from seqr.views.apis.superuser_api import get_all_users
 
 from seqr.views.apis.awesomebar_api import awesomebar_autocomplete_handler
@@ -138,11 +136,12 @@ from seqr.views.apis.auth_api import login_required_error, login_view, logout_vi
 from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, update_individual_igv_sample, \
     receive_bulk_igv_table_handler
 from seqr.views.apis.analysis_group_api import update_analysis_group_handler, delete_analysis_group_handler, \
-    update_dynamic_analysis_group_handler, delete_dynamic_analysis_group_handler
+    update_dynamic_analysis_group_handler, delete_dynamic_analysis_group_handler, analysis_group_collaborators
 from seqr.views.apis.project_api import create_project_handler, update_project_handler, delete_project_handler, \
     project_page_data, project_families, project_overview, project_mme_submisssions, project_individuals, \
     project_analysis_groups, update_project_workspace, project_family_notes, project_collaborators, project_locus_lists, \
-    project_samples, project_notifications, mark_read_project_notifications, subscribe_project_notifications
+    project_notifications, mark_read_project_notifications, subscribe_project_notifications, \
+    update_project_rna_seq, load_rna_seq_sample_data
 from seqr.views.apis.project_categories_api import update_project_categories_handler
 from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_project_from_workspace, \
     grant_workspace_access, validate_anvil_vcf, add_workspace_data, get_anvil_vcf_list, get_anvil_igv_options
@@ -157,6 +156,7 @@ react_app_pages = [
     'gene_info/.*',
     'gene_lists/.*',
     'variant_search/.*',
+    'variant_lookup/.*',
     'report/.*',
     'data_management/.*',
     'summary_data/.*',
@@ -186,6 +186,8 @@ api_endpoints = {
     'individual/(?P<individual_guid>[\w.|-]+)/update_case_review_status': update_case_review_status,
     'individual/(?P<individual_guid>[\w.|-]+)/rna_seq_data': get_individual_rna_seq_data,
 
+    'load_rna_seq_sample/(?P<sample_guid>[^/]+)': load_rna_seq_sample_data,
+
     'family/(?P<family_guid>[\w.|-]+)/details': family_page_data,
     'family/(?P<family_guid>[\w.|-]+)/variant_tag_summary': family_variant_tag_summary,
     'family/(?P<family_guid>[\w.|-]+)/update_case_review_notes': save_internal_case_review_notes,
@@ -206,7 +208,6 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/details': project_page_data,
     'project/(?P<project_guid>[^/]+)/get_families': project_families,
     'project/(?P<project_guid>[^/]+)/get_individuals': project_individuals,
-    'project/(?P<project_guid>[^/]+)/get_samples': project_samples,
     'project/(?P<project_guid>[^/]+)/get_family_notes': project_family_notes,
     'project/(?P<project_guid>[^/]+)/get_mme_submissions': project_mme_submisssions,
     'project/(?P<project_guid>[^/]+)/get_analysis_groups': project_analysis_groups,
@@ -235,19 +236,19 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/upload_individuals_table': receive_individuals_table_handler,
     'project/(?P<project_guid>[^/]+)/save_individuals_table/(?P<upload_file_id>[^/]+)': save_individuals_table_handler,
     'project/(?P<project_guid>[^/]+)/upload_igv_dataset': receive_igv_table_handler,
-    'project/(?P<project_guid>[^/]+)/add_dataset/variants': add_variants_dataset_handler,
+    'project/(?P<project_guid>[^/]+)/update_rna_seq': update_project_rna_seq,
 
-    'project/(?P<project_guid>[^/]+)/igv_track/(?P<igv_track_path>.+)': fetch_igv_track,
+    'igv/(?P<sample_guid>[^/]+)/igv_track/(?P<igv_track_path>.+)': fetch_igv_track,
     'project/(?P<project_guid>[^/]+)/upload_individuals_metadata_table': receive_individuals_metadata_handler,
     'project/(?P<project_guid>[^/]+)/save_individuals_metadata_table/(?P<upload_file_id>[^/]+)': save_individuals_metadata_table_handler,
 
     'project/(?P<project_guid>[^/]+)/analysis_groups/create': update_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/update': update_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/delete': delete_analysis_group_handler,
+    'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/get_collaborators': analysis_group_collaborators,
     'project/(?P<project_guid>[^/]+)/dynamic_analysis_groups/create': update_dynamic_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/dynamic_analysis_groups/(?P<analysis_group_guid>[^/]+)/update': update_dynamic_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/dynamic_analysis_groups/(?P<analysis_group_guid>[^/]+)/delete': delete_dynamic_analysis_group_handler,
-    'project/(?P<project_guid>[^/]+)/update_saved_variant_json': update_saved_variant_json,
     'project/(?P<project_guid>[^/]+)/add_workspace_data': add_workspace_data,
 
     'search/variant/(?P<variant_id>[^/]+)': query_single_variant_handler,
@@ -255,6 +256,7 @@ api_endpoints = {
     'search/(?P<search_hash>[^/]+)/download': export_variants_handler,
     'search/(?P<search_hash>[^/]+)/gene_breakdown': get_variant_gene_breakdown,
     'variant_lookup': variant_lookup_handler,
+    'vlm_lookup': vlm_lookup_handler,
     'search_context': search_context_handler,
     'saved_search/all': get_saved_search_handler,
     'saved_search/create': create_saved_search_handler,
@@ -262,6 +264,7 @@ api_endpoints = {
     'saved_search/(?P<saved_search_guid>[^/]+)/delete': delete_saved_search_handler,
 
     'saved_variant/create': create_saved_variant_handler,
+    'saved_variant/create_manual/(?P<family_guid>[\w.|-]+)': create_manual_saved_variant_handler,
     'saved_variant/(?P<variant_guids>[^/]+)/update_tags': update_variant_tags_handler,
     'saved_variant/(?P<variant_guid>[^/]+)/update_acmg_classification': update_variant_acmg_classification_handler,
     'saved_variant/(?P<variant_guids>[^/]+)/update_functional_data': update_variant_functional_data_handler,
@@ -324,18 +327,18 @@ api_endpoints = {
     'report/variant_metadata/(?P<project_guid>[^/]+)': variant_metadata,
     'report/gregor': gregor_export,
     'report/seqr_stats': seqr_stats,
+    'report/sample_stats_download': sample_stats_download,
 
-    'data_management/elasticsearch_status': elasticsearch_status,
-    'data_management/delete_index': delete_index,
-    'data_management/upload_qc_pipeline_output': upload_qc_pipeline_output,
     'data_management/get_all_users': get_all_users,
     'data_management/update_rna_seq': update_rna_seq,
-    'data_management/load_rna_seq_sample/(?P<sample_guid>[^/]+)': load_rna_seq_sample_data,
     'data_management/load_phenotype_prioritization_data': load_phenotype_prioritization_data,
+    'data_management/loading_vcfs': loading_vcfs,
     'data_management/validate_callset': validate_callset,
     'data_management/loaded_projects/(?P<genome_version>[^/]+)/(?P<sample_type>[^/]+)/(?P<dataset_type>[^/]+)': get_loaded_projects,
     'data_management/load_data': load_data,
     'data_management/add_igv': receive_bulk_igv_table_handler,
+    'data_management/trigger_delete_project': trigger_delete_project,
+    'data_management/trigger_delete_family': trigger_delete_family,
 
     'summary_data/saved_variants/(?P<tag>[^/]+)': saved_variants_page,
     'summary_data/hpo/(?P<hpo_id>[^/]+)': hpo_summary_data,
@@ -343,7 +346,8 @@ api_endpoints = {
     'summary_data/matchmaker': mme_details,
     'summary_data/update_external_analysis': bulk_update_family_external_analysis,
     'summary_data/individual_metadata/(?P<project_guid>[^/]+)': individual_metadata,
-    'summary_data/send_vlm_email': send_vlm_email,
+
+    'send_vlm_email': send_vlm_email,
 
     'create_project_from_workspace/(?P<namespace>[^/]+)/(?P<name>[^/]+)/grant_access': grant_workspace_access,
     'create_project_from_workspace/(?P<namespace>[^/]+)/(?P<name>[^/]+)/validate_vcf': validate_anvil_vcf,
@@ -359,7 +363,11 @@ api_endpoints = {
     'matchmaker/v1/metrics': external_api.mme_metrics_proxy,
 }
 
-urlpatterns = [path('status', status_view), re_path('^(?:luigi_ui)', proxy_to_luigi)]
+urlpatterns = [
+    path('status', status_view),
+    re_path('^(?:luigi_ui)', proxy_to_luigi),
+    re_path('^report/custom_search/.*$', search_results_redirect)
+]
 
 # anvil workspace
 anvil_workspace_url = 'workspace/(?P<namespace>[^/]+)/(?P<name>[^/]+)'
@@ -382,17 +390,6 @@ urlpatterns += [
 ]
 
 handler401 = 'seqr.views.apis.auth_api.app_login_required_error'
-
-kibana_urls = '^(?:{})'.format('|'.join([
-    'app', '\d+/built_assets', '\d+/bundles', 'bundles', 'elasticsearch', 'es_admin', 'node_modules/@kbn', 'internal',
-    'plugins', 'translations', 'ui', 'api/apm', 'api/console', 'api/core', 'api/index_management', 'api/index_patterns',
-    'api/kibana', 'api/licensing', 'api/monitoring', 'api/reporting', 'api/saved_objects', 'api/telemetry',
-    'api/timelion', 'api/ui_metric', 'api/xpack', 'bootstrap',
-]))
-
-urlpatterns += [
-    re_path(kibana_urls, proxy_to_kibana, name='proxy_to_kibana'),
-]
 
 urlpatterns += [
     re_path(r'^admin/login/$', RedirectView.as_view(url=LOGIN_URL, permanent=True, query_string=True)),

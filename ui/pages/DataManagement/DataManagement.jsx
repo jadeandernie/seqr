@@ -3,28 +3,34 @@ import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import { Route, Switch } from 'react-router-dom'
 
-import { getUser, getElasticsearchEnabled } from 'redux/selectors'
+import { getUser } from 'redux/selectors'
 import { Error404, Error401 } from 'shared/components/page/Errors'
 
 import AddIGV from './components/AddIGV'
-import ElasticsearchStatus from './components/ElasticsearchStatus'
 import LoadData from './components/LoadData'
 import RnaSeq from './components/RnaSeq'
-import SampleQc from './components/SampleQc'
 import Users from './components/Users'
 import PhenotypePrioritization from './components/PhenotypePrioritization'
+import TRIGGER_SEARCH_DATA_UPDATE_PAGES from './components/TriggerSearchDataUpdatePages'
 
 const IFRAME_STYLE = { position: 'fixed', left: '0', top: '95px' }
 
-const PM_DATA_MANAGEMENT_PAGES = [
+const LOCAL_PM_DATA_MANAGEMENT_PAGES = [
   { path: 'load_data', component: LoadData },
   { path: 'add_igv', component: AddIGV },
+]
+
+const NON_LOCAL_PAGES = [
   { path: 'rna_seq', component: RnaSeq },
 ]
 
+const PM_DATA_MANAGEMENT_PAGES = [
+  ...LOCAL_PM_DATA_MANAGEMENT_PAGES,
+  ...NON_LOCAL_PAGES,
+]
+
 const DATA_MANAGEMENT_PAGES = [
-  ...PM_DATA_MANAGEMENT_PAGES,
-  { path: 'sample_qc', component: SampleQc },
+  ...LOCAL_PM_DATA_MANAGEMENT_PAGES,
   { path: 'users', component: Users },
   { path: 'phenotype_prioritization', component: PhenotypePrioritization },
 ]
@@ -36,25 +42,22 @@ IframePage.propTypes = {
   src: PropTypes.string,
 }
 
-const ES_DATA_MANAGEMENT_PAGES = [
-  { path: 'elasticsearch_status', component: ElasticsearchStatus },
-  {
-    path: 'kibana',
-    component: () => <IframePage title="Kibana" src="/app/kibana" />,
-  },
-  ...DATA_MANAGEMENT_PAGES,
-]
-
-const HAIL_SEARCH_DATA_MANAGEMENT_PAGES = [
+const LOCAL_CLICKHOUSE_DATA_MANAGEMENT_PAGES = [
   ...DATA_MANAGEMENT_PAGES,
   { path: 'pipeline_status', component: () => <IframePage title="Loading UI" src="/luigi_ui/static/visualiser/index.html" /> },
+  ...TRIGGER_SEARCH_DATA_UPDATE_PAGES,
 ]
 
-const dataManagementPages = (isDataManager, elasticsearchEnabled) => {
-  if (!isDataManager) {
-    return PM_DATA_MANAGEMENT_PAGES
+const CLICKHOUSE_DATA_MANAGEMENT_PAGES = [
+  ...LOCAL_CLICKHOUSE_DATA_MANAGEMENT_PAGES,
+  ...NON_LOCAL_PAGES,
+]
+
+const dataManagementPages = (user) => {
+  if (!user.isDataManager) {
+    return user.isAnvil ? LOCAL_PM_DATA_MANAGEMENT_PAGES : PM_DATA_MANAGEMENT_PAGES
   }
-  return elasticsearchEnabled ? ES_DATA_MANAGEMENT_PAGES : HAIL_SEARCH_DATA_MANAGEMENT_PAGES
+  return user.isAnvil ? CLICKHOUSE_DATA_MANAGEMENT_PAGES : LOCAL_CLICKHOUSE_DATA_MANAGEMENT_PAGES
 }
 
 const DataManagement = ({ match, user, pages }) => (
@@ -78,7 +81,7 @@ export const mapStateToProps = (state) => {
   const user = getUser(state)
   return {
     user,
-    pages: dataManagementPages(user.isDataManager, getElasticsearchEnabled(state)),
+    pages: dataManagementPages(user),
   }
 }
 

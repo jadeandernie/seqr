@@ -37,19 +37,16 @@ test('getPairedSelectedSavedVariants', () => {
   const savedFamilyVariants = getPairedSelectedSavedVariants(
     STATE_WITH_2_FAMILIES, { match: { params:  { familyGuid: 'F011652_1' } } }
   )
-  expect(savedFamilyVariants.length).toEqual(3)
+  expect(savedFamilyVariants.length).toEqual(2)
   expect(savedFamilyVariants[0].variantGuid).toEqual('SV0000004_116042722_r0390_1000')
   expect(savedFamilyVariants[1].variantGuid).toEqual('SV0000002_1248367227_r0390_100')
-  expect(savedFamilyVariants[2].variantGuid).toEqual('SV0000002_SV48367227_r0390_100')
 
   const savedAnalysisGroupVariants = getPairedSelectedSavedVariants(
     STATE_WITH_2_FAMILIES, { match: { params:  { analysisGroupGuid: 'AG0000183_test_group' } } }
   )
-  expect(savedAnalysisGroupVariants.length).toEqual(3)
+  expect(savedAnalysisGroupVariants.length).toEqual(2)
   expect(savedAnalysisGroupVariants[0].variantGuid).toEqual('SV0000004_116042722_r0390_1000')
   expect(savedAnalysisGroupVariants[1].variantGuid).toEqual('SV0000002_1248367227_r0390_100')
-  expect(savedFamilyVariants[2].variantGuid).toEqual('SV0000002_SV48367227_r0390_100')
-
 
   const savedVariants = getPairedSelectedSavedVariants(
     STATE_WITH_2_FAMILIES, { match: { params:  { variantGuid: 'SV0000004_116042722_r0390_1000' } } }
@@ -98,11 +95,11 @@ test('getIndividualGeneDataByFamilyGene', () => {
     F011652_1: {
       rnaSeqData: {
         ENSG00000228198: [
-          { individualName: 'NA19678', isSignificant: true, pValue: 0.0004 },
-          { individualName: 'NA19679_1', isSignificant: true, pValue: 0.01 },
+          { geneId: 'ENSG00000228198', individualName: 'NA19678', isSignificant: true, pValue: 0.0004, zScore: -5, tissueType: 'M', sequencingType: 'T' },
+          { geneId: 'ENSG00000228198', individualName: 'NA19679_1', isSignificant: true, pValue: 0.01 },
         ],
         ENSG00000164458: [
-          { individualName: 'NA19678', isSignificant: true, pValue: 0.0073 },
+          { geneId: 'ENSG00000164458', individualName: 'NA19678', isSignificant: true, pValue: 0.0073, zScore: 20, tissueType: 'M', sequencingType: 'T' },
         ],
       },
       phenotypeGeneScores: {
@@ -120,7 +117,7 @@ test('getIndividualGeneDataByFamilyGene', () => {
     },
     F011652_2: {
       rnaSeqData: {
-        ENSG00000228198: [{ individualName: 'NA19678_2', isSignificant: true, pValue: 0.0214 }],
+        ENSG00000228198: [{ geneId: 'ENSG00000228198', individualName: 'NA19678_2', isSignificant: true, pValue: 0.0214 }],
       },
     },
   })

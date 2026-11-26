@@ -8,16 +8,16 @@ on:
       - master
       - dev
     paths-ignore:
-      - 'hail_search/**'
+      - 'loading_pipeline/**'
+      - '.github/workflows/*pipeline*.yaml'
       - 'vlm/**'
-      - '.github/workflows/*hail-search*.yaml'
       - '.github/workflows/*vlm*.yaml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths-ignore:
-      - 'hail_search/**'
+      - 'loading_pipeline/**'
+      - '.github/workflows/*pipeline*.yaml'
       - 'vlm/**'
-      - '.github/workflows/*hail-search*.yaml'
       - '.github/workflows/*vlm*.yaml'
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.9]
+        python-version: [3.11]
 
     services:
       # Label used to access the service container
@@ -44,20 +44,59 @@ jobs:
         ports:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
+      clickhouse:
+        image: gcr.io/seqr-project/seqr-clickhouse:26.3.9
+        ports:
+          - 9000:9000   # Native client interface
+          - 8123:8123   # HTTP interface
+        volumes:
+          - /var/tmp:/var/seqr/clickhouse-data
+          - /tmp:/in-memory-dir
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'" 
+          --health-interval 10s 
+          --health-timeout 5s 
+          --health-retries 5
+          --name clickhouse
+        env:
+          CLICKHOUSE_USER: clickhouse_test
+          CLICKHOUSE_PASSWORD: clickhouse_test
+          ALLOW_EMPTY_PASSWORD: no
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
 
     steps:
       - uses: actions/checkout@v2
+      - name: Set up Clickhouse Settings
+        run: |          
+          cat <<EOF > test_user_config.xml
+          <clickhouse>
+            <users>
+              <clickhouse_test>
+                <named_collection_control>1</named_collection_control>
+              </clickhouse_test>
+            </users>
+          </clickhouse>
+          EOF
+          docker cp ${{ github.workspace }}/test_user_config.xml clickhouse:/etc/clickhouse-server/users.d/users.xml
+          docker exec clickhouse clickhouse-client --query "SYSTEM RELOAD USERS"
+          docker exec clickhouse clickhouse-client --query "CREATE USER clickhouse_read_only IDENTIFIED WITH plaintext_password BY 'clickhouse_test'"
+          docker exec clickhouse clickhouse-client --query "CREATE SETTINGS PROFILE clickhouse_settings SETTINGS flatten_nested=0, join_use_nulls=1, stop_refreshable_materialized_views_on_startup=1, allow_materialized_view_with_bad_select=1, enable_join_runtime_filters=0 TO clickhouse_test, clickhouse_read_only"
+          docker exec clickhouse clickhouse-client --query "GRANT SELECT, SYSTEM VIEWS, dictGet ON *.* TO clickhouse_read_only"
+          docker exec clickhouse clickhouse-client --query "CREATE NAMED COLLECTION seqr_postgres_named_collection AS user='postgres', password='pgtest', host='postgres', port='5432'"
+          docker exec clickhouse clickhouse-client --query "SYSTEM RELOAD USERS"
+          cat <<EOF > test_config.xml
+          <clickhouse>
+            <user_files_path>/</user_files_path>
+          </clickhouse>
+          EOF
+          docker cp ${{ github.workspace }}/test_config.xml clickhouse:/etc/clickhouse-server/config.d/config.xml
+          docker restart clickhouse
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: actions/setup-java@v1
-        with:
-          java-version: "8" # The JDK version needed by hail
-          java-package: jdk # (jre, jdk, or jdk+fx) - defaults to jdk
-          architecture: x64 # (x64 or x86) - defaults to x64
       - name: Use pip cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('**/requirements*.txt') }}
@@ -68,10 +107,22 @@ jobs:
           python -m pip install --upgrade pip wheel
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+      - name: Wait for service restart
+        run: |
+          timeout 50s sh -c '
+          until curl --fail http://localhost:8123/ping; do
+            sleep 5
+          done
+          '
       - name: Run coverage tests
         run: |
-          coverage run --source="./matchmaker","./seqr","./reference_data","./panelapp" --omit="*/migrations/*","*/apps.py" manage.py test -p '*_tests.py' -v 2 reference_data seqr matchmaker panelapp
-          coverage report --fail-under=99
+          export CLICKHOUSE_READER_USER=clickhouse_read_only
+          export CLICKHOUSE_WRITER_USER=clickhouse_test
+          export CLICKHOUSE_SERVICE_HOSTNAME=localhost
+          coverage run --source="./matchmaker","./seqr","./reference_data","./panelapp","./clickhouse_search" --omit="*/migrations/*","*/apps.py","*/admin.py" manage.py test -p '*_tests.py' -v 2 reference_data clickhouse_search seqr matchmaker panelapp
+          coverage report -m --fail-under=99
+          coverage report | (! grep [1-8][0-9]%)
+          coverage report | (! grep 9[0-5]%)
 
   nodejs:
     runs-on: ubuntu-latest
@@ -91,5 +142,7 @@ jobs:
       - run: npm install -g npm@7.24.2
       - run: npm ci
         working-directory: ./ui
-      - run: npm test
+      - run: npm run lint
+        working-directory: ./ui
+      - run: npm test -- --coverage
         working-directory: ./ui

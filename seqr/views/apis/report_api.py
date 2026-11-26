@@ -1,12 +1,16 @@
 from collections import defaultdict
 
 from datetime import datetime, timedelta
-from django.db.models import Count, Q, Value
+from django.db.models import Count, Q, F, Value
+from django.db.models.expressions import Case, When
+from django.db.models.functions import TruncDate
+from django.contrib.auth.models import User
 from django.contrib.postgres.aggregates import ArrayAgg
 import json
 import re
 import requests
 
+from clickhouse_search.search import get_variant_details_queryset
 from seqr.utils.file_utils import is_google_bucket_file_path, does_file_exist
 from seqr.utils.logging_utils import SeqrLogger
 from seqr.utils.middleware import ErrorsWarningsException
@@ -15,14 +19,15 @@ from seqr.views.utils.airtable_utils import AirtableSession
 from seqr.views.utils.anvil_metadata_utils import parse_anvil_metadata, anvil_export_airtable_fields, \
     FAMILY_ROW_TYPE, SUBJECT_ROW_TYPE, SAMPLE_ROW_TYPE, DISCOVERY_ROW_TYPE, PARTICIPANT_TABLE, PHENOTYPE_TABLE, \
     EXPERIMENT_TABLE, EXPERIMENT_LOOKUP_TABLE, FINDINGS_TABLE, GENE_COLUMN, FAMILY_INDIVIDUAL_FIELDS
-from seqr.views.utils.export_utils import export_multiple_files, write_multiple_files
+from seqr.views.utils.export_utils import export_multiple_files, write_multiple_files, export_table
 from seqr.views.utils.json_utils import create_json_response
-from seqr.views.utils.permissions_utils import user_is_analyst, get_project_and_check_permissions, \
+from seqr.views.utils.orm_to_json_utils import get_json_for_queryset
+from seqr.views.utils.permissions_utils import user_is_analyst, get_project_and_check_view_permission, \
     get_project_guids_user_can_view, get_internal_projects, pm_or_analyst_required, active_user_has_policies_and_passes_test
 from seqr.views.utils.terra_api_utils import anvil_enabled
 from seqr.views.utils.variant_utils import DISCOVERY_CATEGORY
 
-from seqr.models import Project, Family, Sample, RnaSample, Individual
+from seqr.models import Project, Family, FamilyAnalysedBy, Dataset, RnaSample, Individual
 from settings import GREGOR_DATA_MODEL_URL
 
 
@@ -37,52 +42,115 @@ airtable_enabled_analyst_required = active_user_has_policies_and_passes_test(
 
 @pm_or_analyst_required
 def seqr_stats(request):
-    non_demo_projects = Project.objects.filter(is_demo=False)
+    project_qs, dataset_qs_list = _get_project_aggregated_qs(additional_model=(Project, ''))
 
-    project_models = {
-        'demo': Project.objects.filter(is_demo=True),
-    }
-    if anvil_enabled():
-        is_anvil_q = Q(workspace_namespace='') | Q(workspace_namespace__isnull=True)
-        anvil_projects = non_demo_projects.exclude(is_anvil_q)
-        internal_ids = get_internal_projects().values_list('id', flat=True)
-        project_models.update({
-            'internal': anvil_projects.filter(id__in=internal_ids),
-            'external': anvil_projects.exclude(id__in=internal_ids),
-            'no_anvil': non_demo_projects.filter(is_anvil_q),
-        })
-    else:
-        project_models.update({
-            'non_demo': non_demo_projects,
-        })
+    grouped_sample_counts = defaultdict(lambda: defaultdict(int))
+    for qs in dataset_qs_list:
+        for agg in qs:
+            grouped_sample_counts[f"{agg['sample_type']}__{agg['dataset_type']}"][_agg_key(agg)] += agg['count']
 
-    grouped_sample_counts = defaultdict(dict)
-    for project_key, projects in project_models.items():
-        samples_counts = _get_sample_counts(Sample.objects.filter(individual__family__project__in=projects))
-        samples_counts.update(_get_sample_counts(
-            RnaSample.objects.filter(individual__family__project__in=projects).annotate(sample_type=Value('RNA')),
-            data_type_key='data_type')
-        )
-        for k, v in samples_counts.items():
-            grouped_sample_counts[k][project_key] = v
+    project_aggs = project_qs.annotate(
+        count=Count('id', distinct=True),
+        family_count=Count('family', distinct=True),
+        individual_count=Count('family__individual', distinct=True),
+    )
+    project_counts = defaultdict(int)
+    families_count = defaultdict(int)
+    individuals_count = defaultdict(int)
+    for agg in project_aggs:
+        key = _agg_key(agg)
+        project_counts[key] += agg['count']
+        families_count[key] += agg['family_count']
+        individuals_count[key] += agg['individual_count']
+
+    now = datetime.now()
+    user_counts = User.objects.filter(is_active=True).aggregate(
+        total=Count('id'),
+        multipleLogins=Count('id', filter=Q(last_login__isnull=False) & ~Q(last_login=F('date_joined'))),
+        lastMonth=Count('id', filter=Q(last_login__gte=now - timedelta(days=30))),
+        lastYear=Count('id', filter=Q(last_login__gte=now - timedelta(days=365))),
+        thisYear=Count('id', filter=Q(last_login__gte=datetime(now.year, 1, 1))),
+    )
 
     return create_json_response({
-        'projectsCount': {k: projects.count() for k, projects in project_models.items()},
-        'familiesCount': {
-            k: Family.objects.filter(project__in=projects).count() for k, projects in project_models.items()
-        },
-        'individualsCount': {
-            k: Individual.objects.filter(family__project__in=projects).count() for k, projects in project_models.items()
-        },
+        'projectsCount': project_counts,
+        'familiesCount': families_count,
+        'individualsCount': individuals_count,
+        'usersCounts': user_counts,
         'sampleCountsByType': grouped_sample_counts,
     })
 
 
-def _get_sample_counts(sample_q, data_type_key='dataset_type'):
-    samples_agg = sample_q.filter(is_active=True).values('sample_type', data_type_key).annotate(count=Count('*'))
-    return {
-        f'{sample_agg["sample_type"]}__{sample_agg[data_type_key]}': sample_agg['count'] for sample_agg in samples_agg
-    }
+def _get_project_aggregated_qs(additional_model=None, additional_aggs=None):
+    prefixes = ['active_individuals__family__project__', 'individual__family__project__']
+    if additional_model:
+        prefixes.append(additional_model[1])
+    agg_fields = [{'demo': F(f'{prefix}is_demo')} for prefix in prefixes]
+    if anvil_enabled():
+        internal_ids = get_internal_projects().values_list('id', flat=True)
+        for i, prefix in enumerate(prefixes):
+            agg_fields[i].update({
+                'no_anvil': Q(**{f'{prefix}workspace_namespace': ''}) | Q(**{f'{prefix}workspace_namespace__isnull': True}),
+                'is_internal': Case(When(**{f'{prefix}id__in': internal_ids, 'then': Value(True)}), default=Value(False)),
+            })
+
+    dataset_qs = [
+        models.annotate(**agg_fields[i], **(additional_aggs or {})).filter(demo__isnull=False).values(
+            'sample_type', 'dataset_type', *agg_fields[i], *(additional_aggs or []),
+        ).annotate(count=Count('active_individuals')) for i, models in enumerate([
+            Dataset.objects, RnaSample.objects.filter(is_active=True).annotate(
+                sample_type=Value('RNA'), dataset_type=F('data_type'), active_individuals=F('individual_id'), loaded_date=F('created_date'),
+            ),
+        ])
+    ]
+
+    if additional_model:
+        fields = agg_fields[-1]
+        return additional_model[0].objects.annotate(**fields).values(*fields), dataset_qs
+
+    return dataset_qs
+
+
+def _agg_key(agg):
+    if agg['demo']:
+        return 'demo'
+    elif agg.get('no_anvil'):
+        return 'no_anvil'
+    elif 'is_internal' in agg:
+        return 'internal' if agg['is_internal'] else 'external'
+    return 'non_demo'
+
+
+HEADER = ['date_loaded', 'num_samples', 'sample_type', 'dataset_type', 'is_demo']
+DATASET_TYPE_LOOKUP = {
+    **RnaSample.DATA_TYPE_LOOKUP,
+    **{k: v.split(' ')[0] for k, v in Dataset.DATASET_TYPE_LOOKUP.items()},
+}
+
+
+@pm_or_analyst_required
+def sample_stats_download(request):
+    dataset_qs_list = _get_project_aggregated_qs(additional_aggs={'loaded': TruncDate('loaded_date')})
+    rows = sorted(
+        [_format_export_row(**item) for qs in dataset_qs_list for item in qs],
+        key=lambda row: (row[0], -row[1], *row[2:]),
+    )
+
+    header = HEADER
+    if anvil_enabled():
+        header = header + ['anvil_status']
+
+    file_format = request.GET.get('file_format', 'tsv')
+    return export_table('seqr_sample_loading', header, rows, file_format)
+
+
+def _format_export_row(loaded, count, sample_type, dataset_type, demo, no_anvil='', is_internal=''):
+    row = [loaded.strftime('%Y-%m-%d'), count, sample_type, DATASET_TYPE_LOOKUP.get(dataset_type, 'Unknown'), demo]
+    if no_anvil:
+        row.append('No AnVIL')
+    elif is_internal != '':
+        row.append('Internal' if is_internal else 'External')
+    return row
 
 
 # AnVIL metadata
@@ -117,9 +185,10 @@ PHENOTYPE_PROJECT_CATEGORIES = [
 
 @airtable_enabled_analyst_required
 def anvil_export(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_view_permission(project_guid, request.user)
 
     parsed_rows = defaultdict(list)
+    family_id_map = {}
     family_diseases = {}
 
     def _add_row(row, family_id, row_type):
@@ -129,7 +198,7 @@ def anvil_export(request, project_guid):
                 if not (discovery_row.get(GENE_COLUMN) or discovery_row.get('sv_type'))]
             if missing_gene_rows:
                 raise ErrorsWarningsException(
-                    [f'Discovery variant(s) {", ".join(missing_gene_rows)} in family {family_id} have no associated gene'])
+                    [f'Discovery variant(s) {", ".join(sorted(missing_gene_rows))} in family {family_id_map[family_id]} have no associated gene'])
             parsed_rows[row_type] += [{
                 'entity:discovery_id': f'{discovery_row["chrom"]}_{discovery_row["pos"]}_{discovery_row["participant_id"]}',
                 **{k: str(discovery_row.get(k.lower()) or '') for k in ['Zygosity', 'Chrom', 'Pos', 'Ref', 'Alt', 'Transcript']},
@@ -163,6 +232,7 @@ def anvil_export(request, project_guid):
                     'disease_id': row.get('condition_id', '').replace('|', ';'),
                     'disease_description': row.get('known_condition_name', '').replace('|', ';'),
                 }
+                family_id_map[family_id] = row[id_field]
             parsed_rows[row_type].append(row)
 
     max_loaded_date = request.GET.get('loadedBefore') or (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
@@ -172,8 +242,8 @@ def anvil_export(request, project_guid):
             'congenital_status': Individual.ONSET_AGE_LOOKUP[individual.onset_age] if individual.onset_age else 'Unknown',
             **anvil_export_airtable_fields(airtable_metadata, has_dbgap_submission),
         },
-        get_additional_sample_fields=lambda sample, *args: {
-            'entity:sample_id': sample.individual.individual_id,
+        get_additional_sample_fields=lambda individual, *args: {
+            'entity:sample_id': individual.individual_id,
             'sequencing_center': 'Broad',
         },
         family_fields={'phenotype_group': {
@@ -375,11 +445,11 @@ def gregor_export(request):
     grouped_data_type_individuals = _get_individual_data_types(projects)
 
     # If multiple individual records, prefer WGS
-    individual_lookup = {
+    individual_lookup = [
         next(data_type_individuals[data_type.upper()] for data_type in GREGOR_DATA_TYPES
-             if data_type_individuals.get(data_type.upper())): None
+             if data_type_individuals.get(data_type.upper()))
         for data_type_individuals in grouped_data_type_individuals.values()
-    }
+    ]
 
     participant_rows = []
     family_map = {}
@@ -398,7 +468,7 @@ def gregor_export(request):
     parse_anvil_metadata(
         projects,
         user=request.user,
-        individual_samples=individual_lookup,
+        individuals=individual_lookup,
         individual_data_types=grouped_data_type_individuals,
         add_row=_add_row,
         format_id=_format_gregor_id,
@@ -407,6 +477,7 @@ def gregor_export(request):
         airtable_fields=[[PARTICIPANT_ID_FIELD, 'Recontactable'], [SMID_FIELD]],
         include_mondo=True,
         proband_only_variants=True,
+        get_variant_json=_get_variant_json,
     )
 
     airtable_metadata_by_participant = _get_gregor_airtable_data(participant_rows, request.user, smids_by_airtable_record_id)
@@ -421,30 +492,14 @@ def gregor_export(request):
     missing_airtable_data_types = defaultdict(list)
     missing_seqr_data_types = defaultdict(list)
     for participant in participant_rows:
-        phenotype_rows += _parse_participant_phenotype_rows(participant)
-        analyte = {k: participant.pop(k) for k in [SMID_FIELD, *ANALYTE_TABLE_COLUMNS[2:]]}
-        analyte['participant_id'] = participant['participant_id']
-
-        if not participant[PARTICIPANT_ID_FIELD]:
-            missing_participant_ids.append(participant['participant_id'])
-            continue
-
-        airtable_participant_id = participant.pop(PARTICIPANT_ID_FIELD)
-        airtable_metadata = airtable_metadata_by_participant.get(airtable_participant_id)
-        if not airtable_metadata:
-            missing_airtable.append(airtable_participant_id)
-            continue
-
-        seqr_data_types = set(grouped_data_type_individuals[participant['participant_id']].keys())
-        airtable_data_types = {dt.upper() for dt in GREGOR_DATA_TYPES if dt.upper() in airtable_metadata}
-        for data_type in seqr_data_types - airtable_data_types:
-            missing_airtable_data_types[data_type].append(airtable_participant_id)
-        for data_type in airtable_data_types - seqr_data_types:
-            missing_seqr_data_types[data_type].append(airtable_participant_id)
-        _parse_participant_airtable_rows(
-            analyte, airtable_metadata, seqr_data_types.intersection(airtable_data_types), experiment_ids_by_participant,
-            analyte_rows, airtable_rows, experiment_lookup_rows,
+        airtable_args = _process_participant_row(
+            participant, phenotype_rows, missing_participant_ids, airtable_metadata_by_participant,
+            missing_airtable, grouped_data_type_individuals, missing_airtable_data_types, missing_seqr_data_types,
         )
+        if airtable_args:
+            _parse_participant_airtable_rows(
+                *airtable_args, experiment_ids_by_participant, analyte_rows, airtable_rows, experiment_lookup_rows,
+            )
 
     errors = []
     if missing_participant_ids:
@@ -458,7 +513,7 @@ def gregor_export(request):
             f'{", ".join(sorted(missing_airtable))}'
         )
     warnings = [
-        f'The following entries are missing {data_type} airtable data: {", ".join(participants)}'
+        f'The following entries are missing {data_type} airtable data: {", ".join(sorted(participants))}'
         for data_type, participants in sorted(missing_airtable_data_types.items())
     ]
     warnings += [
@@ -496,21 +551,46 @@ def gregor_export(request):
     })
 
 
+def _process_participant_row(participant, phenotype_rows, missing_participant_ids, airtable_metadata_by_participant,
+                             missing_airtable, grouped_data_type_individuals, missing_airtable_data_types,
+                             missing_seqr_data_types):
+    phenotype_rows += _parse_participant_phenotype_rows(participant)
+    analyte = {k: participant.pop(k) for k in [SMID_FIELD, *ANALYTE_TABLE_COLUMNS[2:]]}
+    analyte['participant_id'] = participant['participant_id']
+
+    if not participant[PARTICIPANT_ID_FIELD]:
+        missing_participant_ids.append(participant['participant_id'])
+        return None
+
+    airtable_participant_id = participant.pop(PARTICIPANT_ID_FIELD)
+    airtable_metadata = airtable_metadata_by_participant.get(airtable_participant_id)
+    if not airtable_metadata:
+        missing_airtable.append(airtable_participant_id)
+        return None
+
+    seqr_data_types = set(grouped_data_type_individuals[participant['participant_id']].keys())
+    airtable_data_types = {dt.upper() for dt in GREGOR_DATA_TYPES if dt.upper() in airtable_metadata}
+    for data_type in seqr_data_types - airtable_data_types:
+        missing_airtable_data_types[data_type].append(airtable_participant_id)
+    for data_type in airtable_data_types - seqr_data_types:
+        missing_seqr_data_types[data_type].append(airtable_participant_id)
+
+    return analyte, airtable_metadata, seqr_data_types.intersection(airtable_data_types)
+
+
 def _get_individual_data_types(projects):
-    sample_types = Sample.objects.filter(individual__family__project__in=projects).values_list('individual_id', 'sample_type')
-    individual_data_types = defaultdict(set)
-    for individual_db_id, sample_type in sample_types:
-        individual_data_types[individual_db_id].add(sample_type)
-    for individual_db_id in RnaSample.objects.filter(individual__family__project__in=projects).values_list('individual_id', flat=True):
-        individual_data_types[individual_db_id].add('RNA')
-    individuals = Individual.objects.filter(id__in=individual_data_types).prefetch_related(
-        'family__project', 'mother', 'father')
+    rna_individuals = set(RnaSample.objects.filter(individual__family__project__in=projects).values_list('individual_id', flat=True))
+    individuals = Individual.objects.filter(family__project__in=projects).annotate(
+        active_sample_types=ArrayAgg('active_datasets__sample_type', distinct=True, filter=Q(active_datasets__isnull=False)),
+        inactive_sample_types=ArrayAgg('inactive_datasets__sample_type', distinct=True, filter=Q(inactive_datasets__isnull=False)),
+    ).prefetch_related('family__project', 'mother', 'father')
 
     grouped_data_type_individuals = defaultdict(dict)
     for i in individuals:
         participant_id = _format_gregor_id(i.individual_id)
-        grouped_data_type_individuals[participant_id].update(
-            {data_type: i for data_type in individual_data_types[i.id]})
+        data_types = {*i.active_sample_types, *i.inactive_sample_types} | ({'RNA'} if i.id in rna_individuals else set())
+        if data_types:
+            grouped_data_type_individuals[participant_id].update({data_type: i for data_type in data_types})
     return grouped_data_type_individuals
 
 
@@ -622,6 +702,8 @@ def _post_process_gregor_variant(row, gene_variants):
         'linked_variant': next(
             v['genetic_findings_id'] for v in gene_variants if v['genetic_findings_id'] != row['genetic_findings_id']
         ) if len(gene_variants) > 1 else None,
+        'gene_disease_validity': 'Curation in progress',
+        'GREGoR_variant_classification': 'Curation in progress',
     }
 
 
@@ -890,6 +972,16 @@ def family_metadata(request, project_guid):
     parse_anvil_metadata(
         projects, user=request.user, add_row=_add_row, omit_airtable=True, include_family_sample_metadata=True, include_no_individual_families=True)
 
+    analysed_by = get_json_for_queryset(
+        FamilyAnalysedBy.objects.filter(family_id__in=families_by_id).order_by('last_modified_date'),
+        additional_values={'familyId': F('family_id')},
+    )
+    analysed_by_family_type = defaultdict(lambda: defaultdict(list))
+    for fab in analysed_by:
+        analysed_by_family_type[fab['familyId']][fab['dataType']].append(
+            f"{fab['createdBy']} ({fab['lastModifiedDate']:%-m/%-d/%Y})"
+        )
+
     for family_id, f in families_by_id.items():
         individuals_by_id = family_individuals[family_id]
         proband = next((i for i in individuals_by_id.values() if i['proband_relationship'] == 'Self'), None)
@@ -910,16 +1002,25 @@ def family_metadata(request, project_guid):
         sorted_samples = sorted(individuals_by_id.values(), key=lambda x: x.get('date_data_generation', ''))
         earliest_sample = next((s for s in [proband or {}] + sorted_samples if s.get('date_data_generation')), {})
 
+        analysed_by = [
+            f'{ANALYSIS_DATA_TYPE_LOOKUP[data_type]}: {", ".join(analysed)}'
+            for data_type, analysed in analysed_by_family_type[family_id].items()
+        ]
         inheritance_models = f.pop('inheritance_models', [])
+        family_structure = _get_family_structure(
+            sum(1 for individual in individuals_by_id.values() if individual.get('date_data_generation')),
+            sum(1 for id in known_ids.values() if individuals_by_id.get(id, {}).get('date_data_generation')),
+        )
         f.update({
             'individual_count': len(individuals_by_id),
             'other_individual_ids':  '; '.join(sorted(individuals_ids)),
-            'family_structure': _get_family_structure(len(individuals_by_id), sum(1 for id in known_ids.values() if id)),
+            'family_structure': family_structure,
             'data_type': earliest_sample.get('data_type'),
             'date_data_generation': earliest_sample.get('date_data_generation'),
             'genes': '; '.join(sorted(f.get('genes', []))),
             'actual_inheritance': 'unknown' if inheritance_models == {'unknown'} else ';'.join(
                 sorted([i for i in inheritance_models if i != 'unknown'])),
+            'analysed_by': '; '.join(analysed_by),
         })
 
     return create_json_response({'rows': list(families_by_id.values())})
@@ -930,7 +1031,10 @@ def _get_metadata_projects(project_guid, user):
         return get_internal_projects().filter(guid__in=get_project_guids_user_can_view(user))
     if project_guid == GREGOR_CATEGORY.lower():
         return Project.objects.filter(projectcategory__name=GREGOR_CATEGORY)
-    return [get_project_and_check_permissions(project_guid, user)]
+    return [get_project_and_check_view_permission(project_guid, user)]
+
+
+ANALYSIS_DATA_TYPE_LOOKUP = dict(FamilyAnalysedBy.DATA_TYPE_CHOICES)
 
 
 FAMILY_STRUCTURES = {
@@ -955,7 +1059,8 @@ def variant_metadata(request, project_guid):
     individuals = Individual.objects.filter(
         family__project__in=projects, family__savedvariant__varianttag__variant_tag_type__category=DISCOVERY_CATEGORY,
     ).distinct().annotate(
-        data_types=ArrayAgg('sample__sample_type', distinct=True, filter=Q(sample__isnull=False))
+        active_data_types=ArrayAgg('active_datasets__sample_type', distinct=True),
+        inactive_data_types=ArrayAgg('inactive_datasets__sample_type', distinct=True),
     )
 
     families_by_id = {}
@@ -981,16 +1086,54 @@ def variant_metadata(request, project_guid):
     parse_anvil_metadata(
         projects,
         user=request.user,
-        individual_samples={i: None for i in individuals},
-        individual_data_types={i.individual_id: i.data_types for i in individuals},
+        individuals=individuals,
+        individual_data_types={i.individual_id: {*i.active_data_types, *i.inactive_data_types} for i in individuals},
         add_row=_add_row,
-        variant_json_fields=['clinvar', 'variantId'],
-        variant_attr_fields=['tags'],
-        mme_value=ArrayAgg('matchmakersubmissiongenes__saved_variant__saved_variant_json__variantId'),
+        mme_value=ArrayAgg('matchmakersubmissiongenes__saved_variant__variant_id'),
         include_family_name_display=True,
         include_mondo=True,
         omit_airtable=True,
         proband_only_variants=True,
+        get_variant_json=_get_metadata_variant_json,
     )
 
     return create_json_response({'rows': variant_rows})
+
+
+def _get_metadata_variant_json(*args):
+    return _get_variant_json(
+        *args,
+        include_clinvar=True,
+        variantId=F('variant_id'),
+        tags=ArrayAgg('varianttag__variant_tag_type__name', distinct=True),
+    )
+
+
+def _get_variant_json(saved_variants, fields, annotations, include_clinvar=False, **kwargs):
+    dataset_type_keys = saved_variants.exclude(dataset_type__startswith='SV').filter(
+        key__isnull=False,
+    ).values(
+        'dataset_type', genome_version=F('family__project__genome_version'),
+    ).annotate(keys=ArrayAgg('key', distinct=True, filter=Q(key__isnull=False)))
+    clickhouse_metadata = {}
+    for o in dataset_type_keys:
+        clickhouse_metadata.update(_get_clickhouse_metadata(**o, include_clinvar=include_clinvar))
+
+    variants = saved_variants.values('dataset_type', 'key', *fields, **annotations, **kwargs)
+    for variant in variants:
+        metadata = clickhouse_metadata.get((variant.pop('dataset_type'), variant['genome_version'], variant.pop('key')), {})
+        variant['ClinGen_allele_ID'] = metadata.get('caid')
+        if include_clinvar:
+            variant['clinvar'] = metadata.get('clinvar')
+
+    return variants
+
+def _get_clickhouse_metadata(dataset_type, genome_version, keys, include_clinvar):
+    qs = get_variant_details_queryset(genome_version, dataset_type,keys)
+    fields = ['key']
+    if include_clinvar:
+        fields.append('clinvar')
+        qs = qs.join_clinvar()
+    if dataset_type == Dataset.DATASET_TYPE_VARIANT_CALLS:
+        fields.append('caid')
+    return {(dataset_type, genome_version, v.pop('key')): v for v in qs.values(*fields)}

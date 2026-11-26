@@ -12,17 +12,20 @@ import {
   INDIVIDUAL_HAS_DATA_FIELD,
   MME_TAG_NAME,
   TISSUE_DISPLAY,
+  PRODUCT_DISPLAY,
   SIMPLIFIED_SEX_LOOKUP,
 } from 'shared/utils/constants'
 import { toCamelcase, toSnakecase, snakecaseToTitlecase } from 'shared/utils/stringUtils'
+import { compareObjects } from 'shared/utils/sortUtils'
 
 import {
-  getProjectsByGuid, getFamiliesGroupedByProjectGuid, getIndividualsByGuid, getSamplesByGuid, getGenesById, getUser,
+  getProjectsByGuid, getFamiliesGroupedByProjectGuid, getIndividualsByGuid, getGenesById, getUser,
   getAnalysisGroupsGroupedByProjectGuid, getSavedVariantsByGuid, getSortedIndividualsByFamily,
   getMmeResultsByGuid, getMmeSubmissionsByGuid, getHasActiveSearchSampleByFamily, getSelectableTagTypesByProject,
-  getVariantTagsByGuid, getUserOptionsByUsername, getSamplesByFamily, getNotesByFamilyType,
-  getVariantTagNotesByFamilyVariants, getPhenotypeGeneScoresByIndividual,
+  getVariantTagsByGuid, getUserOptionsByUsername, getNotesByFamilyType,
+  getVariantTagNotesByFamilyVariants, getPhenotypeGeneScoresByIndividual, getActiveDatasetsByIndividual,
   getRnaSeqDataByIndividual, familyPassesFilters, getAnalysisGroupGuid, getCurrentAnalysisGroupFamilyGuids,
+  getDatasetsByIndividual, getActiveDatasetsByFamily, getMinMaxDatasetsByFamily, getDatasetsGroupedByProjectGuid,
 } from 'redux/selectors'
 
 import {
@@ -64,6 +67,7 @@ export const getTagTypesLoading = state => state.tagTypesLoading.isLoading
 export const getFamilyTagTypeCounts = state => state.familyTagTypeCounts
 export const getSavedVariantTableState = state => state.savedVariantTableState
 export const getGregorMetadataImportStats = state => state.importStats.gregorMetadata
+export const getRnaSeqUploadStats = state => state.rnaSeqUploadStats
 const getFamiliesTableFiltersByProject = state => state.familyTableFilterState
 
 export const getCurrentProject = createSelector(
@@ -82,6 +86,12 @@ export const getProjectAnalysisGroupsByGuid = createSelector(
     ...selectEntitiesForProjectGuid(groupedAnalysisGroups, projectGuid),
     ...selectEntitiesForProjectGuid(groupedAnalysisGroups, null),
   }),
+)
+
+export const getCurrentAnalysisGroup = createSelector(
+  getProjectAnalysisGroupsByGuid,
+  getAnalysisGroupGuid,
+  (analysisGroupsByGuid, analysisGroupGuid) => analysisGroupsByGuid[analysisGroupGuid],
 )
 
 export const getProjectAnalysisGroupFamiliesByGuid = createSelector(
@@ -133,11 +143,9 @@ export const getProjectAnalysisGroupFamilySizeHistogram = createSelector(
 
 export const getProjectAnalysisGroupDataLoadedFamilySizeHistogram = createSelector(
   getProjectAnalysisGroupFamiliesByGuid,
-  getSamplesByFamily,
-  (familiesByGuid, samplesByFamily) => getFamilySizeHistogram(Object.values(familiesByGuid).map(((family) => {
-    const sampleIndividuals = new Set((samplesByFamily[family.familyGuid] || []).filter(
-      sample => sample.isActive,
-    ).map(sample => sample.individualGuid))
+  getActiveDatasetsByFamily,
+  (familiesByGuid, datasetsByFamily) => getFamilySizeHistogram(Object.values(familiesByGuid).map(((family) => {
+    const sampleIndividuals = new Set((datasetsByFamily[family.familyGuid] || []).map(sample => sample.individualGuid))
     const hasSampleParents = (family.parents || []).reduce(
       (acc, { individualGuid, maternalGuid, paternalGuid }) => {
         const hasSampleMaternal = sampleIndividuals.has(maternalGuid)
@@ -170,9 +178,32 @@ export const getProjectAnalysisGroupIndividualsByGuid = createSelector(
 )
 
 export const getProjectAnalysisGroupSamplesByTypes = createSelector(
+  getProjectGuid,
+  getCurrentAnalysisGroupFamilyGuids,
+  getProjectAnalysisGroupIndividualsByGuid,
+  getDatasetsGroupedByProjectGuid,
+  (projectGuid, analysisGroupFamilyGuids, analysisGroupIndividuals, datasetsByProject) => Object.values(
+    datasetsByProject[projectGuid] || {},
+  ).sort(compareObjects('loadedDate')).reduce((acc, { sampleType, datasetType, loadedDate, activeIndividuals, inactiveIndividuals }) => {
+    const key = `${sampleType}__${datasetType}`
+    if (!acc[key]) {
+      acc[key] = []
+    }
+    const individualGuids = [...(activeIndividuals || []), ...(inactiveIndividuals || [])]
+    const count = !analysisGroupFamilyGuids ? individualGuids.length : individualGuids.filter(
+      individualGuid => individualGuid in analysisGroupIndividuals,
+    ).length
+    if (count) {
+      acc[key].push({ loadedDate, count })
+    }
+    return acc
+  }, {}),
+)
+
+export const getProjectAnalysisGroupRnaSamplesByTypes = createSelector(
   getCurrentProject,
   getCurrentAnalysisGroupFamilyGuids,
-  (project, analysisGroupFamilyGuids) => Object.entries(project.sampleCounts || {}).map(
+  (project, analysisGroupFamilyGuids) => Object.entries(project.rnaSampleCounts || {}).map(
     ([key, typeCounts]) => ([key, typeCounts.map(({ familyCounts, ...data }) => ({
       ...data,
       count: Object.entries(familyCounts).reduce((total, [familyGuid, count]) => (
@@ -212,11 +243,11 @@ export const getTaggedVariantsByFamily = createSelector(
   getGenesById,
   getVariantTagsByGuid,
   (savedVariants, genesById, variantTagsByGuid) => Object.values(savedVariants).filter(
-    variant => variant.tagGuids.length,
+    variant => variant.tagGuids?.length,
   ).reduce((acc, variant) => {
     const { familyGuids, ...variantDetail } = variant
     variantDetail.tags = variant.tagGuids.map(tagGuid => variantTagsByGuid[tagGuid])
-    variantDetail.genes = Object.keys(variant.transcripts || {}).map(geneId => genesById[geneId])
+    variantDetail.genes = (variant.geneIds || []).map(geneId => genesById[geneId])
     familyGuids.forEach((familyGuid) => {
       if (!acc[familyGuid]) {
         acc[familyGuid] = []
@@ -299,7 +330,7 @@ export const getIndividualTaggedVariants = createSelector(
     const { familyGuid } = individualsByGuid[individualGuid]
     return Object.values(taggedVariants[familyGuid] || []).reduce((acc, variant) => {
       const variantDetail = {
-        ...variant.genotypes[individualGuid],
+        ...(variant.genotypes || {})[individualGuid],
         ...variant,
       }
       return [...acc, ...variant.genes.filter(gene => gene).map(gene => ({
@@ -455,16 +486,16 @@ export const getVisibleFamilies = createSelector(
 export const getVisibleFamiliesInSortedOrder = createSelector(
   getVisibleFamilies,
   getIndividualsByGuid,
-  getSamplesByFamily,
+  getMinMaxDatasetsByFamily,
   getFamiliesSortOrder,
   getFamiliesSortDirection,
-  (visibleFamilies, individualsByGuid, samplesByFamily, familiesSortOrder, familiesSortDirection) => {
+  (visibleFamilies, individualsByGuid, minMaxDatasetsByFamily, familiesSortOrder, familiesSortDirection) => {
     if (!familiesSortOrder || !FAMILY_SORT_LOOKUP[familiesSortOrder] ||
       visibleFamilies.some(({ familyId }) => !familyId)) { // families have been loaded without any core fields
       return visibleFamilies
     }
 
-    const getSortKey = FAMILY_SORT_LOOKUP[familiesSortOrder](individualsByGuid, samplesByFamily)
+    const getSortKey = FAMILY_SORT_LOOKUP[familiesSortOrder](individualsByGuid, minMaxDatasetsByFamily)
     return visibleFamilies.slice(0).sort((a, b) => getSortKey(a).localeCompare(getSortKey(b)) * familiesSortDirection)
   },
 )
@@ -480,50 +511,40 @@ export const getEntityExportConfig = ({ projectName, tableName, fileName, fields
 
 const getFamiliesExportData = createSelector(
   getVisibleFamiliesInSortedOrder,
-  getSamplesByFamily,
+  getMinMaxDatasetsByFamily,
   getNotesByFamilyType,
-  (visibleFamilies, samplesByFamily, notesByFamilyType) => visibleFamilies.reduce((acc, family) => [...acc, {
+  (visibleFamilies, minMaxDatasetsByFamily, notesByFamilyType) => visibleFamilies.reduce((acc, family) => [...acc, {
     ...family,
     ...FAMILY_NOTES_FIELDS.reduce((noteAcc, { id, noteType }) => (
       { ...noteAcc, [id]: (notesByFamilyType[family.familyGuid] || {})[noteType] }), {}),
-    [FAMILY_FIELD_FIRST_SAMPLE]: (samplesByFamily[family.familyGuid] || [])[0],
+    [FAMILY_FIELD_FIRST_SAMPLE]: (minMaxDatasetsByFamily[family.familyGuid] || [])[0],
   }], []),
-)
-
-const getSamplesByIndividual = createSelector(
-  getSamplesByGuid,
-  samplesByGuid => Object.values(samplesByGuid).reduce((acc, sample) => {
-    if (!acc[sample.individualGuid]) {
-      acc[sample.individualGuid] = []
-    }
-    acc[sample.individualGuid].push(sample)
-    return acc
-  }, {}),
 )
 
 const getIndividualsExportData = createSelector(
   getVisibleFamiliesInSortedOrder,
   getSortedIndividualsByFamily,
-  getSamplesByIndividual,
-  (families, individualsByFamily, samplesByIndividual) => families.reduce((acc, family) => [
+  getActiveDatasetsByIndividual,
+  (families, individualsByFamily, activeDatasetsByIndividual) => families.reduce((acc, family) => [
     ...acc, ...(individualsByFamily[family.familyGuid] || []).map(individual => ({
       ...individual,
       [FAMILY_FIELD_ID]: family.familyId,
-      [INDIVIDUAL_HAS_DATA_FIELD]: (
-        samplesByIndividual[individual.individualGuid] || []).some(({ isActive }) => isActive),
+      [INDIVIDUAL_HAS_DATA_FIELD]: (activeDatasetsByIndividual[individual.individualGuid] || []).length > 0,
     }))], []),
 )
 
 const getSamplesExportData = createSelector(
   getVisibleFamiliesInSortedOrder,
-  getIndividualsByGuid,
-  getSamplesByFamily,
-  (visibleFamilies, individualsByGuid, samplesByFamily) => visibleFamilies.reduce((acc, family) => [
-    ...acc, ...(samplesByFamily[family.familyGuid] || []).map(sample => ({
-      ...sample,
-      [FAMILY_FIELD_ID]: family.familyId,
-      [INDIVIDUAL_FIELD_ID]: individualsByGuid[sample.individualGuid]?.individualId,
-    }))], []),
+  getSortedIndividualsByFamily,
+  getDatasetsByIndividual,
+  (visibleFamilies, individualsByFamily, datasetsByIndividual) => visibleFamilies.reduce((acc, family) => [
+    ...acc, ...(individualsByFamily[family.familyGuid] || []).reduce((indivAcc, { individualGuid, individualId }) => ([
+      ...indivAcc, ...(datasetsByIndividual[individualGuid] || []).map(sample => ({
+        ...sample,
+        [FAMILY_FIELD_ID]: family.familyId,
+        [INDIVIDUAL_FIELD_ID]: individualId,
+      })),
+    ]), [])], []),
 )
 
 export const getProjectExportUrls = createSelector(
@@ -592,8 +613,9 @@ export const getAnalysisStatusCounts = createSelector(
 export const getDefaultMmeSubmission = createSelector(
   getCurrentProject,
   project => ({
-    contactName: project.mmePrimaryDataOwner,
-    contactHref: project.mmeContactUrl,
+    contacts: project.mmeContactUrl.replace('mailto:', '').split(',').map((email, i) => (
+      { email: email.trim(), name: (project.mmePrimaryDataOwner.split(',')[i] || '').trim() }
+    )),
     geneVariants: [],
     phenotypes: [],
   }),
@@ -627,7 +649,7 @@ export const getMmeDefaultContactEmail = createSelector(
   (mmeResultsByGuid, mmeSubmissionsByGuid, genesById, savedVariants, user, matchmakerResultGuid) => {
     const { patient, geneVariants, submissionGuid } = mmeResultsByGuid[matchmakerResultGuid]
     const {
-      geneVariants: submissionGeneVariants, phenotypes, individualGuid, contactHref, submissionId,
+      geneVariants: submissionGeneVariants, phenotypes, individualGuid, contacts, submissionId,
     } = mmeSubmissionsByGuid[submissionGuid]
 
     const submittedGenes = [...new Set((submissionGeneVariants || []).map(
@@ -651,15 +673,15 @@ export const getMmeDefaultContactEmail = createSelector(
     }
     const submittedPhenotypes = submittedPhenotypeList.join(numPhenotypes === 2 ? ' and ' : ', ')
 
-    const contacts = [
+    const emailContacts = [
       patient.contact.href.replace('mailto:', ''),
-      contactHref.replace('mailto:', '').replace('matchmaker@broadinstitute.org,', ''),
+      ...contacts.map(({ email }) => email).filter(email => email !== 'matchmaker@broadinstitute.org'),
       user.email,
     ]
     return {
       matchmakerResultGuid,
       patientId: patient.id,
-      to: contacts.filter(val => val).join(','),
+      to: emailContacts.filter(val => val).join(','),
       subject: `${geneName || `Patient ${patient.id}`} Matchmaker Exchange connection (${submissionId})`,
       body: `Dear ${patient.contact.name},\n\nWe recently matched with one of your patients in Matchmaker Exchange harboring ${(submissionGeneVariants || []).length === 1 ? 'a variant' : 'variants'} in ${submittedGenes.join(', ')}. Our patient has ${submittedVariants}${submittedPhenotypes ? ` and presents with ${submittedPhenotypes}` : ''}. Would you be willing to share whether your patient's phenotype and genotype match with ours? We are very grateful for your help and look forward to hearing more.\n\nBest wishes,\n${user.displayName}`,
     }
@@ -804,7 +826,7 @@ export const getPageHeaderEntityLinks = createSelector(
         null,
 
     }]
-    if (project.hasCaseReview) {
+    if (project.hasCaseReview && !project.partialAccess) {
       entityLinks.push({
         to: `/project/${project.projectGuid}/case_review`,
         content: 'Case Review',
@@ -840,17 +862,19 @@ export const getTissueOptionsByIndividualGuid = createSelector(
     const tissueTypesByIndividualGuid = Object.entries(rnaSeqDataByIndividualGuid || {}).map(
       ([individualGuid, rnaSeqData]) => ([
         individualGuid,
-        [...new Set(Object.values(rnaSeqData || {}).map(Object.values).flat(2).map(({ tissueType }) => tissueType))],
+        [...new Set(Object.values(rnaSeqData || {}).map(Object.values).flat(2).map(
+          ({ tissueType, sequencingType }) => `${tissueType}-${sequencingType}`,
+        ))],
       ]),
     )
-    return tissueTypesByIndividualGuid.reduce((acc, [individualGuid, tissueTypes]) => (
-      tissueTypes.length > 0 ? {
-        ...acc,
-        [individualGuid]: tissueTypes.map(tissueType => (
-          { key: tissueType, text: TISSUE_DISPLAY[tissueType] || 'Unknown Tissue', value: tissueType }
-        )),
-      } : acc
-    ), {})
+    return tissueTypesByIndividualGuid.reduce((acc, [individualGuid, dataTypes]) => ({
+      ...acc,
+      [individualGuid]: dataTypes.map(dataType => ({
+        key: dataType,
+        value: dataType,
+        text: `Tissue type: ${TISSUE_DISPLAY[dataType.split('-')[0]] || 'Unknown Tissue'}, Sequencing Product: ${PRODUCT_DISPLAY[dataType.split('-')[1]] || 'Unknown Product'}`,
+      })),
+    }), {})
   },
 )
 

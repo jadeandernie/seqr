@@ -4,6 +4,7 @@ import gzip
 import json
 import mock
 import re
+import responses
 
 from copy import deepcopy
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -11,7 +12,7 @@ from django.urls.base import reverse
 from io import BytesIO
 from openpyxl import load_workbook
 
-from seqr.models import Individual, Sample, SavedVariant, VariantTag
+from seqr.models import Individual, Dataset, SavedVariant, VariantTag
 from seqr.views.apis.individual_api import edit_individuals_handler, update_individual_handler, \
     delete_individuals_handler, receive_individuals_table_handler, save_individuals_table_handler, \
     receive_individuals_metadata_handler, save_individuals_metadata_table_handler, update_individual_hpo_terms, \
@@ -47,6 +48,7 @@ INDIVIDUAL_UPDATE_DATA = {
     'displayName': 'NA20870',
     'notes': 'A note',
     'birthYear': 2000,
+    'affected': 'U',
     'features': [{
         'id': 'HP:0002011',
         'label': 'nervous system abnormality',
@@ -75,8 +77,8 @@ EXTERNAL_WORKSPACE_INDIVIDUAL_UPDATE_DATA = {
     'individualId': 'NA21987',
     'paternalGuid': 'I000018_na21234',
     'maternalGuid': 'I000020_na65432',
-    'maternalId': '',
-    'paternalId': 'foobar',
+    'maternalId': 'foobar',
+    'paternalId': '',
     'sex': 'U',
     'affected': 'N',
 }
@@ -91,8 +93,11 @@ INDIVIDUAL_FAMILY_UPDATE_DATA = {
 LOAD_PARTICIPANT_TABLE = deepcopy(PARTICIPANT_TABLE)
 for row in LOAD_PARTICIPANT_TABLE[4:]:
     row[7] = row[7].replace('Broad_', '')
+LOAD_PARTICIPANT_TABLE[5][11] = 'Niece'
 LOAD_PARTICIPANT_TABLE[6][15] += '|Asian'
 LOAD_PARTICIPANT_TABLE[6][17] = ''
+
+TRIGGER_RELOAD_URL = 'http://pipeline-runner:6000/rebuild_gt_stats_enqueue'
 
 
 @mock.patch('seqr.utils.middleware.DEBUG', False)
@@ -100,20 +105,28 @@ class IndividualAPITest(object):
 
     def test_update_individual_handler(self):
         edit_individuals_url = reverse(update_individual_handler, args=[INDIVIDUAL_UPDATE_GUID])
-        self.check_collaborator_login(edit_individuals_url)
+
+        note_only_edit_response = {
+            INDIVIDUAL_UPDATE_GUID: {
+                **{k: mock.ANY for k in INDIVIDUAL_CORE_FIELDS},
+                'displayName': 'NA20870',
+                'notes': 'A note',
+                'birthYear': None,
+                'affected': 'A',
+            }
+        }
+        self.check_partial_access_login(
+            edit_individuals_url, note_only_edit_response, request_data=INDIVIDUAL_UPDATE_DATA,
+        )
 
         response = self.client.post(edit_individuals_url, content_type='application/json',
                                     data=json.dumps(INDIVIDUAL_UPDATE_DATA))
 
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
-        self.assertListEqual(list(response_json.keys()), [INDIVIDUAL_UPDATE_GUID])
-        self.assertSetEqual(set(response_json[INDIVIDUAL_UPDATE_GUID].keys()), INDIVIDUAL_CORE_FIELDS)
+        self.assertDictEqual(response_json, note_only_edit_response)
         individual = Individual.objects.get(guid=INDIVIDUAL_UPDATE_GUID)
-        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['displayName'], 'NA20870')
         self.assertEqual(individual.display_name, '')
-        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['notes'], 'A note')
-        self.assertIsNone(response_json[INDIVIDUAL_UPDATE_GUID]['birthYear'])
         self.assertFalse('features' in response_json[INDIVIDUAL_UPDATE_GUID])
         self.assertIsNone(individual.features)
 
@@ -124,6 +137,7 @@ class IndividualAPITest(object):
         response_json = response.json()
         self.assertSetEqual(set(response_json[INDIVIDUAL_UPDATE_GUID].keys()), INDIVIDUAL_CORE_FIELDS)
         self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['birthYear'], 2000)
+        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['affected'], 'A')
 
         update_json = {'analyteType': 'D', 'tissueAffectedStatus': False}
         response = self.client.post(edit_individuals_url, content_type='application/json', data=json.dumps(update_json))
@@ -143,6 +157,7 @@ class IndividualAPITest(object):
         edit_individuals_url = reverse(update_individual_hpo_terms, args=[INDIVIDUAL_UPDATE_GUID])
         self.check_manager_login(edit_individuals_url)
 
+        self.reset_logs()
         response = self.client.post(edit_individuals_url, content_type='application/json',
                                     data=json.dumps(INDIVIDUAL_UPDATE_DATA))
 
@@ -169,8 +184,15 @@ class IndividualAPITest(object):
             {'id': 'HP:0011675', 'notes': 'A new term'},
         ])
 
+        self.assert_json_logs(self.manager_user, [
+            ('update Individual I000007_na20870', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ])
+
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP')
+    @responses.activate
     def test_edit_individuals(self, mock_pm_group):
+        responses.add(responses.POST, TRIGGER_RELOAD_URL, status=400)
         edit_individuals_url = reverse(edit_individuals_handler, args=[PROJECT_GUID])
         self.check_manager_login(edit_individuals_url)
 
@@ -198,7 +220,9 @@ class IndividualAPITest(object):
         ])
 
         # send valid request
-        Sample.objects.filter(guid__in=['S000130_na19678', 'S000135_na20870']).update(is_active=False)
+        for dataset in Dataset.objects.filter(guid__in=['S000130_na19678', 'S000129_na19675']):
+            dataset.inactive_individuals.set(dataset.active_individuals.all())
+            dataset.active_individuals.set(set())
         response = self.client.post(edit_individuals_url, content_type='application/json', data=json.dumps({
             'individuals': [INDIVIDUAL_IDS_UPDATE_DATA, INDIVIDUAL_FAMILY_UPDATE_DATA]
         }))
@@ -237,6 +261,20 @@ class IndividualAPITest(object):
         self.assertEqual(response_json['individualsByGuid'][ID_UPDATE_GUID]['individualId'], UPDATED_ID)
         self.assertEqual(response_json['individualsByGuid'][ID_UPDATE_GUID]['maternalId'], 'NA19679')
 
+        response = self.client.post(edit_individuals_url, content_type='application/json', data=json.dumps({
+            'individuals': [{
+                'individualGuid': INDIVIDUAL_GUID,
+                'familyId': '1',
+                'individualId': 'NA19675_1',
+                'paternalId': '',
+            }]
+        }))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual({INDIVIDUAL_GUID}, set(response_json['individualsByGuid']))
+        self.assertIsNone(response_json['individualsByGuid'][INDIVIDUAL_GUID]['paternalId'])
+        self.assertEqual(response_json['individualsByGuid'][INDIVIDUAL_GUID]['maternalId'], 'NA19679')
+
         # Test PM permission
         pm_required_edit_individuals_url = reverse(edit_individuals_handler, args=[PM_REQUIRED_PROJECT_GUID])
         response = self.client.post(pm_required_edit_individuals_url, content_type='application/json', data=json.dumps({
@@ -261,6 +299,7 @@ class IndividualAPITest(object):
             'individualsByGuid': {PM_REQUIRED_INDIVIDUAL_GUID: mock.ANY},
             'familiesByGuid': {}
         })
+        self.assertEqual(len(responses.calls), 0)
 
         # Test External AnVIL projects
         ext_anvil_edit_individuals_url = reverse(edit_individuals_handler, args=[EXTERNAL_WORKSPACE_PROJECT_GUID])
@@ -282,11 +321,12 @@ class IndividualAPITest(object):
             return
 
         self.assertEqual(response.status_code, 400)
-        self.assertListEqual(response.json()['errors'], [
-            'Invalid parental guid I000020_na65432',
+        self.assertDictEqual(response.json(), {'errors': [
             'NA21234 is recorded as Female sex and also as the father of NA21987',
-        ])
+            'Invalid parental guid I000020_na65432',
+        ], 'warnings': []})
 
+        self.reset_logs()
         update_json = deepcopy(EXTERNAL_WORKSPACE_INDIVIDUAL_UPDATE_DATA)
         update_json['maternalGuid'] = update_json.pop('paternalGuid')
         response = self.client.post(ext_anvil_edit_individuals_url, content_type='application/json', data=json.dumps({
@@ -307,6 +347,29 @@ class IndividualAPITest(object):
         self.assertIsNone(updated_individual['paternalGuid'])
         self.assertIsNone(updated_individual['paternalGuid'])
 
+        self._assert_expected_reload_calls(EXTERNAL_WORKSPACE_PROJECT_GUID)
+        self.assert_json_logs(self.manager_user, [
+            ('update Individual I000019_na21987',  {'dbUpdate': {
+                'dbEntity': 'Individual',
+                'entityId': 'I000019_na21987',
+                'updateFields': ['affected', 'sex'],
+                'updateType': 'update',
+            }}),
+            ('update Individual I000019_na21987', {'dbUpdate': {
+                'dbEntity': 'Individual',
+                'entityId': 'I000019_na21987',
+                'updateFields': ['mother'],
+                'updateType': 'update',
+            }}),
+            ('Reloading dictionary seqrdb_affected_status_dict', None),
+            ('Triggering rebuild_gt_stats for R0004_non_analyst_project', None),
+            (f'Error Triggering Rebuild Gt Stats: 400 Client Error: Bad Request for url: {TRIGGER_RELOAD_URL}', {
+                'severity': 'ERROR',
+                '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
+                'detail': {'project_guids': ['R0004_non_analyst_project']},
+            }),
+        ])
+
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP')
     def test_delete_individuals(self, mock_pm_group):
         individuals_url = reverse(delete_individuals_handler, args=[PROJECT_GUID])
@@ -318,13 +381,21 @@ class IndividualAPITest(object):
         }))
         self.assertEqual(response.status_code, 400)
 
-        # send valid requests
         response = self.client.post(individuals_url, content_type='application/json', data=json.dumps({
             'individuals': [INDIVIDUAL_IDS_UPDATE_DATA]
         }))
-        self._assert_expected_delete_individuals(response, mock_pm_group)
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], ['Unable to delete individuals with active search sample: NA19678'])
+        for dataset in Dataset.objects.filter(guid__in=['S000130_na19678', 'S000143_na20885', 'S000147_na21234']):
+            dataset.inactive_individuals.set(dataset.active_individuals.all())
+            dataset.active_individuals.set(set())
 
-    def _assert_expected_delete_individuals(self, response, mock_pm_group):
+        # send valid requests
+        self.reset_logs()
+        response = self.client.post(individuals_url, content_type='application/json', data=json.dumps({
+            'individuals': [INDIVIDUAL_IDS_UPDATE_DATA]
+        }))
+
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
         self.assertSetEqual(set(response_json.keys()), {'individualsByGuid', 'familiesByGuid'})
@@ -334,6 +405,15 @@ class IndividualAPITest(object):
         })
         self.assertFalse('I000002_na19678' in response_json['familiesByGuid']['F000001_1']['individualGuids'])
         self.assertIsNone(response_json['familiesByGuid']['F000001_1']['pedigreeImage'])
+        self.assertFalse(Dataset.objects.filter(guid='S000130_na19678').exists())
+        self.assert_json_logs(self.manager_user, [
+            ('delete Dataset S000130_na19678', {'dbUpdate': mock.ANY}),
+            ('delete 1 Individuals', {'dbUpdate': mock.ANY}),
+            ('update 1 Familys', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_affected_status_dict', None),
+            ('Reloading dictionary seqrdb_sex_dict', None),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ])
 
         # Test PM permission
         pm_required_delete_individuals_url = reverse(delete_individuals_handler, args=[PM_REQUIRED_PROJECT_GUID])
@@ -382,6 +462,11 @@ class IndividualAPITest(object):
                 'individuals': [EXTERNAL_WORKSPACE_INDIVIDUAL_UPDATE_DATA]
             }))
         self.assertEqual(response.status_code, 200 if self.HAS_EXTERNAL_PROJECT_ACCESS else 403)
+        if self.HAS_EXTERNAL_PROJECT_ACCESS:
+            self.assertListEqual(
+                list(Dataset.objects.get(guid='S000147_na21234').inactive_individuals.order_by('id').values_list('guid', flat=True)),
+                ['I000018_na21234', 'I000021_na21654'],
+            )
 
     def test_individuals_table_handler_errors(self):
         individuals_url = reverse(receive_individuals_table_handler, args=[PROJECT_GUID])
@@ -417,13 +502,15 @@ class IndividualAPITest(object):
         self.assertEqual(response.status_code, 400)
         self.assertDictEqual(response.json(), {
             'errors': [
+                'The following families do not have any affected individuals: 1',
+                'NA19675_1 already has loaded data and cannot be moved to a different family',
                 'NA19675_1 already has loaded data and cannot be moved to a different family',
                 'NA19675_1 is included as 2 separate records, but must be unique within the project',
             ], 'warnings': []
         })
 
         response = self.client.post(individuals_url, {'f': SimpleUploadedFile(
-            'test.tsv', 'Family ID	Individual ID	Previous Individual ID\n"1"	"NA19675_1"	"NA19675"'.encode('utf-8'))})
+            'test.tsv', 'Family ID	Individual ID	Previous Individual ID	Affected\n"1"	"NA19675_1"	"NA19675"	"A"'.encode('utf-8'))})
         self.assertEqual(response.status_code, 400)
         self.assertDictEqual(response.json(), {
             'errors': ['Could not find individuals with the following previous IDs: NA19675'], 'warnings': []
@@ -461,6 +548,8 @@ class IndividualAPITest(object):
         self.assertEqual(response.status_code, 400)
         self.assertDictEqual(response.json(), {
             'errors': [
+                'The following families do not have any affected individuals: 1',
+                missing_entry_warning,
                 'Invalid proband relationship "Father" for NA19675_1 with given gender Female',
                 'NA19675_1 is recorded as their own father',
                 'NA19675_1 is recorded as Female sex and also as the father of NA19675_1',
@@ -470,7 +559,7 @@ class IndividualAPITest(object):
                 'NA19675_2 is recorded as XXX sex and also as the father of NA19677',
                 'NA19675_1 is included as 2 separate records, but must be unique within the project',
             ],
-            'warnings': [missing_entry_warning, 'The following families do not have any affected individuals: 2'],
+            'warnings': [],
         })
 
         rows = [rows[0], '"new_fam_1"	"NA19677"	""	"M"	""	"unaffected"']
@@ -482,13 +571,15 @@ class IndividualAPITest(object):
         ], 'warnings': []})
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
+    @responses.activate
     def test_individuals_table_handler(self):
+        responses.add(responses.POST, TRIGGER_RELOAD_URL)
         individuals_url = reverse(receive_individuals_table_handler, args=[PROJECT_GUID])
         self.check_manager_login(individuals_url)
 
         data = 'Family ID	Individual ID	Previous Individual ID	Paternal ID	Maternal ID	Sex	Affected Status	Notes	familyNotes\n\
 "1"	" NA19675_1 "	""	"NA19678 "	"NA19679"	"Female"	"Affected"	"A affected individual, test1-zsf"	""\n\
-"1"	"NA19678"	""	""	""	"XXY"	"Unaffected"	"a individual note"	""\n\
+"1"	"NA19678"	""	""	""	"XXY"	"Affected"	"a individual note"	""\n\
 "4"	"NA20872_update"	"NA20872"	""	""	"Male"	"Affected"	""	""\n\
 "21"	" HG00735"	""	""	""	"Female"	"Affected"	""	"a new family""'
 
@@ -508,6 +599,7 @@ class IndividualAPITest(object):
 
         url = reverse(save_individuals_table_handler, args=[PROJECT_GUID, response_json['uploadedFileId']])
 
+        self.reset_logs()
         response = self.client.post(url)
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -541,6 +633,37 @@ class IndividualAPITest(object):
         self.assertEqual(response_json['individualsByGuid'][new_indiv_guid]['sex'], 'F')
         self.assertEqual(response_json['individualsByGuid']['I000008_na20872']['individualId'], 'NA20872_update')
 
+        self._assert_expected_reload_calls(PROJECT_GUID)
+        read_tmp_table_logs = self._read_tmp_table_logs('ffa788c23360f0908f3de16dca799fe1')
+        self.assert_json_logs(None, read_tmp_table_logs)
+        self.assert_json_logs(self.manager_user, [
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Family', 'entityId': mock.ANY, 'updateFields': ['family_id', 'project'], 'updateType': 'create',
+            }}),
+            ('update Individual I000001_na19675', {'dbUpdate': mock.ANY}),
+            ('update Individual I000002_na19678', {'dbUpdate': mock.ANY}),
+            ('update Individual I000008_na20872', {'dbUpdate': mock.ANY}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Individual', 'entityId': mock.ANY, 'updateType': 'create', 'updateFields': [
+                    'affected', 'case_review_status', 'family', 'individual_id',
+                ],
+            }}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'FamilyNote', 'entityId': mock.ANY, 'updateType': 'create', 'updateFields': [
+                    'family', 'note', 'note_type',
+                ],
+            }}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Individual', 'entityId': mock.ANY, 'updateType': 'update', 'updateFields': ['sex'],
+            }}),
+            ('update 3 Familys', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_affected_status_dict', None),
+            ('Triggering rebuild_gt_stats for R0001_1kg', None),
+            ('Triggered Rebuild Gt Stats', {'detail': {'project_guids': ['R0001_1kg']}}),
+            ('Reloading dictionary seqrdb_sex_dict', None),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ], offset=len(read_tmp_table_logs))
+
         # Test PM permission
         receive_url = reverse(receive_individuals_table_handler, args=[PM_REQUIRED_PROJECT_GUID])
         save_url = reverse(save_individuals_table_handler, args=[PM_REQUIRED_PROJECT_GUID, '123'])
@@ -551,12 +674,20 @@ class IndividualAPITest(object):
 
         self.login_pm_user()
         response = self.client.post(receive_url, {
-            'f': SimpleUploadedFile('individuals.tsv', 'Family ID	Individual ID\n1	2'.encode('utf-8'))})
+            'f': SimpleUploadedFile('individuals.tsv', 'Family ID	Individual ID	Affected\n1	2	A'.encode('utf-8'))})
         self.assertEqual(response.status_code, 200)
         save_url = reverse(save_individuals_table_handler, args=[
             PM_REQUIRED_PROJECT_GUID, response.json()['uploadedFileId']])
         response = self.client.post(save_url)
         self.assertEqual(response.status_code, 200)
+
+    def _assert_expected_reload_calls(self, project_guid):
+        self.assertEqual(len(responses.calls), 1)
+        self.assertDictEqual(json.loads(responses.calls[0].request.body), {'project_guids': [project_guid]})
+
+    @staticmethod
+    def _read_tmp_table_logs(file_name):
+        return []
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     @mock.patch('seqr.views.utils.pedigree_info_utils.NO_VALIDATE_MANIFEST_PROJECT_CATEGORIES')
@@ -632,16 +763,17 @@ class IndividualAPITest(object):
                            'Make sure to create an additional record with SCO_PED073A_GA0338_1 as the Individual ID'
         missing_columns_error = 'SCO_PED073B_GA0339_1 is missing the following required columns: MONDO ID, MONDO Label, Tissue Affected Status'
         response = _send_request_data(data)
-        self.assertDictEqual(response.json(), {'warnings': [expected_warning], 'errors': [
-            missing_columns_error, 'Multiple consent codes specified in manifest: GMB, HMB',
+        self.assertDictEqual(response.json(), {'warnings': [], 'errors': [
+            missing_columns_error, 'Multiple consent codes specified in manifest: GMB, HMB', expected_warning,
         ]})
 
         data[4][-2] = 'GMB'
         mock_no_validate_categories.resolve_expression.return_value = ['Not-used category']
         response = _send_request_data(data)
         self.assertEqual(response.status_code, 400)
-        self.assertDictEqual(response.json(), {'warnings': [expected_warning], 'errors': [
+        self.assertDictEqual(response.json(), {'warnings': [], 'errors': [
             missing_columns_error, 'Consent code in manifest "GMB" does not match project consent code "HMB"',
+            expected_warning,
         ]})
 
         data[3][12] = 'Maybe'
@@ -935,7 +1067,7 @@ class IndividualAPITest(object):
 
     def test_individuals_metadata_table_handler(self):
         url = reverse(receive_individuals_metadata_handler, args=['R0001_1kg'])
-        self.check_collaborator_login(url)
+        self.check_manager_login(url)
 
         # Send invalid requests
         header = 'family_id,indiv_id,hpo_term_yes,hpo_term_no'
@@ -944,11 +1076,11 @@ class IndividualAPITest(object):
         self.assertEqual(response.status_code, 400)
         self.assertDictEqual(response.json(), {'errors': ['Invalid header, missing individual id column'], 'warnings': []})
 
-        header = 'family_id,individual_id,hpo_term_present,hpo_term_absent,sex,birth year,other affected relatives,onset age,expected inheritance,maternal ancestry,candidate genes,assigned analyst'
+        header = 'individual_id,hpo_term_present,hpo_term_absent,sex,birth year,other affected relatives,onset age,expected inheritance,maternal ancestry,candidate genes,assigned analyst'
         rows = [
-            '1,NA19678,,,,,no,infant,recessive,,,not_an_email',
-            '1,NA19679,HP:0100258 (Preaxial polydactyly),,,,,,,,,test_user_no_access@test.com',
-            '1,HG00731,HP:0002017,HP:0012469 (Infantile spasms);HP:0011675 (Arrhythmia);HP:0011675 (Arrhythmia),,,,,,,,,',
+            'NA19678,,,,,no,infant,recessive,,,not_an_email',
+            'NA19679,HP:0100258 (Preaxial polydactyly),,,,,,,,,test_user_no_access@test.com',
+            'HG007311,HP:0002017,HP:0012469 (Infantile spasms);HP:0011675 (Arrhythmia);HP:0011675 (Arrhythmia),,,,,,,,,',
         ]
         f = SimpleUploadedFile('updates.csv', "{}\n{}".format(header, '\n'.join(rows)).encode('utf-8'))
         response = self.client.post(url, data={'f': f})
@@ -963,20 +1095,33 @@ class IndividualAPITest(object):
                 'The following invalid values for "onset_age" will not be added: infant (NA19678)',
                 'The following invalid values for "expected_inheritance" will not be added: recessive (NA19678)',
                 'The following invalid values for "assigned_analyst" will not be added: not_an_email (NA19678); test_user_no_access@test.com (NA19679)',
-                'Unable to find matching ids for 1 individuals. The following entries will not be updated: HG00731',
+                'Unable to find matching ids for 1 individuals. The following entries will not be updated: HG007311',
                 'No changes detected for 2 individuals. The following entries will not be updated: NA19678, NA19679',
             ]})
 
         # send valid request
+        self.reset_logs()
+        header = f'family_id,{header}'
         rows[0] = '1,NA19678,,,,,false,,,,,'
+        rows[1] = f'1,{rows[1]}'
+        rows[2] = rows[2].replace('HG007311', '1,HG00731')
         rows.append('1,NA19675_1,HP:0002017,"HP:0012469 (Infantile spasms);HP:0004322 (Short stature, severe)",F,2000,True,Juvenile onset,"Autosomal dominant inheritance, Sporadic","Finnish, Irish","IKBKAP -- (multiple panels, no confirm), EHBP1L1",test_user_collaborator@test.com')
         f = SimpleUploadedFile('updates.csv', "{}\n{}".format(header, '\n'.join(rows)).encode('utf-8'))
         response = self.client.post(url, data={'f': f})
         self._is_expected_individuals_metadata_upload(response, expected_families=True, has_non_hpo_update=True)
 
+        read_tmp_table_logs = self._read_tmp_table_logs('6aea3d1f1bfc295340aa504370102fd5')
+        offset = 2 if read_tmp_table_logs else 1
+        self.assert_json_logs(None, read_tmp_table_logs, offset=offset)
+        self.assert_json_logs(self.manager_user, [
+            ('update Individual I000002_na19678', {'dbUpdate': mock.ANY}),
+            ('update Individual I000001_na19675', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ], offset=offset+len(read_tmp_table_logs))
+
     def test_individuals_metadata_hpo_term_number_table_handler(self):
         url = reverse(receive_individuals_metadata_handler, args=['R0001_1kg'])
-        self.check_collaborator_login(url)
+        self.check_manager_login(url)
 
         header = 'family_id,individual_id,affected,hpo_number,hpo_number,sex,birth,other affected relatives,onset,expected inheritance,maternal ancestry,candidate genes'
         rows = [
@@ -994,17 +1139,24 @@ class IndividualAPITest(object):
         response = self.client.post(url, data={'f': f})
         self._is_expected_individuals_metadata_upload(response)
 
-    def _set_metadata_file_iter(self, mock_subprocess, genetic_findings_table):
-        mock_subprocess.return_value.stdout.__iter__.side_effect = [
-            iter(['\t'.join(row).encode() for row in file]) for file in [
-                EXPERIMENT_TABLE, EXPERIMENT_LOOKUP_TABLE, LOAD_PARTICIPANT_TABLE, PHENOTYPE_TABLE,
-                genetic_findings_table,
+    def _set_metadata_file_iter(self, genetic_findings_table):
+        self.gs_files.update({
+            f'{file_name}.tsv': iter(['\t'.join(row).encode() for row in file]) for file_name, file in [
+                ('experiment_dna_short_read', EXPERIMENT_TABLE + [[
+                    'Broad_exome_HG00732', 'Broad_SM-JDBTM', 'Broad_HG00732_1', 'Kapa HyperPrep', '151', 'exome', '', '', '2022-08-15', '385', 'NovaSeq', '',
+                ]]),
+                ('experiment', EXPERIMENT_LOOKUP_TABLE + [[
+                    'experiment_dna_short_read.Broad_exome_HG00732', 'experiment_dna_short_read', 'Broad_exome_HG00732', 'Broad_HG00732',
+                ]]),
+                ('participant', LOAD_PARTICIPANT_TABLE),
+                ('phenotype', PHENOTYPE_TABLE),
+                ('genetic_findings', genetic_findings_table),
             ]
-        ]
+        })
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_import_gregor_metadata(self, mock_subprocess):
+    def test_import_gregor_metadata(self):
+        responses.add(responses.POST, TRIGGER_RELOAD_URL)
         genetic_findings_table = deepcopy(GENETIC_FINDINGS_TABLE)
         genetic_findings_table[2] = genetic_findings_table[2][:11] + genetic_findings_table[4][11:14] + \
                                     genetic_findings_table[2][14:]
@@ -1013,15 +1165,28 @@ class IndividualAPITest(object):
             'OR4G11P', '', '', '', 'Heterozygous', '', 'unknown', 'Broad_NA20889_1_248367227', '', 'Candidate',
             'IRIDA syndrome', 'MONDO:0008788', 'Autosomal dominant', 'Full', '', '', 'SR-ES', '', '', '', '', '', '', '',
         ])
-        self._set_metadata_file_iter(mock_subprocess, genetic_findings_table)
+        self.mock_subprocess.wait.return_value = 1
+        self.gs_files['experiment_dna_short_read.tsv'] = [b'Bucket is a requester pays bucket but no user project provided']
 
         url = reverse(import_gregor_metadata, args=[PM_REQUIRED_PROJECT_GUID])
         self.check_pm_login(url)
 
+        self.reset_logs()
         body = {
             'workspaceNamespace': 'my-seqr-billing', 'workspaceName': 'anvil-1kg project nåme with uniçøde',
             'sampleType': 'exome',
         }
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
+        self.assertEqual(response.status_code, 500)
+        self.assertDictEqual(response.json(), {'error': 'Could not access file gs://test_bucket/data_tables/experiment_dna_short_read.tsv'})
+        self.assert_json_logs(self.pm_user, [
+            ('==> gsutil ls gs://test_bucket/data_tables/experiment_dna_short_read.tsv', None),
+            ('Bucket is a requester pays bucket but no user project provided', {'severity': 'WARNING'}),
+        ])
+
+        self.mock_subprocess.reset_mock()
+        self._set_metadata_file_iter(genetic_findings_table)
+        self.mock_subprocess.wait.return_value = 0
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -1030,6 +1195,7 @@ class IndividualAPITest(object):
         })
         warnings = [
             'Broad_HG00733 is the mother of VCGS_FAM203_621_D2 but is not included',
+            'Skipped Invalid proband relationship "Niece" for NA20888 with given gender Male',
             'Skipped the following unrecognized HPO terms: HP:0001509',
         ]
         self.assertDictEqual(response_json['importStats'], {'gregorMetadata': {
@@ -1080,8 +1246,8 @@ class IndividualAPITest(object):
             'mother__individual_id', 'father__individual_id', 'features', 'absent_features', 'case_review_status',
         )
         self.assertDictEqual(individual_db_data[0], {
-            'individual_id': 'Broad_HG00732',
-            'display_name': '',
+            'individual_id': 'Broad_HG00732_1',
+            'display_name': 'Broad_HG00732',
             'family__guid': new_family_guid,
             'affected': 'N',
             'sex': 'M',
@@ -1113,7 +1279,7 @@ class IndividualAPITest(object):
             'family__guid': 'F000012_12',
             'affected': 'A',
             'sex': 'M',
-            'proband_relationship': '',
+            'proband_relationship': None,
             'mother__individual_id': None,
             'father__individual_id': None,
             'population': 'SAS',
@@ -1129,7 +1295,7 @@ class IndividualAPITest(object):
             'sex': 'F',
             'proband_relationship': 'S',
             'mother__individual_id': None,
-            'father__individual_id': 'Broad_HG00732',
+            'father__individual_id': 'Broad_HG00732_1',
             'population': 'AMR',
             'features': [{'id': 'HP:0011675'}],
             'absent_features': [{'id': 'HP:0002017'}],
@@ -1139,9 +1305,7 @@ class IndividualAPITest(object):
         saved_variants = SavedVariant.objects.filter(
             varianttag__variant_tag_type__name='GREGoR Finding'
         ).order_by('family_id', 'variant_id').distinct().values(
-            'guid', 'variant_id', 'xpos', 'family__guid', 'saved_variant_json__genomeVersion',
-            'saved_variant_json__transcripts', 'saved_variant_json__genotypes', 'saved_variant_json__mainTranscriptId',
-            'saved_variant_json__hgvsc',
+            'guid', 'variant_id', 'xpos', 'family__guid', 'key', 'dataset_type', 'genotypes', 'gene_ids', 'main_transcript',
         )
         self.assertEqual(len(saved_variants), 4)
         self.assertDictEqual(saved_variants[0], {
@@ -1149,26 +1313,28 @@ class IndividualAPITest(object):
             'variant_id': '1-248367227-TC-T',
             'xpos': 1248367227,
             'family__guid': 'F000012_12',
-            'saved_variant_json__genomeVersion': '37',
-            'saved_variant_json__transcripts': mock.ANY,
-            'saved_variant_json__genotypes': mock.ANY,
-            'saved_variant_json__mainTranscriptId': 'ENST00000505820',
-            'saved_variant_json__hgvsc': None,
+            'key': 100,
+            'dataset_type': 'SNV_INDEL',
+            'genotypes': mock.ANY,
+            'gene_ids': ['ENSG00000240361', 'ENSG00000135953'],
+            'main_transcript': {
+                'aminoAcids': None, 'biotype': 'protein_coding', 'canonical': 1, 'codons': 'Gtg/Atg',
+                'consequenceTerms': ['intron_variant'], 'geneId': 'ENSG00000240361', 'hgvsc': 'ENST00000262738.3:c.3955G>A',
+                'hgvsp': 'ENST00000505820.2:c.1586-17C>G', 'loftee': [None, []], 'majorConsequence': 'intron_variant',
+                'transcriptId': 'ENST00000505820', 'transcriptRank': 0,
+            },
         })
-        self.assertEqual(len(saved_variants[0]['saved_variant_json__transcripts']), 2)
-        self.assertEqual(len(saved_variants[0]['saved_variant_json__genotypes']), 2)
+        self.assertEqual(len(saved_variants[0]['genotypes']), 2)
         self.assertDictEqual(saved_variants[1], {
             'guid': mock.ANY,
             'variant_id': '1-249045487-A-G',
             'xpos': 1249045487,
             'family__guid': 'F000012_12',
-            'saved_variant_json__genomeVersion': '37',
-            'saved_variant_json__transcripts': {
-                'ENSG00000240361': [{'hgvsc': None, 'hgvsp': None, 'transcriptId': None}],
-            },
-            'saved_variant_json__genotypes': {created_individual_guid: {'numAlt': 1}},
-            'saved_variant_json__mainTranscriptId': None,
-            'saved_variant_json__hgvsc': None,
+            'main_transcript': {},
+            'key': None,
+            'dataset_type': 'SNV_INDEL',
+            'genotypes': {created_individual_guid: {'numAlt': 1}},
+            'gene_ids': ['ENSG00000240361'],
         })
         new_family_genotypes = {new_family_individual_guid: {'numAlt': 2}}
         self.assertDictEqual(saved_variants[2], {
@@ -1176,13 +1342,11 @@ class IndividualAPITest(object):
             'variant_id': '1-248367227-TC-T',
             'xpos': 1248367227,
             'family__guid': new_family_guid,
-            'saved_variant_json__genomeVersion': '37',
-            'saved_variant_json__transcripts': {
-                'ENSG00000135953': [{'hgvsc': 'c.3955G>A', 'hgvsp': 'c.1586-17C>G', 'transcriptId': 'ENST00000505820'}]
-            },
-            'saved_variant_json__genotypes': new_family_genotypes,
-            'saved_variant_json__mainTranscriptId': 'ENST00000505820',
-            'saved_variant_json__hgvsc': None,
+            'key': 100,
+            'dataset_type': 'SNV_INDEL',
+            'genotypes': new_family_genotypes,
+            'gene_ids': ['ENSG00000135953'],
+            'main_transcript':  {'hgvsc': 'c.3955G>A','hgvsp': 'c.1586-17C>G', 'transcriptId': 'ENST00000505820'},
         })
 
         variant_tags = VariantTag.objects.filter(variant_tag_type__name='GREGoR Finding')
@@ -1197,6 +1361,7 @@ class IndividualAPITest(object):
             'condition_id': 'OMIM:616126',
             'known_condition_name': 'Immunodeficiency 38',
             'condition_inheritance': 'Autosomal recessive',
+            'GREGoR_variant_classification': 'Curation in progress',
         })
         self.assertDictEqual(json.loads(next(t for t in new_variant_tags if t != comp_het_tag).metadata), {
             'gene_known_for_phenotype': 'Candidate',
@@ -1207,26 +1372,14 @@ class IndividualAPITest(object):
 
         new_family_tag = variant_tags.get(saved_variants__guid=saved_variants[2]['guid'])
         self.assertDictEqual(
-            json.loads(new_family_tag.metadata), {'gene_known_for_phenotype': 'Known', 'condition_id': 'MONDO:0044970'},
+            json.loads(new_family_tag.metadata), {'gene_known_for_phenotype': 'Known', 'condition_id': 'MONDO:0044970', 'GREGoR_variant_classification': 'Curation in progress'},
         )
 
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil cat gs://test_bucket/data_tables/experiment_dna_short_read.tsv', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().stdout.__iter__(),
-            mock.call('gsutil cat gs://test_bucket/data_tables/experiment.tsv', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().stdout.__iter__(),
-            mock.call('gsutil cat gs://test_bucket/data_tables/participant.tsv', stdout=-1, stderr=-2, shell=True), # nosec
-            mock.call().stdout.__iter__(),
-            mock.call('gsutil cat gs://test_bucket/data_tables/phenotype.tsv', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().stdout.__iter__(),
-            mock.call('gsutil cat gs://test_bucket/data_tables/genetic_findings.tsv', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().stdout.__iter__(),
-        ])
-
         # Test behavior on reload
+        responses.calls.reset()
         SavedVariant.objects.get(guid=saved_variants[2]['guid']).delete()
         genetic_findings_table[2][10] = 'PPX123'
-        self._set_metadata_file_iter(mock_subprocess, genetic_findings_table)
+        self._set_metadata_file_iter(genetic_findings_table)
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -1237,16 +1390,15 @@ class IndividualAPITest(object):
                 'Created 0 new families, 0 new individuals',
                 'Updated 0 existing families, 0 existing individuals',
                 'Skipped 4 unchanged individuals',
-                'Loaded 1 new and 3 updated findings tags',
+                'Loaded 1 new and 0 updated findings tags (skipped 3 unchanged tags)',
             ],
         }})
         self.assertDictEqual(response_json['individualsByGuid'], {})
+        self.assertEqual(len(responses.calls), 0)
 
-        no_gene_saved_variant_json = SavedVariant.objects.get(family__guid=new_family_guid, variant_id='1-248367227-TC-T').saved_variant_json
-        self.assertDictEqual(no_gene_saved_variant_json['transcripts'], {})
-        self.assertDictEqual(no_gene_saved_variant_json['genotypes'], new_family_genotypes)
-        self.assertNotIn('mainTranscriptId', no_gene_saved_variant_json)
-        self.assertNotIn('hgvsc', no_gene_saved_variant_json)
+        saved_variant = SavedVariant.objects.get(family__guid=new_family_guid, variant_id='1-248367227-TC-T')
+        self.assertEqual(saved_variant.key, 100)
+        self.assertDictEqual(saved_variant.genotypes, new_family_genotypes)
 
     def test_get_hpo_terms(self):
         url = reverse(get_hpo_terms, args=['HP:0011458'])
@@ -1270,7 +1422,7 @@ class IndividualAPITest(object):
 
     def test_get_individual_rna_seq_data(self):
         url = reverse(get_individual_rna_seq_data, args=[INDIVIDUAL_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url)
 
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
@@ -1281,16 +1433,16 @@ class IndividualAPITest(object):
                 'ENSG00000135953': [{
                     'geneId': 'ENSG00000135953', 'zScore': 7.31, 'pValue': 0.00000000000948, 'pAdjust': 0.00000000781,
                     'isSignificant': True,
-                    'tissueType': 'M',
+                    'tissueType': 'M', 'sequencingType': 'T',
                 }],
                 'ENSG00000240361': [{
                     'geneId': 'ENSG00000240361', 'zScore': -4.08, 'pValue': 5.88, 'pAdjust': 0.09, 'isSignificant': False,
-                    'tissueType': 'M',
+                    'tissueType': 'M', 'sequencingType': 'T',
                 }],
                 'ENSG00000268903': [{
                     'geneId': 'ENSG00000268903', 'zScore': 7.08, 'pValue':0.000000000588, 'pAdjust': 0.00000000139,
                     'isSignificant': True,
-                    'tissueType': 'M',
+                    'tissueType': 'M', 'sequencingType': 'T',
                 }],
             },
             'spliceOutliers': {
@@ -1305,7 +1457,7 @@ class IndividualAPITest(object):
                 'meanCounts': 0.85,  'meanTotalCounts': 0.85, 'pAdjust': 3.08e-56,
                 'pValue': 1.08e-56, 'rareDiseaseSamplesTotal': 20, 'rareDiseaseSamplesWithThisJunction': 1,
                 'totalCounts': 1297, 'start': 132885746, 'strand': '*', 'type': 'psi5', 'deltaIntronJaccardIndex': 12.34,
-                'tissueType': 'F',
+                'tissueType': 'F', 'sequencingType': 'W',
             },
             outliers_by_pos[132885746]
         )
@@ -1314,7 +1466,7 @@ class IndividualAPITest(object):
 
     def test_get_individual_rna_seq_data_is_significant(self):
         url = reverse(get_individual_rna_seq_data, args=[INDIVIDUAL_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url)
 
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
@@ -1352,7 +1504,7 @@ class LocalIndividualAPITest(AuthenticationTestCase, IndividualAPITest):
 
 
 class AnvilIndividualAPITest(AnvilAuthenticationTestCase, IndividualAPITest):
-    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data']
+    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'clickhouse_saved_variants']
     HAS_EXTERNAL_PROJECT_ACCESS = True
 
     def setUp(self):
@@ -1370,18 +1522,22 @@ class AnvilIndividualAPITest(AnvilAuthenticationTestCase, IndividualAPITest):
 
     def _mock_subprocess(self, command, **kwargs):
         command_args = re.match(
-            r'gsutil (?P<cmd>cat|mv)(?P<local_path> \S+)? gs://seqr-scratch-temp/(?P<gs_path>\S+)', command,
+            r'gsutil (?P<cmd>cat|mv|ls)(?P<local_path> \S+)? gs://(?P<gs_bucket>\S+)/(?P<gs_path>\S+)', command,
         ).groupdict()
         file_name = command_args['gs_path']
         if command_args['cmd'] == 'mv':
             src_path = command_args['local_path'].strip()
             self.assertEqual(src_path.split('/')[-1], file_name)
+            self.assertEqual(command_args['gs_bucket'], 'seqr-scratch-temp')
             with gzip.open(src_path) as f:
                 self.gs_files[file_name] = f.readlines()
         else:
             self.mock_subprocess.stdout.__iter__.return_value = self.gs_files[file_name]
         return self.mock_subprocess
 
-    def _assert_expected_delete_individuals(self, response, mock_pm_group):
-        self.assertEqual(response.status_code, 400)
-        self.assertListEqual(response.json()['errors'], ['Unable to delete individuals with active search sample: NA19678'])
+    @staticmethod
+    def _read_tmp_table_logs(file_name):
+        return [
+            (f'==> gsutil ls gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz', None),
+            (f'==> gsutil cat gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz | gunzip -c -q - ', None),
+        ]

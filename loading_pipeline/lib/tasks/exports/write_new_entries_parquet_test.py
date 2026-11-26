@@ -1,0 +1,228 @@
+import luigi.worker
+import pandas as pd
+
+from loading_pipeline.lib.core import (
+    DatasetType,
+    ReferenceGenome,
+    SampleType,
+)
+from loading_pipeline.lib.misc.validation import ALL_VALIDATIONS
+from loading_pipeline.lib.paths import (
+    new_entries_parquet_path,
+)
+from loading_pipeline.lib.tasks.exports.write_new_entries_parquet import (
+    WriteNewEntriesParquetTask,
+)
+from loading_pipeline.lib.test.misc import (
+    convert_ndarray_to_list,
+    copy_project_pedigree_to_mocked_dir,
+)
+from loading_pipeline.lib.test.mocked_dataroot_testcase import MockedDatarootTestCase
+
+TEST_PEDIGREE_3_REMAP = 'loading_pipeline/var/test/pedigrees/test_pedigree_3_remap.tsv'
+TEST_PEDIGREE_4_REMAP = 'loading_pipeline/var/test/pedigrees/test_pedigree_4_remap.tsv'
+TEST_PEDIGREE_5 = 'loading_pipeline/var/test/pedigrees/test_pedigree_5.tsv'
+TEST_MITO_EXPORT_PEDIGREE = (
+    'loading_pipeline/var/test/pedigrees/test_mito_export_pedigree.tsv'
+)
+TEST_SNV_INDEL_VCF = 'loading_pipeline/var/test/callsets/1kg_30variants.vcf'
+TEST_MITO_CALLSET = 'loading_pipeline/var/test/callsets/mito_1.mt'
+
+TEST_RUN_ID = 'manual__2024-04-03'
+
+
+class WriteNewEntriesParquetTest(MockedDatarootTestCase):
+    def test_write_new_entries_parquet(self):
+        copy_project_pedigree_to_mocked_dir(
+            TEST_PEDIGREE_3_REMAP,
+            ReferenceGenome.GRCh38,
+            DatasetType.SNV_INDEL,
+            SampleType.WGS,
+            'R0113_test_project',
+        )
+        copy_project_pedigree_to_mocked_dir(
+            TEST_PEDIGREE_4_REMAP,
+            ReferenceGenome.GRCh38,
+            DatasetType.SNV_INDEL,
+            SampleType.WGS,
+            'R0114_project4',
+        )
+        worker = luigi.worker.Worker()
+        task = WriteNewEntriesParquetTask(
+            reference_genome=ReferenceGenome.GRCh38,
+            dataset_type=DatasetType.SNV_INDEL,
+            sample_type=SampleType.WGS,
+            callset_path=TEST_SNV_INDEL_VCF,
+            project_guids=['R0113_test_project', 'R0114_project4'],
+            validations_to_skip=[ALL_VALIDATIONS],
+            run_id=TEST_RUN_ID,
+        )
+        worker.add(task)
+        worker.run()
+        self.assertTrue(task.output().exists())
+        self.assertTrue(task.complete())
+        df = pd.read_parquet(
+            new_entries_parquet_path(
+                ReferenceGenome.GRCh38,
+                DatasetType.SNV_INDEL,
+                TEST_RUN_ID,
+            ),
+        )
+        export_json = convert_ndarray_to_list(df.to_dict('records'))
+        self.assertEqual(len(export_json), 181)
+        self.assertEqual(
+            df['family_guid'].value_counts().to_dict(),
+            {
+                'abc_1': 16,
+                '789_1': 15,
+                '890_1': 14,
+                '901_1': 14,
+                'bcd_1': 14,
+                '345_1': 13,
+                '456_1': 13,
+                '567_1': 13,
+                'def_1': 13,
+                '123_1': 12,
+                '234_1': 11,
+                '678_1': 11,
+                'cde_1': 11,
+                'efg_1': 11,
+            },
+        )
+        self.assertEqual(
+            [export_json[2], export_json[11], export_json[17]],
+            [
+                {
+                    'project_guid': 'R0114_project4',
+                    'family_guid': '123_1',
+                    'sample_type': 'WGS',
+                    'variantId': '1-876499-A-G',
+                    'xpos': 1000876499,
+                    'filters': [],
+                    'calls': [
+                        {
+                            'sampleId': 'NA19675_1',
+                            'gt': 2,
+                            'gq': 15,
+                            'ab': 1.0,
+                            'dp': 5,
+                        },
+                    ],
+                    'sign': 1,
+                },
+                {
+                    'project_guid': 'R0113_test_project',
+                    'family_guid': 'abc_1',
+                    'sample_type': 'WGS',
+                    'variantId': '1-876499-A-G',
+                    'xpos': 1000876499,
+                    'filters': [],
+                    'calls': [
+                        {
+                            'sampleId': 'HG00731_1',
+                            'gt': 2,
+                            'gq': 21,
+                            'ab': 1.0,
+                            'dp': 7,
+                        },
+                        {
+                            'sampleId': 'HG00732_1',
+                            'gt': 2,
+                            'gq': 24,
+                            'ab': 1.0,
+                            'dp': 8,
+                        },
+                        {
+                            'sampleId': 'HG00733_1',
+                            'gt': 2,
+                            'gq': 12,
+                            'ab': 1.0,
+                            'dp': 4,
+                        },
+                    ],
+                    'sign': 1,
+                },
+                {
+                    'project_guid': 'R0113_test_project',
+                    'family_guid': 'abc_1',
+                    'sample_type': 'WGS',
+                    'variantId': '1-878314-G-C',
+                    'xpos': 1000878314,
+                    'filters': ['VQSRTrancheSNP99.00to99.90'],
+                    'calls': [
+                        {
+                            'sampleId': 'HG00731_1',
+                            'gt': 1,
+                            'gq': 30,
+                            'ab': 0.3333333432674408,
+                            'dp': 3,
+                        },
+                        {'sampleId': 'HG00732_1', 'gt': 0, 'gq': 6, 'ab': 0.0, 'dp': 2},
+                        {
+                            'sampleId': 'HG00733_1',
+                            'gt': 1,
+                            'gq': 61,
+                            'ab': 0.6000000238418579,
+                            'dp': 5,
+                        },
+                    ],
+                    'sign': 1,
+                },
+            ],
+        )
+
+    def test_mito_write_new_entries_parquet(self):
+        copy_project_pedigree_to_mocked_dir(
+            TEST_MITO_EXPORT_PEDIGREE,
+            ReferenceGenome.GRCh38,
+            DatasetType.MITO,
+            SampleType.WGS,
+            'R0116_test_project3',
+        )
+        worker = luigi.worker.Worker()
+        task = WriteNewEntriesParquetTask(
+            reference_genome=ReferenceGenome.GRCh38,
+            dataset_type=DatasetType.MITO,
+            sample_type=SampleType.WGS,
+            callset_path=TEST_MITO_CALLSET,
+            project_guids=['R0116_test_project3'],
+            validations_to_skip=[ALL_VALIDATIONS],
+            run_id=TEST_RUN_ID,
+        )
+        worker.add(task)
+        worker.run()
+        self.assertTrue(task.output().exists())
+        self.assertTrue(task.complete())
+        df = pd.read_parquet(
+            new_entries_parquet_path(
+                ReferenceGenome.GRCh38,
+                DatasetType.MITO,
+                TEST_RUN_ID,
+            ),
+        )
+        export_json = convert_ndarray_to_list(df.to_dict('records'))
+        self.assertEqual(len(export_json), 3)
+        self.assertEqual(
+            export_json[2:],
+            [
+                {
+                    'project_guid': 'R0116_test_project3',
+                    'family_guid': 'family_1',
+                    'sample_type': 'WGS',
+                    'variantId': 'M-8-G-T',
+                    'xpos': 25000000008,
+                    'filters': [],
+                    'calls': [
+                        {
+                            'sampleId': 'RGP_1270_2',
+                            'gt': 2,
+                            'dp': 4216,
+                            'hl': 0.999,
+                            'mitoCn': 224,
+                            'contamination': 0.0,
+                        },
+                    ],
+                    'sign': 1,
+                },
+            ],
+        )

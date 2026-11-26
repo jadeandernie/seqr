@@ -1,5 +1,4 @@
-from collections import OrderedDict
-import json
+import gzip
 import openpyxl as xl
 import os
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -25,8 +24,10 @@ def export_table(filename_prefix, header, rows, file_format='tsv', titlecase_hea
         header (list): List of column names
         rows (list): List of rows, where each row is a list of column values
         file_format (string): "tsv", "xls", or "json"
+
     Returns:
         Django HttpResponse object with the table data as an attachment.
+    
     """
 
     for i, row in enumerate(rows):
@@ -40,14 +41,6 @@ def export_table(filename_prefix, header, rows, file_format='tsv', titlecase_hea
         response['Content-Disposition'] = 'attachment; filename="{}.tsv"'.format(filename_prefix).encode('ascii', 'ignore')
         response.writelines(['\t'.join(header)+'\n'])
         response.writelines(('\t'.join(map(str, row))+'\n' for row in rows))
-        return response
-    elif file_format == "json":
-        response = HttpResponse(content_type='application/json')
-        response['Content-Disposition'] = 'attachment; filename="{}.json"'.format(filename_prefix).encode('ascii', 'ignore')
-        for row in rows:
-            json_keys = [s.replace(" ", "_").lower() for s in header]
-            json_values = list(map(str, row))
-            response.write(json.dumps(OrderedDict(zip(json_keys, json_values)))+'\n')
         return response
     elif file_format == "xls":
         wb = xl.Workbook(write_only=True)
@@ -67,8 +60,8 @@ def export_table(filename_prefix, header, rows, file_format='tsv', titlecase_hea
         raise ValueError("Invalid file_format: %s" % file_format)
 
 
-def _format_files_content(files,  file_format='csv', add_header_prefix=False, blank_value='', file_suffixes=None):
-    if file_format not in DELIMITERS:
+def _format_files_content(files, file_format='csv', add_header_prefix=False, blank_value='', file_suffixes=None):
+    if file_format and file_format not in DELIMITERS:
         raise ValueError('Invalid file_format: {}'.format(file_format))
     parsed_files = []
     for filename, header, rows in files:
@@ -77,13 +70,14 @@ def _format_files_content(files,  file_format='csv', add_header_prefix=False, bl
             header_display = ['{}-{}'.format(str(header_tuple[0]).zfill(2), header_tuple[1]) for header_tuple in
                               enumerate(header)]
             header_display[0] = header[0]
-        content_rows = [[row.get(key) or blank_value for key in header] for row in rows]
+        content_rows = [[str(row.get(key) or blank_value) for key in header] for row in rows]
         content = '\n'.join([
             DELIMITERS[file_format].join(row) for row in [header_display] + content_rows
             if any(val != blank_value for val in row)
         ])
         content = str(content.encode('utf-8'), 'ascii', errors='ignore')  # Strip unicode chars in the content
-        parsed_files.append(('{}.{}'.format(filename, (file_suffixes or {}).get(filename, file_format)), content))
+        file_name = '{}.{}'.format(filename, (file_suffixes or {}).get(filename, file_format)) if file_format else filename
+        parsed_files.append((file_name, content))
     return parsed_files
 
 
@@ -98,14 +92,19 @@ def export_multiple_files(files, zip_filename, **kwargs):
         return response
 
 
-def write_multiple_files(files, file_path, user, **kwargs):
+def write_multiple_files(files, file_path, user, gzip_file=False, **kwargs):
     is_gs_path = is_google_bucket_file_path(file_path)
     if not is_gs_path:
         os.makedirs(file_path, exist_ok=True)
     with TemporaryDirectory() as temp_dir_name:
         dir_name = temp_dir_name if is_gs_path else file_path
+        open_func = gzip.open if gzip_file else open
+        open_mode = 'wt' if gzip_file else 'w'
         for filename, content in _format_files_content(files, **kwargs):
-            with open(f'{dir_name}/{filename}', 'w') as f:
+            current_file = f'{dir_name}/{filename}'
+            if gzip_file:
+                current_file += '.gz'
+            with open_func(current_file, open_mode) as f:
                 f.write(content)
         if is_gs_path:
             mv_file_to_gs(f'{temp_dir_name}/*', f'{file_path}/', user)

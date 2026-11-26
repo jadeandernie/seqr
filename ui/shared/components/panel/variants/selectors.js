@@ -16,7 +16,7 @@ import {
 import {
   getVariantTagsByGuid, getVariantNotesByGuid, getSavedVariantsByGuid, getAnalysisGroupsByGuid, getGenesById, getUser,
   getFamiliesByGuid, getProjectsByGuid, getIndividualsByGuid, getRnaSeqDataByIndividual,
-  getPhenotypeGeneScoresByIndividual, getCurrentAnalysisGroupFamilyGuids,
+  getPhenotypeGeneScoresByIndividual, getCurrentAnalysisGroupFamilyGuids, getVariantsById,
 } from 'redux/selectors'
 
 export const getIndividualGeneDataByFamilyGene = createSelector(
@@ -65,8 +65,8 @@ export const getSavedVariantTableState = state => (
 
 const matchingVariants = (variants, matchFunc) => variants.filter(o => (Array.isArray(o) ? o : [o]).some(matchFunc))
 
-// sorts manual variants to top of list, as manual variants are missing all populations
-const sortCompHet = (a, b) => (a.populations ? 1 : 0) - (b.populations ? 1 : 0)
+// sorts manual variants to top of list
+const sortCompHet = (a, b) => (a.key ? 1 : 0) - (b.key ? 1 : 0)
 
 const getProjectSavedVariantsSelection = createSelector(
   (state, props) => props.match.params,
@@ -116,7 +116,7 @@ const getSummaryDataSavedVariantsSelection = createSelector(
     }
     const pairedFilters = []
     if (gene) {
-      pairedFilters.push(({ transcripts }) => gene in (transcripts || {}))
+      pairedFilters.push(({ transcripts, geneIds }) => (transcripts ? gene in transcripts : geneIds.includes(gene)))
     } if (tag && tag !== SHOW_ALL) {
       const tags = tag.split(';')
       pairedFilters.push(({ tagGuids }) => tags.every(t => tagGuids.some(tagGuid => (
@@ -135,53 +135,37 @@ export const getPairedSelectedSavedVariants = createSelector(
   getSavedVariantsByGuid,
   getVariantTagsByGuid,
   getVariantNotesByGuid,
-  (projectVariants, summaryDataVariants, savedVariants, tagsByGuid, notesByGuid) => {
+  getVariantsById,
+  (projectVariants, summaryDataVariants, savedVariants, tagsByGuid, notesByGuid, variantsById) => {
     const [variantFilter, pairedFilters] = projectVariants || summaryDataVariants
 
-    let variants = Object.values(savedVariants)
+    let variants = Object.values(savedVariants).map(
+      variant => ({ ...(variantsById[variant.variantId] || {}), ...variant }),
+    )
     if (variantFilter) {
       variants = variants.filter(variantFilter)
     }
 
     const selectedVariantsByGuid = variants.reduce((acc, variant) => ({ ...acc, [variant.variantGuid]: variant }), {})
-    const seenPairedGuids = []
-    let pairedVariants = variants.reduce((acc, variant) => {
-      if (seenPairedGuids.includes(variant.variantGuid)) {
-        return acc
+
+    const groupedVariantGuids = [
+      ...Object.values(tagsByGuid),
+      ...Object.values(notesByGuid),
+    ].map(({ variantGuids }) => variantGuids)
+    const compHets = new Set(groupedVariantGuids.reduce((acc, variantGuids) => (
+      variantGuids.length > 1 ? [...acc, ...variantGuids] : acc
+    ), []))
+
+    const pairedVariantsLookup = groupedVariantGuids.reduce((acc, variantGuids) => {
+      const key = variantGuids.sort().join('_')
+      if (!acc[key] && !compHets.has(key) && variantGuids.every(variantGuid => selectedVariantsByGuid[variantGuid])) {
+        const pairVariants = variantGuids.map(variantGuid => selectedVariantsByGuid[variantGuid])
+        acc[key] = pairVariants.length === 1 ? pairVariants[0] : pairVariants.sort(sortCompHet)
       }
-
-      const variantPairGuids = [...[
-        ...variant.tagGuids.map(t => tagsByGuid[t].variantGuids),
-        ...variant.noteGuids.map(n => notesByGuid[n].variantGuids),
-      ].filter(variantGuids => variantGuids.length > 1).reduce(
-        (guidAcc, variantGuids) => new Set([
-          ...guidAcc, ...variantGuids.filter(varGuid => varGuid !== variant.variantGuid),
-        ]), new Set(),
-      )].filter(varGuid => selectedVariantsByGuid[varGuid])
-
-      if (variantPairGuids.length) {
-        let unseenPairedGuids = variantPairGuids.filter(varGuid => !seenPairedGuids.includes(varGuid))
-        seenPairedGuids.push(variant.variantGuid, ...unseenPairedGuids)
-
-        if (unseenPairedGuids.length > 1) {
-          // check if variant is part of multiple distinct comp het pairs or a single MNV with 3+ linked variants
-          const pairVariant = selectedVariantsByGuid[unseenPairedGuids[0]]
-          const separateGuids = unseenPairedGuids.slice(1).filter(varGuid => !(
-            pairVariant.tagGuids.some(t => selectedVariantsByGuid[varGuid].tagGuids.includes(t)) ||
-            pairVariant.noteGuids.some(n => selectedVariantsByGuid[varGuid].noteGuids.includes(n))))
-          if (separateGuids.length) {
-            acc.push([variant, ...separateGuids.map(varGuid => selectedVariantsByGuid[varGuid])].sort(sortCompHet))
-            unseenPairedGuids = unseenPairedGuids.filter(varGuid => !separateGuids.includes(varGuid))
-          }
-        }
-
-        acc.push([variant, ...unseenPairedGuids.map(varGuid => selectedVariantsByGuid[varGuid])].sort(sortCompHet))
-        return acc
-      }
-
-      acc.push(variant)
       return acc
-    }, [])
+    }, {})
+
+    let pairedVariants = Object.values(pairedVariantsLookup)
 
     pairedFilters.forEach((pairedFilter) => {
       pairedVariants = matchingVariants(pairedVariants, pairedFilter)

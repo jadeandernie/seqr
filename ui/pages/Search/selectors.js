@@ -1,4 +1,5 @@
 import { createSelector, createSelectorCreator, defaultMemoize } from 'reselect'
+import uniqWith from 'lodash/uniqWith'
 
 import {
   getProjectsByGuid,
@@ -7,13 +8,18 @@ import {
   getCurrentAnalysisGroupFamilyGuids,
   getLocusListsByGuid,
   getAnalysisGroupsGroupedByProjectGuid,
-  getCurrentSearchParams,
   getUser,
-  getProjectDatasetTypes,
   getSearchFamiliesByHash,
+  getGenesById,
+  getSearchesByHash,
+  getProjectDatasetTypes,
+  getActiveDatasetsByFamily,
+  getSortedIndividualsByFamily,
+  getVariantsById,
 } from 'redux/selectors'
-import { FAMILY_ANALYSIS_STATUS_LOOKUP } from 'shared/utils/constants'
+import { getVariantMainGeneId, getVariantSummary, FAMILY_ANALYSIS_STATUS_LOOKUP } from 'shared/utils/constants'
 import { compareObjects } from 'shared/utils/sortUtils'
+import { compHetGene } from 'shared/components/panel/variants/VariantUtils'
 
 export const getSearchContextIsLoading = state => state.searchContextLoading.isLoading
 export const getMultiProjectSearchContextIsLoading = state => state.multiProjectSearchContextLoading.isLoading
@@ -21,6 +27,45 @@ export const getSavedSearchesByGuid = state => state.savedSearchesByGuid
 export const getSavedSearchesIsLoading = state => state.savedSearchesLoading.isLoading
 export const getSavedSearchesLoadingError = state => state.savedSearchesLoading.errorMessage
 export const getFlattenCompoundHet = state => state.flattenCompoundHet
+const getSearchedVariantIds = state => state.searchedVariantIds
+export const getSearchedVariantsIsLoading = state => state.searchedVariantsLoading.isLoading
+export const getSearchedVariantsErrorMessage = state => state.searchedVariantsLoading.errorMessage
+export const getSearchGeneBreakdown = state => state.searchGeneBreakdown
+export const getSearchGeneBreakdownLoading = state => state.searchGeneBreakdownLoading.isLoading
+export const getSearchGeneBreakdownErrorMessage = state => state.searchGeneBreakdownLoading.errorMessage
+export const getVariantSearchDisplay = state => state.variantSearchDisplay
+
+const getCurrentSearchHash = (state, ownProps) => ownProps.match.params.searchHash
+
+export const getCurrentSearchParams = createSelector(
+  getSearchesByHash,
+  getCurrentSearchHash,
+  (searchesByHash, searchHash) => searchesByHash[searchHash],
+)
+
+export const getTotalVariantsCount = createSelector(
+  getCurrentSearchParams,
+  searchParams => (searchParams || {}).totalResults,
+)
+
+export const getSearchedVariantExportConfig = createSelector(
+  getCurrentSearchHash,
+  getCurrentSearchParams,
+  getProjectsByGuid,
+  (searchHash, searchParams, projectsByGuid) => {
+    const { projectFamilies } = searchParams || {}
+    if ((projectFamilies || []).some(
+      ({ projectGuid }) => projectsByGuid[projectGuid]?.isDemo && !projectsByGuid[projectGuid].allUserDemo,
+    )) {
+      // Do not allow downloads for demo projects
+      return null
+    }
+    return [{
+      name: 'Variant Search Results',
+      url: `/api/search/${searchHash}/download`,
+    }]
+  },
+)
 
 export const getInhertanceFilterMode = createSelector(
   getCurrentSearchParams,
@@ -87,14 +132,15 @@ const getIntitialProjectFamilies = createProjectFamiliesSelector(
 )
 
 export const getIntitialSearch = createSelector(
+  getCurrentSearchHash,
   getCurrentSearchParams,
   getIntitialProjectFamilies,
-  (searchParams, projectFamilies) => {
+  (previousSearchHash, searchParams, projectFamilies) => {
     if (searchParams) {
-      return searchParams
+      return { ...searchParams, previousSearchHash }
     }
 
-    return projectFamilies ? { projectFamilies: [projectFamilies] } : null
+    return projectFamilies ? { projectFamilies: [projectFamilies], previousSearchHash } : null
   },
 )
 
@@ -155,8 +201,14 @@ export const getLocusListOptions = createListEqualSelector(
 export const getDatasetTypes = createSelector(
   (state, props) => props.projectFamilies,
   getProjectDatasetTypes,
-  (projectFamilies, projectDatasetTypes) => {
-    const datasetTypes = (projectFamilies || []).reduce((acc, { projectGuid }) => new Set([
+  getActiveDatasetsByFamily,
+  (projectFamilies, projectDatasetTypes, datasetsByFamily) => {
+    const isSingleFamily = (projectFamilies || []).length === 1 && projectFamilies[0].familyGuids?.length === 1
+    const datasetTypes = isSingleFamily ? [
+      ...new Set((datasetsByFamily[projectFamilies[0].familyGuids[0]] || []).map(({ datasetType }) => datasetType)),
+    ] : (
+      projectFamilies || []
+    ).reduce((acc, { projectGuid }) => new Set([
       ...acc, ...(projectDatasetTypes[projectGuid] || [])]), new Set())
     return [...datasetTypes].sort().join(',')
   },
@@ -191,4 +243,73 @@ export const getAnalysisGroupOptions = createSelector(
     ...(analysisGroupsGroupedByProjectGuid[projectGuid] || {}),
     ...(analysisGroupsGroupedByProjectGuid.null || {}),
   }).map(group => ({ value: group.analysisGroupGuid, text: group.name, icon: group.criteria ? 'sync' : null })),
+)
+
+export const getDisplayVariants = createSelector(
+  getFlattenCompoundHet,
+  getSearchedVariantIds,
+  getVariantsById,
+  (flattenCompoundHet, searchedVariantIds, variantsById) => {
+    const searchedVariants = (searchedVariantIds || []).map(
+      variantId => (Array.isArray(variantId) ? variantId.map(vId => variantsById[vId]) : variantsById[variantId]),
+    )
+    const shouldFlatten = Object.values(flattenCompoundHet || {}).some(val => val)
+    if (!shouldFlatten) {
+      return searchedVariants || []
+    }
+    const flattened = flattenCompoundHet.all ? searchedVariants.flat() : searchedVariants.reduce((acc, variant) => (
+      (Array.isArray(variant) && flattenCompoundHet[compHetGene(variant)]) ? [...acc, ...variant] : [...acc, variant]
+    ), [])
+    return uniqWith(flattened, (a, b) => !Array.isArray(a) && !Array.isArray(b) && a.variantId === b.variantId)
+  },
+)
+
+export const getSearchGeneBreakdownValues = createSelector(
+  getSearchGeneBreakdown,
+  (state, props) => props.searchHash,
+  getFamiliesByGuid,
+  getGenesById,
+  getSearchesByHash,
+  (geneBreakdowns, searchHash, familiesByGuid, genesById, searchesByHash) => Object.entries(
+    geneBreakdowns[searchHash] || {},
+  ).map(([geneId, counts]) => ({
+    numVariants: counts.total,
+    numFamilies: Object.keys(counts.families).length,
+    families: Object.entries(counts.families).map(
+      ([familyGuid, count]) => ({ family: familiesByGuid[familyGuid], count }),
+    ),
+    search: searchesByHash[searchHash].search,
+    ...(genesById[geneId] || {
+      geneId, geneSymbol: geneId, omimPhenotypes: [], constraints: {}, cnSensitivity: {}, sHet: {},
+    }),
+  })),
+)
+
+export const getVlmFamiliesByContactEmail = createSelector(
+  getSortedIndividualsByFamily,
+  (state, ownProps) => ownProps.variant,
+  (individualsByFamily, variant) => (variant.lookupFamilyGuids || []).reduce((acc, familyGuid) => {
+    const individual = individualsByFamily[familyGuid]?.[0]
+    const contactEmail = individual?.projectGuid ? 'internal' : (individual?.vlmContactEmail || 'disabled')
+    return { ...acc, [contactEmail]: [...(acc[contactEmail] || []), familyGuid] }
+  }, {}),
+)
+
+export const getVlmDefaultContactEmails = createSelector(
+  getVlmFamiliesByContactEmail,
+  getGenesById,
+  getUser,
+  (state, ownProps) => ownProps.variant,
+  (familiesByContactEmail, genesById, user, variant) => {
+    const gene = genesById[getVariantMainGeneId(variant)]?.geneSymbol
+    const subject = `${gene || variant.variantId} variant match in seqr`
+    const defaultEmailContent = `harboring ${getVariantSummary(variant)} in ${gene || 'no genes'} (${window.location.href}).
+    \n\nWe have identified the variant in a case with [replace with phenotype].
+    \n\n[List your specific questions for the researcher here.]
+    \n\nWe appreciate your assistance and look forward to hearing more from you.\n\nBest wishes,\n${user.displayName}`
+    return Object.entries(familiesByContactEmail).reduce((acc, [to, familyGuids]) => ({
+      ...acc,
+      [to]: { to, subject, body: `Dear researcher,\n\nWe are interested in learning more about your ${familyGuids.length} cases in seqr ${defaultEmailContent}` },
+    }), {})
+  },
 )

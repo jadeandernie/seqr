@@ -8,7 +8,7 @@ from django.http import StreamingHttpResponse
 
 from seqr.models import Individual, IgvSample
 from seqr.utils.file_utils import file_iter, file_bytes_iter, does_file_exist
-from seqr.utils.google_storage_utils import get_google_project, is_google_bucket_file_path
+from seqr.utils.google_storage_utils import get_google_project, is_google_bucket_file_path, get_gs_access_token
 from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file
 from seqr.views.utils.json_to_orm_utils import get_or_create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
@@ -17,9 +17,7 @@ from seqr.views.utils.permissions_utils import check_family_view_permission, ext
     login_and_policies_required, pm_or_data_manager_required, get_project_analysis_group_guids_user_can_view, user_is_data_manager, \
     user_is_pm, get_project_and_check_edit_permission, is_internal_anvil_project, project_has_anvil, \
     check_workspace_perm, CAN_VIEW
-from seqr.views.utils.terra_api_utils import get_service_account_access_token
 
-GS_STORAGE_ACCESS_CACHE_KEY = 'gs_storage_access_cache_entry'
 GS_STORAGE_URL = 'https://storage.googleapis.com'
 TIMEOUT = 300
 
@@ -232,7 +230,7 @@ def _stream_gs(request, gs_path):
 
 
 def _get_gs_rest_api_headers(range_header, gs_path):
-    headers = {'Authorization': 'Bearer {}'.format(get_service_account_access_token())}
+    headers = {'Authorization': 'Bearer {}'.format(get_gs_access_token())}
     if range_header:
         headers['Range'] = range_header
     google_project = get_google_project(gs_path)

@@ -395,6 +395,13 @@ export const sendMmeContactEmail = values => dispatch => new HttpRequestHelper(
   },
 ).post(values)
 
+export const logExternalMmeMatch = values => dispatch => new HttpRequestHelper(
+  `/api/matchmaker/submission/${values.submissionGuid}/log_external_match`,
+  (responseJson) => {
+    dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+  },
+).post(values)
+
 export const updateProjectMmeContact = values => (dispatch, getState) => new HttpRequestHelper(
   `/api/matchmaker/update_project_contact/${getState().currentProjectGuid}`,
   (responseJson) => {

@@ -4,16 +4,9 @@ import mock
 from seqr.models import Project, Dataset, SavedVariant
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase
 
-MOCK_GCNV_DATA = [
-    b'chr\tstart\tend\tname\tsample\tsample_fix\tsvtype\tGT\tCN\tNP\tQA\tQS\tQSE\tQSS\tploidy\tstrand\tvariant_name\tID\trmsstd\tdefragmented\tvaf\tvac\tlt100_raw_calls\tlt10_highQS_rare_calls\tPASS_SAMPLE\tPASS_FREQ\tPASS_QS\tHIGH_QUALITY\tgenes_any_overlap\tgenes_any_overlap_exonsPerGene\tgenes_any_overlap_totalExons\tgenes_strict_overlap\tgenes_strict_overlap_exonsPerGene\tgenes_strict_overlap_totalExons\tgenes_CG\tgenes_LOF\tgenes_any_overlap_Ensemble_ID\tidentical\tpartial_ovl\tany_ovl\tno_ovl\tsource',
-    b'chr10\t122599967\t122600191\tCASE_7_Y_cnv_57308\tC1933_010-001_v1_Exome_GCP\t010-001_v1_Exome_C1933\tDEL\t1\t1\t1\t7\t7\t7\t72\t\t-\tprefix_70191\t326536\t0\tFALSE\t0.05066805\t1077\tTRUE\tTRUE\tTRUE\tFALSE\tFALSE\tFALSE\tDMBT1\t1\t1\tNA\t0\t0\tNA\tDMBT1\tENSG00000187908.19\tcluster_10_CASE_cnv_46117\tcluster_10_CASE_cnv_46117\tcluster_10_CASE_cnv_46117;prefix_19107\tFALSE\tround2',
-]
-
 
 class SetSavedVariantKeyTest(AnvilAuthenticationTestCase):
     fixtures = ['users', '1kg_project', 'report_variants', 'clickhouse_discovery_variants', 'clickhouse_saved_variants']
-
-    MOCK_GCNV_DATA = MOCK_GCNV_DATA
 
     @classmethod
     def setUpTestData(cls):
@@ -26,11 +19,7 @@ class SetSavedVariantKeyTest(AnvilAuthenticationTestCase):
         SavedVariant.objects.filter(guid='SV0000007_prefix_19107_DEL_r00').update(variant_id='prefix_19107_DEL')
 
     @mock.patch('clickhouse_search.management.commands.set_saved_variant_key.BATCH_SIZE', 2)
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_command(self, mock_subprocess):
-        mock_subprocess.return_value.stdout = self.MOCK_GCNV_DATA
-        mock_subprocess.return_value.wait.return_value = 0
-
+    def test_command(self):
         call_command('set_saved_variant_key')
         self.assert_json_logs(user=None, expected=[
             ('Finding keys for 1 MITO (GRCh38) variant ids', None),
@@ -95,13 +84,7 @@ class SetSavedVariantKeyTest(AnvilAuthenticationTestCase):
 class SetSavedVariantKeyFailedMappingTest(SetSavedVariantKeyTest):
     fixtures = ['users', '1kg_project', 'report_variants']
 
-    MOCK_GCNV_DATA = MOCK_GCNV_DATA[:1]
-
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_command(self, mock_subprocess):
-        mock_subprocess.return_value.stdout = self.MOCK_GCNV_DATA
-        mock_subprocess.return_value.wait.return_value = 0
-
+    def test_command(self):
         call_command('set_saved_variant_key')
         self.assert_json_logs(user=None, expected=[
             ('Finding keys for 1 MITO (GRCh38) variant ids', None),

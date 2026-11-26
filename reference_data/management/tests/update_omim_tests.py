@@ -7,6 +7,7 @@ from django.core.management.base import CommandError
 
 from reference_data.management.tests.test_utils import ReferenceDataCommandTestCase
 from reference_data.models import Omim, GeneInfo
+from seqr.views.utils.test_utils import MockGoogleStorage
 
 OMIM_DATA = [
     '# Copyright (c) 1966-2020 Johns Hopkins University. Use of this file adheres to the terms specified at https://omim.org/help/agreement.\n',
@@ -73,17 +74,17 @@ class UpdateOmimTest(ReferenceDataCommandTestCase):
 
     @mock.patch('seqr.views.utils.export_utils.open')
     @mock.patch('seqr.views.utils.export_utils.TemporaryDirectory')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_update_omim_command(self, mock_subprocess, mock_temp_dir, mock_open):
-        mock_subprocess.return_value.wait.return_value = 0
+    def test_update_omim_command(self, mock_temp_dir, mock_open):
+        mock_gcs = MockGoogleStorage().start(self)
         mock_temp_dir.return_value.__enter__.return_value = '/mock/tmp'
 
         self._test_update_omim_command(
             command_args=['--omim-key=test_key'],
-            additional_logs=[(3, '==> gsutil mv /mock/tmp/* gs://seqr-reference-data/omim/', None)],
         )
 
-        mock_subprocess.assert_called_with('gsutil mv /mock/tmp/* gs://seqr-reference-data/omim/', stdout=-1, stderr=-2, shell=True)  # nosec
+        mock_gcs.assert_calls(self, [mock.call.upload_from_filename(
+            'gs://seqr-reference-data/omim/parsed_omim_records__latest.txt', '/mock/tmp/parsed_omim_records__latest.txt',
+        )])
         mock_open.assert_called_with('/mock/tmp/parsed_omim_records__latest.txt', 'w')
         self.assertEqual(mock_open.return_value.__enter__.return_value.write.call_args.args[0], CACHED_OMIM_DATA)
 

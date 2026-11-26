@@ -36,6 +36,7 @@ import {
 } from '../selectors'
 import EditFamiliesAndIndividualsButton from './edit-families-and-individuals/EditFamiliesAndIndividualsButton'
 import EditIndividualMetadataButton from './edit-families-and-individuals/EditIndividualMetadataButton'
+import ImportPhenopacketsButton from './edit-families-and-individuals/ImportPhenopacketsButton'
 import EditDatasetsButton from './EditDatasetsButton'
 
 const DetailContent = styled.div`
@@ -183,7 +184,13 @@ const FamiliesIndividuals = React.memo(({ canEdit, hasCaseReview, familySizes, u
   if (user && (user.isPm || (hasCaseReview && canEdit))) {
     editIndividualsButton = <EditFamiliesAndIndividualsButton />
   } else if (user && canEdit) {
-    editIndividualsButton = <EditIndividualMetadataButton />
+    editIndividualsButton = (
+      <span>
+        <EditIndividualMetadataButton />
+        <br />
+        <ImportPhenopacketsButton />
+      </span>
+    )
   }
 
   return (

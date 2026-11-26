@@ -37,6 +37,7 @@ test('shows the standard edit panes, without a Gregor import pane, by default', 
   const menuItems = wrapper.find('Tab').prop('panes').map(p => p.menuItem)
   expect(menuItems).toEqual([
     'Edit Families', 'Edit Individuals', 'Bulk Edit Families', 'Bulk Edit Individuals', 'Bulk Edit Individual Metadata',
+    'Import Clinical Data (Phenopackets)',
   ])
 })
 
@@ -55,6 +56,7 @@ test('shows the standard edit panes when there is no current project', () => {
   const menuItems = wrapper.find('Tab').prop('panes').map(p => p.menuItem)
   expect(menuItems).toEqual([
     'Edit Families', 'Edit Individuals', 'Bulk Edit Families', 'Bulk Edit Individuals', 'Bulk Edit Individual Metadata',
+    'Import Clinical Data (Phenopackets)',
   ])
 })
 
@@ -78,5 +80,5 @@ test('adds a Gregor import pane when the project has a Gregor finding tag type',
 
   const menuItems = wrapper.find('Tab').prop('panes').map(p => p.menuItem)
   expect(menuItems).toContain('Import From Gregor Metadata')
-  expect(menuItems.length).toEqual(6)
+  expect(menuItems.length).toEqual(7)
 })

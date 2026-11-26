@@ -143,6 +143,25 @@ test('renders family size histogram edge cases and the case review edit button',
   expect(wrapper.find('[modalName="editFamiliesAndIndividuals"]').exists()).toBe(true)
 })
 
+test('offers metadata editing and Phenopacket import to collaborators who can edit but not manage', () => {
+  const editState = cloneDeep(STATE_WITH_2_FAMILIES)
+  editState.projectsByGuid[PROJECT_GUID].hasCaseReview = false
+  editState.projectsByGuid[PROJECT_GUID].canEdit = true
+  editState.user = { ...editState.user, isPm: false }
+
+  const wrapper = renderProjectOverview(editState)
+
+  expect(wrapper.find('[modalName="editFamiliesAndIndividuals"]').exists()).toBe(false)
+  expect(wrapper.find('[modalName="editIndividualsMetadata"]').exists()).toBe(true)
+  expect(wrapper.find('[modalName="importPhenopackets"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain('Bulk Edit Metadata')
+  expect(wrapper.text()).toContain('Import clinical data (Phenopackets)')
+
+  const viewState = cloneDeep(editState)
+  viewState.projectsByGuid[PROJECT_GUID].canEdit = false
+  expect(renderProjectOverview(viewState).find('[modalName="importPhenopackets"]').exists()).toBe(false)
+})
+
 test('shows additional loaded datasets and renders rna datasets', () => {
   const datasetState = {
     ...STATE_WITH_2_FAMILIES,

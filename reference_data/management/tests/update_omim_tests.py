@@ -82,9 +82,10 @@ class UpdateOmimTest(ReferenceDataCommandTestCase):
             command_args=['--omim-key=test_key'],
         )
 
+        # The command is run twice, and uploads the parsed records each time
         mock_gcs.assert_calls(self, [mock.call.upload_from_filename(
             'gs://seqr-reference-data/omim/parsed_omim_records__latest.txt', '/mock/tmp/parsed_omim_records__latest.txt',
-        )])
+        )] * 2)
         mock_open.assert_called_with('/mock/tmp/parsed_omim_records__latest.txt', 'w')
         self.assertEqual(mock_open.return_value.__enter__.return_value.write.call_args.args[0], CACHED_OMIM_DATA)
 

@@ -14,7 +14,7 @@ import { STATE } from './fixtures'
 jest.mock('shared/components/panel/variants/Variants', () => ({
   ...jest.requireActual('shared/components/panel/variants/Variants'),
   __esModule: true,
-  Variant: (): null => null,
+  Variant: () => null,
 }))
 
 configure({ adapter: new Adapter() })
@@ -22,7 +22,7 @@ configure({ adapter: new Adapter() })
 const OPTED_OUT_FAMILY_GUID = 'F000099_opted_out'
 const LIFTED_FAMILY_GUID = 'F000100_lifted'
 
-const lookupIndividual = (individualGuid: string, familyGuid: string) => ({
+const lookupIndividual = (individualGuid, familyGuid) => ({
   [individualGuid]: { individualGuid, familyGuid, displayName: individualGuid, affected: 'A', sex: 'F' },
 })
 
@@ -49,13 +49,15 @@ const LOOKUP_VARIANT = {
   },
 }
 
+const INITIAL_ENTRIES = [`/variant_lookup?variantId=${LOOKUP_VARIANT.variantId}&genomeVersion=38`]
+
 test('shows the genome build for families which have opted out of contact', async () => {
   mockFetchResponse({ variantsById: { [LOOKUP_VARIANT.variantId]: LOOKUP_VARIANT } })
   const store = configureStore()(LOOKUP_STATE)
 
   const wrapper = mount(
     <Provider store={store}>
-      <MemoryRouter initialEntries={[`/variant_lookup?variantId=${LOOKUP_VARIANT.variantId}&genomeVersion=38`]}>
+      <MemoryRouter initialEntries={INITIAL_ENTRIES}>
         <Route path="/variant_lookup/:gene?" component={VariantLookup} />
       </MemoryRouter>
     </Provider>,
@@ -63,7 +65,7 @@ test('shows the genome build for families which have opted out of contact', asyn
   await flushAll()
   wrapper.update()
 
-  const buildLabels = wrapper.find('Label[basic=true]').map((label: any) => [label.prop('content'), label.prop('color')])
+  const buildLabels = wrapper.find('Label[basic=true]').map(label => [label.prop('content'), label.prop('color')])
   expect(buildLabels).toEqual([['GRCh38', 'green'], ['GRCh37', 'orange']])
   expect(wrapper.text()).not.toContain('GRChundefined')
 })

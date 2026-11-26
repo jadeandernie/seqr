@@ -1,4 +1,5 @@
 import { PANEL_APP_CONFIDENCE_LEVELS, AD_MOI, AR_MOI, XD_MOI, XR_MOI, OTHER_MOI } from './constants'
+import { genericComparator } from './sortUtils'
 
 /**
  * Converts a Mode of Inheritance (MOI) string to MOI initials.
@@ -75,6 +76,22 @@ export type PanelAppItem = {
   display: string
 }
 
+const hasSelectedMoi = (item: PanelAppItem, selectedMOIs?: string[] | null): boolean => {
+  if (!selectedMOIs || selectedMOIs.length === 0) {
+    return true
+  }
+  const initials = moiToMoiInitials(item.pagene?.modeOfInheritance, false)
+  return selectedMOIs.some((moi) => initials.includes(moi))
+}
+
+const getConfidenceColor = (confidenceLevel?: number): string => (
+  (PANEL_APP_CONFIDENCE_LEVELS as Record<number, string>)[confidenceLevel] || PANEL_APP_CONFIDENCE_LEVELS[0]
+)
+
+const addColorItem = (acc: Record<string, string>, color: string, display: string): Record<string, string> => (
+  { ...acc, [color]: [acc[color], display].filter(val => val).join(', ') }
+)
+
 /**
  * Formats an array of PanelApp items into a record with confidence levels as keys
  * and concatenated item displays as values.
@@ -92,19 +109,42 @@ export const formatPanelAppItems = (
     return []
   }
 
-  const hasSelectedMoi = (item: { pagene?: any; display?: string }, selectedMOIs: any[]) => {
-    if (!selectedMOIs || selectedMOIs.length === 0) {
-      return true
-    }
-    const initials = moiToMoiInitials(item.pagene?.modeOfInheritance, false)
-    return selectedMOIs.some((moi) => initials.includes(moi))
-  }
+  return items.reduce((acc, item) => (
+    hasSelectedMoi(item, selectedMOIs) ? addColorItem(acc, getConfidenceColor(item.pagene?.confidenceLevel), item.display) : acc
+  ), {} as Record<string, string>)
+}
 
-  return items.reduce((acc, item) => {
-    if (!hasSelectedMoi(item, selectedMOIs)) {
-      return acc
-    }
-    const color: string = PANEL_APP_CONFIDENCE_LEVELS[item.pagene?.confidenceLevel] || PANEL_APP_CONFIDENCE_LEVELS[0]
-    return { ...acc, [color]: [acc[color], item.display].filter(val => val).join(', ') }
-  }, {} as Record<string, string>)
+export type PanelAppLocusList = {
+  paLocusList?: unknown
+  items?: PanelAppItem[] | null
+}
+
+/**
+ * Formats the items of multiple gene lists into a record with confidence levels as keys
+ * and concatenated item displays as values. An item in several PanelApp lists gets its highest confidence level,
+ * and items which are only in non-PanelApp lists have no confidence level.
+ *
+ * @param {PanelAppLocusList[]} locusLists - The gene lists to merge.
+ * @param {string[] | null | undefined} selectedMOIs - Optional array of selected MOIs for filtering PanelApp items.
+ * @returns {Record<string, string>} A record where keys represent confidence levels and values
+ * are concatenated item displays.
+ */
+export const formatMergedPanelAppItems = (
+  locusLists: PanelAppLocusList[],
+  selectedMOIs?: string[] | null
+): Record<string, string> => {
+  const confidenceByDisplay = locusLists.reduce((acc, { paLocusList, items }) => {
+    (items || []).filter(item => !paLocusList || hasSelectedMoi(item, selectedMOIs)).forEach((item) => {
+      const confidenceLevel = (paLocusList && item.pagene?.confidenceLevel) || 0
+      acc.set(item.display, Math.max(acc.get(item.display) || 0, confidenceLevel))
+    })
+    return acc
+  }, new Map<string, number>())
+
+  return [...confidenceByDisplay.keys()].sort(
+    (a, b) => genericComparator(a.toLowerCase(), b.toLowerCase()),
+  ).reduce(
+    (acc, display) => addColorItem(acc, getConfidenceColor(confidenceByDisplay.get(display)), display),
+    {} as Record<string, string>,
+  )
 }

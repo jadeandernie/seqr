@@ -330,27 +330,43 @@ export const getLocusListsWithGenes = createSelector(
   ),
 )
 
+const parseLocusListItems = items => items.map((item) => {
+  let display
+  if (item.geneId) {
+    display = item.gene ? item.gene.geneSymbol : item.geneId
+  } else {
+    display = `chr${item.chrom}:${item.start}-${item.end}`
+  }
+  return { ...item, display }
+}).sort(compareObjects('display'))
+
+const getRawItems = items => items.map(({ display }) => display).join(', ')
+
 export const getParsedLocusList = createSelector(
   getLocusListsWithGenes,
   (state, props) => props.locusListGuid,
   (locusListsByGuid, locusListGuid) => {
     const locusList = locusListsByGuid[locusListGuid] || {}
     if (locusList.items) {
-      locusList.items = locusList.items.map((item) => {
-        let display
-        if (item.geneId) {
-          display = item.gene ? item.gene.geneSymbol : item.geneId
-        } else {
-          display = `chr${item.chrom}:${item.start}-${item.end}`
-        }
-        return { ...item, display }
-      })
-      locusList.items.sort(compareObjects('display'))
-      locusList.rawItems = locusList.items.map(({ display }) => display).join(', ')
+      locusList.items = parseLocusListItems(locusList.items)
+      locusList.rawItems = getRawItems(locusList.items)
     }
 
     return locusList
   },
+)
+
+export const getParsedLocusListsByGuid = createSelector(
+  getLocusListsWithGenes,
+  locusListsByGuid => Object.entries(locusListsByGuid).reduce((acc, [locusListGuid, locusList]) => {
+    if (locusList.items) {
+      const items = parseLocusListItems(locusList.items)
+      acc[locusListGuid] = { ...locusList, items, rawItems: getRawItems(items) }
+    } else {
+      acc[locusListGuid] = locusList
+    }
+    return acc
+  }, {}),
 )
 
 const groupDataNestedByChrom = (initialData, groupedData, nestedKey) => groupedData.reduce(

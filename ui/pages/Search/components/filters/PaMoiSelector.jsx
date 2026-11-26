@@ -2,8 +2,9 @@ import PropTypes from 'prop-types'
 import React from 'react'
 import { connect } from 'react-redux'
 
-import { getLocusListsWithGenes } from 'redux/selectors'
+import { getParsedLocusListsByGuid } from 'redux/selectors'
 import { Multiselect } from 'shared/components/form/Inputs'
+import { getSelectedLocusLists } from 'shared/utils/locusListUtils'
 import { moiToMoiInitials } from 'shared/utils/panelAppUtils'
 import { PANEL_APP_MOI_OPTIONS } from 'shared/utils/constants'
 
@@ -12,18 +13,28 @@ const EMPTY_LIST = []
 class PaMoiDropdown extends React.PureComponent {
 
   static propTypes = {
-    locusList: PropTypes.object,
+    locus: PropTypes.object,
+    locusListsByGuid: PropTypes.object,
+    value: PropTypes.oneOfType([PropTypes.arrayOf(PropTypes.string), PropTypes.string]),
+    label: PropTypes.node,
+    width: PropTypes.number,
+    onChange: PropTypes.func,
   }
 
-  moiOptions = () => {
-    const { locusList } = this.props
+  panelAppItems = () => {
+    const { locus, locusListsByGuid } = this.props
+    return getSelectedLocusLists(locus, locusListsByGuid).filter(
+      ({ paLocusList, items }) => paLocusList && items,
+    ).map(({ items }) => items)
+  }
 
-    const initials = locusList.items.reduce((acc, gene) => {
+  moiOptions = (panelAppItems) => {
+    const initials = panelAppItems.flat().reduce((acc, gene) => {
       moiToMoiInitials(gene.pagene?.modeOfInheritance, false).forEach((initial) => {
         acc[initial] = true
       })
       return acc
-    }, {}) || {}
+    }, {})
 
     return PANEL_APP_MOI_OPTIONS.map(moi => ({
       ...moi,
@@ -32,8 +43,9 @@ class PaMoiDropdown extends React.PureComponent {
   }
 
   render() {
-    const { value, label, width, locusList, onChange } = this.props || []
-    const disabled = !locusList?.items
+    const { value, label, width, onChange } = this.props
+    const panelAppItems = this.panelAppItems()
+    const disabled = panelAppItems.length === 0
     return (
       <Multiselect
         label={label}
@@ -43,7 +55,7 @@ class PaMoiDropdown extends React.PureComponent {
         onChange={onChange}
         placeholder="Showing all MOIs as listed in Panel App"
         disabled={disabled}
-        options={disabled ? EMPTY_LIST : this.moiOptions()}
+        options={disabled ? EMPTY_LIST : this.moiOptions(panelAppItems)}
         color="violet"
       />
     )
@@ -51,8 +63,8 @@ class PaMoiDropdown extends React.PureComponent {
 
 }
 
-const mapStateToProps = (state, ownProps) => ({
-  locusList: getLocusListsWithGenes(state)[ownProps.locus.locusListGuid],
+const mapStateToProps = state => ({
+  locusListsByGuid: getParsedLocusListsByGuid(state),
 })
 
 export default connect(mapStateToProps)(PaMoiDropdown)

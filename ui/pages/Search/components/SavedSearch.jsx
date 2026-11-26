@@ -9,6 +9,7 @@ import DataLoader from 'shared/components/DataLoader'
 import UpdateButton from 'shared/components/buttons/UpdateButton'
 import { validators } from 'shared/components/form/FormHelpers'
 import { Select, BooleanCheckbox } from 'shared/components/form/Inputs'
+import { getLocusListGuids } from 'shared/utils/locusListUtils'
 import { saveSearch, loadSavedSearches } from '../reducers'
 import {
   getSavedSearchesByGuid,
@@ -32,9 +33,12 @@ const FormButtonContainer = styled.div`
 
 const SUBSCRIPTION = { values: true }
 
+const getSortedLocusListGuids = locus => [...getLocusListGuids(locus)].sort()
+
 const isSameSearch = ({ locus: locus1, ...search1 }, { locus: locus2, ...search2 }) => (
   isEqual(search1, search2) && (
-    locus1?.locusListGuid ? locus1.locusListGuid === locus2.locusListGuid : isEqual(locus1, locus2)
+    getLocusListGuids(locus1).length ?
+      isEqual(getSortedLocusListGuids(locus1), getSortedLocusListGuids(locus2)) : isEqual(locus1, locus2)
   )
 )
 

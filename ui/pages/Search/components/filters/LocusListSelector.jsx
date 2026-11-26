@@ -5,10 +5,11 @@ import { FormSpy } from 'react-final-form'
 import { Form } from 'semantic-ui-react'
 import styled from 'styled-components'
 
-import { getLocusListsIsLoading } from 'redux/selectors'
+import { loadLocusListItems } from 'redux/rootReducer'
+import { getLocusListsIsLoading, getParsedLocusListsByGuid } from 'redux/selectors'
 import { Dropdown } from 'shared/components/form/Inputs'
-import { formatPanelAppItems } from 'shared/utils/panelAppUtils'
-import { LocusListsLoader, LocusListItemsLoader } from 'shared/components/LocusListLoader'
+import { getLocusListGuids, getLocusListGuidsValue, getSelectedLocusLists, mergeLocusListItems } from 'shared/utils/locusListUtils'
+import { LocusListsLoader } from 'shared/components/LocusListLoader'
 import { getLocusListOptions } from '../../selectors'
 
 const DropdownInput = styled(Dropdown).attrs({
@@ -16,7 +17,7 @@ const DropdownInput = styled(Dropdown).attrs({
   selection: true,
   search: true,
   includeCategories: true,
-  clearable: true,
+  multiple: true,
   fluid: true,
   labeled: true,
   width: 16,
@@ -26,55 +27,77 @@ const DropdownInput = styled(Dropdown).attrs({
   }
 `
 
+const isSameList = (list1, list2) => list1.length === list2.length && list1.every((val, i) => val === list2[i])
+
+const isLoaded = ({ items, paLocusList }) => !!items && (
+  !paLocusList || items.length === 0 || items.some(({ pagene }) => pagene)
+)
+
+const getRawItems = ({ value, locusListsByGuid }) => getSelectedLocusLists(value, locusListsByGuid).map(
+  locusList => (isLoaded(locusList) ? locusList.rawItems : undefined),
+)
+
+const isSameLocusLists = (props1, props2) => (
+  isSameList(getLocusListGuids(props1.value), getLocusListGuids(props2.value)) &&
+  isSameList(getRawItems(props1), getRawItems(props2))
+)
+
 class BaseLocusListDropdown extends React.Component {
 
   static propTypes = {
-    locusList: PropTypes.object,
+    value: PropTypes.object,
+    locusListsByGuid: PropTypes.object,
     locusListOptions: PropTypes.arrayOf(PropTypes.object),
     loading: PropTypes.bool,
     onChange: PropTypes.func,
-    selectedMOIs: PropTypes.arrayOf(PropTypes.string),
+    loadItems: PropTypes.func,
+  }
+
+  componentDidMount() {
+    this.loadItems()
   }
 
   shouldComponentUpdate(nextProps) {
-    const { locusList, locusListOptions, onChange, loading, selectedMOIs } = this.props
+    const { locusListOptions, onChange, loading } = this.props
     return nextProps.locusListOptions !== locusListOptions ||
       nextProps.onChange !== onChange ||
       nextProps.loading !== loading ||
-      nextProps.locusList.locusListGuid !== locusList.locusListGuid ||
-      (!!locusList.locusListGuid && nextProps.locusList.rawItems !== locusList.rawItems) ||
-      nextProps.selectedMOIs !== selectedMOIs
+      !isSameLocusLists(nextProps, this.props)
   }
 
   componentDidUpdate(prevProps) {
-    const { locusList, onChange, selectedMOIs } = this.props
+    const { value, locusListsByGuid, onChange } = this.props
 
-    if (prevProps.locusList.rawItems !== locusList.rawItems) {
-      const { locusListGuid } = locusList
+    if (!isSameList(getLocusListGuids(prevProps.value), getLocusListGuids(value))) {
+      this.loadItems()
+    }
 
-      if (locusList.paLocusList) {
-        const panelAppItems = formatPanelAppItems(locusList.items, selectedMOIs)
-        onChange({ locusListGuid, panelAppItems, selectedMOIs })
-      } else {
-        const { rawItems } = locusList
-        onChange({ locusListGuid, rawItems })
-      }
+    if (!isSameLocusLists(prevProps, this.props) && getRawItems(this.props).every(rawItems => rawItems !== undefined)) {
+      const locusListGuids = getLocusListGuids(value)
+      onChange({
+        ...getLocusListGuidsValue(locusListGuids),
+        ...mergeLocusListItems(getSelectedLocusLists(value, locusListsByGuid), value?.selectedMOIs),
+      })
     }
   }
 
-  onChange = (locusListGuid) => {
+  onChange = (locusListGuids) => {
     const { onChange } = this.props
-    onChange({ locusListGuid })
+    onChange(getLocusListGuidsValue(locusListGuids))
+  }
+
+  loadItems = () => {
+    const { value, loadItems } = this.props
+    getLocusListGuids(value).forEach(loadItems)
   }
 
   render() {
-    const { locusList, locusListOptions, loading } = this.props
-    const locusListGuid = locusList.locusListGuid || ''
+    const { value, locusListOptions, loading } = this.props
     return (
       <Form.Group inline>
         <DropdownInput
-          label="Gene List"
-          value={locusListGuid}
+          label="Gene Lists"
+          value={getLocusListGuids(value)}
           loading={loading}
           disabled={loading}
           onChange={this.onChange}
@@ -88,24 +111,23 @@ class BaseLocusListDropdown extends React.Component {
 
 const mapStateToProps = (state, ownProps) => ({
   locusListOptions: getLocusListOptions(state, ownProps),
+  locusListsByGuid: getParsedLocusListsByGuid(state),
   loading: getLocusListsIsLoading(state),
 })
 
-const LocusListDropdown = connect(mapStateToProps)(BaseLocusListDropdown)
+const mapDispatchToProps = {
+  loadItems: loadLocusListItems,
+}
+
+const LocusListDropdown = connect(mapStateToProps, mapDispatchToProps)(BaseLocusListDropdown)
 
 const SUBSCRIPTION = { values: true }
 
-const LocusListSelector = React.memo(({ value, ...props }) => (
+const LocusListSelector = React.memo(props => (
   <LocusListsLoader allProjectLists hideLoading>
-    <LocusListItemsLoader locusListGuid={value.locusListGuid} reloadOnIdUpdate content hideLoading>
-      <LocusListDropdown selectedMOIs={value?.selectedMOIs} {...props} />
-    </LocusListItemsLoader>
+    <LocusListDropdown {...props} />
   </LocusListsLoader>
 ))
-
-LocusListSelector.propTypes = {
-  value: PropTypes.object,
-}
 
 export default props => (
   <FormSpy subscription={SUBSCRIPTION}>

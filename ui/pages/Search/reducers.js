@@ -27,6 +27,7 @@ const RECEIVE_SEARCHED_VARIANTS = 'RECEIVE_SEARCHED_VARIANTS'
 const REQUEST_SEARCH_GENE_BREAKDOWN = 'REQUEST_SEARCH_GENE_BREAKDOWN'
 const RECEIVE_SEARCH_GENE_BREAKDOWN = 'RECEIVE_SEARCH_GENE_BREAKDOWN'
 const UPDATE_SEARCHED_VARIANT_DISPLAY = 'UPDATE_SEARCHED_VARIANT_DISPLAY'
+const RECEIVE_SEARCH_FILTER_SCHEMA = 'RECEIVE_SEARCH_FILTER_SCHEMA'
 
 // actions
 
@@ -111,6 +112,18 @@ export const loadProjectGroupContext = (projectCategoryGuid, addElementCallback)
       (e) => {
         dispatch({ type: RECEIVE_SEARCH_CONTEXT, error: e.message })
       }).post({ projectCategoryGuid })
+  }
+}
+
+export const loadSearchFilterSchema = () => (dispatch, getState) => {
+  if (!getState().searchFilterSchema) {
+    new HttpRequestHelper('/api/search_filter_schema',
+      (responseJson) => {
+        dispatch({ type: RECEIVE_SEARCH_FILTER_SCHEMA, newValue: responseJson.searchFilterSchema })
+      },
+      () => {
+        dispatch({ type: RECEIVE_SEARCH_FILTER_SCHEMA, newValue: null })
+      }).get()
   }
 }
 
@@ -237,6 +250,7 @@ export const reducers = {
   searchGeneBreakdownLoading: loadingReducer(REQUEST_SEARCH_GENE_BREAKDOWN, RECEIVE_SEARCH_GENE_BREAKDOWN),
   savedSearchesByGuid: createObjectsByIdReducer(RECEIVE_SAVED_SEARCHES, 'savedSearchesByGuid'),
   savedSearchesLoading: loadingReducer(REQUEST_SAVED_SEARCHES, RECEIVE_SAVED_SEARCHES),
+  searchFilterSchema: createSingleValueReducer(RECEIVE_SEARCH_FILTER_SCHEMA, null),
   variantSearchDisplay: createSingleObjectReducer(UPDATE_SEARCHED_VARIANT_DISPLAY, {
     sort: SORT_BY_XPOS,
     page: 1,

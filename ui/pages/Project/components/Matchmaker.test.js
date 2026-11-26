@@ -519,9 +519,13 @@ test('renders an individual with no variant genotypes', () => {
   )
 
   const genotypesData = wrapper.find({ familyGuid: 'F011652_1' }).first().prop('data')
-  expect(genotypesData).toEqual([
+  expect(genotypesData).toHaveLength(2)
+  expect(genotypesData).toEqual(expect.arrayContaining([
     expect.objectContaining({ variantId: 'SV0000002_1248367227_r0390_100-ENSG00000228198', numAlt: 2 }),
     expect.objectContaining({ variantId: 'SV0000004_116042722_r0390_1000-ENSG00000228198' }),
-  ])
-  expect('numAlt' in genotypesData[1]).toBe(false)
+  ]))
+  const noGenotypesVariant = genotypesData.find(
+    ({ variantId }) => variantId === 'SV0000004_116042722_r0390_1000-ENSG00000228198',
+  )
+  expect('numAlt' in noGenotypesVariant).toBe(false)
 })

@@ -9,6 +9,7 @@ import DataTable from '../table/DataTable'
 import FormWrapper from './FormWrapper'
 
 const ROWS_PER_PAGE = 12
+const MAX_CONFIRM_DELETE_LABELS = 10
 
 const TableContainer = styled.div`
 
@@ -65,6 +66,9 @@ class EditRecordsForm extends React.PureComponent {
     /* Column for filtering displayed table rows */
     filterColumn: PropTypes.string,
 
+    /* Optional callback to get the label for a record in the delete confirmation, defaults to its idField value */
+    getRecordLabel: PropTypes.func,
+
     onSubmit: PropTypes.func.isRequired,
     closeParentModal: PropTypes.func.isRequired,
   }
@@ -72,6 +76,7 @@ class EditRecordsForm extends React.PureComponent {
   static defaultProps = {
     modalName: null,
     filterColumn: null,
+    getRecordLabel: null,
   }
 
   state = { data: null }
@@ -98,9 +103,27 @@ class EditRecordsForm extends React.PureComponent {
     )))
   }
 
+  getDeleteConfirmDialog = () => {
+    const { records, entityKey, idField, getRecordLabel } = this.props
+    const { data } = this.state
+    const labels = Object.values(data || records).filter(({ toDelete }) => toDelete).map(
+      record => (getRecordLabel ? getRecordLabel(record) : record[idField]),
+    ).sort((a, b) => `${a}`.localeCompare(`${b}`, undefined, { numeric: true }))
+
+    const numHidden = labels.length - MAX_CONFIRM_DELETE_LABELS
+    const shownLabels = numHidden > 0 ? labels.slice(0, MAX_CONFIRM_DELETE_LABELS) : labels
+    return [
+      'Are you sure you want to delete the following',
+      // entityKey is plural, so the count is only shown when it reads correctly
+      ...(labels.length > 1 ? [labels.length] : []),
+      `${entityKey}: ${shownLabels.join(', ')}${numHidden > 0 ? ` and ${numHidden} more` : ''}?`,
+    ].join(' ')
+  }
+
   render() {
     const {
-      modalName, records, onSubmit, entityKey, closeParentModal, idField, columns, filterColumn, ...tableProps
+      modalName, records, onSubmit, entityKey, closeParentModal, idField, columns, filterColumn, getRecordLabel,
+      ...tableProps
     } = this.props
     const { data } = this.state
     const recordData = data || records
@@ -108,9 +131,7 @@ class EditRecordsForm extends React.PureComponent {
     const rowsToDelete = Object.entries(recordData).reduce((acc, [recordId, { toDelete }]) => (
       { ...acc, [recordId]: toDelete }
     ), {})
-    const selectedIds = Object.values(recordData).filter(({ toDelete }) => toDelete).map(
-      record => record[filterColumn] || record[idField],
-    )
+    const hasRowsToDelete = Object.values(rowsToDelete).some(toDelete => toDelete)
 
     const getRowFilterVal = filterColumn ? row => row[filterColumn] : null
 
@@ -142,9 +163,9 @@ class EditRecordsForm extends React.PureComponent {
                   initialValues={this.getFilteredRecords(recordData, record => record.toDelete)}
                   onSubmit={onSubmit}
                   onSuccess={closeParentModal}
-                  confirmDialog={`Are you sure you want to delete the following ${entityKey}: ${selectedIds.join(', ')}?`}
+                  getConfirmDialog={this.getDeleteConfirmDialog}
                   buttonText="Delete Selected"
-                  disabled={!selectedIds.length}
+                  disabled={!hasRowsToDelete}
                 />
               }
               getRowFilterVal={getRowFilterVal}

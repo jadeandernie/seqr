@@ -12,6 +12,9 @@ import { getProjectAnalysisGroupIndividualsByGuid, getIndivdualsLoading } from '
 
 const INDIVIDUAL_CORE_FIELDS = INDIVIDUAL_FIELDS.slice(0, -1)
 
+// Individual IDs are only unique within a family, so the family is included to identify the individual
+const getIndividualLabel = individual => `${individual[INDIVIDUAL_FIELD_ID]} (family ${individual[FAMILY_FIELD_ID]})`
+
 const EditIndividualsForm = React.memo(({ load, loading, user, ...props }) => (
   <DataLoader load={load} content={props.records} loading={loading}>
     <EditRecordsForm
@@ -19,6 +22,7 @@ const EditIndividualsForm = React.memo(({ load, loading, user, ...props }) => (
       entityKey="individuals"
       defaultSortColumn={FAMILY_FIELD_ID}
       filterColumn={INDIVIDUAL_FIELD_ID}
+      getRecordLabel={getIndividualLabel}
       columns={user.isAnalyst ? INDIVIDUAL_FIELDS : INDIVIDUAL_CORE_FIELDS}
       {...props}
     />

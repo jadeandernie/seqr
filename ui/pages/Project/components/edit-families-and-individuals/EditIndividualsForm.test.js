@@ -59,17 +59,30 @@ test('confirms which individuals will be deleted', () => {
   const store = configureStore(STATE_WITH_2_FAMILIES)
   const wrapper = mount(
     <Provider store={store}>
-      <EditIndividualsForm modalName="editIndividuals" analysisGroupGuid="AG0000183_test_group" />
+      {/* Not scoped to an analysis group, so individuals with the same ID in different families are shown */}
+      <EditIndividualsForm modalName="editIndividuals" />
     </Provider>,
   )
 
   expect(wrapper.find('DispatchRequestButton').prop('buttonContent')).toEqual('Delete Selected')
   expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(true)
 
-  wrapper.find('DataTable').prop('selectRows')({ I021476_na19678_1: true, I021475_na19675_1: true })
+  const dataTable = wrapper.find('DataTable').instance()
+  const deleteButton = wrapper.find('DispatchRequestButton').instance()
+
+  wrapper.find('DataTable').prop('selectRows')(
+    { I021476_na19678_1: true, I021475_na19675_1: true, I021476_na19678_2: true },
+  )
   wrapper.update()
   expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(false)
-  expect(wrapper.find('DispatchRequestButton').prop('confirmDialog')).toEqual(
-    'Are you sure you want to delete the following individuals: NA19678, NA19675?',
-  )
+
+  wrapper.find('DispatchRequestButton').find('button').simulate('click')
+  expect(wrapper.find('Confirm').prop('open')).toBe(true)
+  expect(wrapper.find('Confirm').find('ModalContent').text()).toEqual([
+    'Are you sure you want to delete the following 3 individuals:',
+    'NA19675 (family 1), NA19678 (family 1), NA19678 (family 2)?',
+  ].join(' '))
+
+  expect(wrapper.find('DataTable').instance()).toBe(dataTable)
+  expect(wrapper.find('DispatchRequestButton').instance()).toBe(deleteButton)
 })

@@ -341,6 +341,11 @@ ELASTICSEARCH_SERVICE_PORT = os.environ.get('ELASTICSEARCH_SERVICE_PORT', '9200'
 ELASTICSEARCH_SERVER = '{host}:{port}'.format(
     host=ELASTICSEARCH_SERVICE_HOSTNAME, port=ELASTICSEARCH_SERVICE_PORT)
 
+# The maximum number of families which can be searched with per-family genotype filters (inheritance or quality filters,
+# or a subset of the families in an index) if the search is not restricted to genes, intervals or variants.
+# The default is the number of family clauses elasticsearch accepts in a single query (MAX_SEARCH_CLAUSES)
+MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES = int(os.environ.get('MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES', '1024'))
+
 SEQR_ELASTICSEARCH_USERNAME = os.environ.get('SEQR_ES_USERNAME', 'seqr')
 SEQR_ELASTICSEARCH_PASSWORD = os.environ.get('SEQR_ES_PASSWORD')
 ELASTICSEARCH_CREDENTIALS = (SEQR_ELASTICSEARCH_USERNAME, SEQR_ELASTICSEARCH_PASSWORD) if SEQR_ELASTICSEARCH_PASSWORD else None

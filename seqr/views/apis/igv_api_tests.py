@@ -12,7 +12,8 @@ from seqr.views.apis.igv_api import GS_STORAGE_ACCESS_CACHE_KEY
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase
 
 STREAMING_READS_CONTENT = [b'CRAM\x03\x83', b'\\\t\xfb\xa3\xf7%\x01', b'[\xfc\xc9\t\xae']
-PROJECT_GUID = 'R0001_1kg'
+STREAMING_GZIPPED_CONTENT = [b'\x1f\x8b\x08\x04\x00\x00\x00\x00\x00\xff\x06\x00BC', b'\x02\x00\x1b\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00']
+PROJECT_GUID ='R0001_1kg'
 LOCAL_SAMPLE_GUID = 'S000145_na19675'
 GS_SAMPLE_GUID = 'S000146_na20870'
 OTHER_GS_SAMPLE_GUID = 'S000147_na20870'
@@ -145,6 +146,40 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, '/some/local/path.bam'])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 403)
+        mock_subprocess.assert_not_called()
+
+    @mock.patch('seqr.utils.file_utils.os.path.isfile')
+    @mock.patch('seqr.utils.file_utils.gzip.open')
+    @mock.patch('seqr.utils.file_utils.open')
+    def test_proxy_local_gzipped_to_igv(self, mock_open, mock_gzip_open, mock_isfile, mock_subprocess):
+        mock_isfile.return_value = True
+        mock_subprocess.return_value.stdout = STREAMING_GZIPPED_CONTENT
+        mock_open.return_value.__enter__.return_value.__iter__.return_value = STREAMING_GZIPPED_CONTENT
+        mock_gzip_open.return_value.__enter__.return_value.__iter__.return_value = [b'chr1\t100\t200\n']
+
+        sample = IgvSample.objects.get(guid=LOCAL_SAMPLE_GUID)
+        sample.file_path = '/readviz/NA19675.junctions.bed.gz'
+        sample.sample_type = 'spliceJunctions'
+        sample.save()
+
+        url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, '/readviz/NA19675.junctions.bed.gz'])
+        self.check_require_login(url)
+        response = self.client.get(url, HTTP_RANGE='bytes=100-250')
+        self.assertEqual(response.status_code, 206)
+        self.assertListEqual([val for val in response.streaming_content], STREAMING_GZIPPED_CONTENT)
+        mock_subprocess.assert_called_once_with(
+            'dd skip=100 count=151 bs=1 if=/readviz/NA19675.junctions.bed.gz status="none"',
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)  # nosec
+        mock_open.assert_not_called()
+        mock_gzip_open.assert_not_called()
+
+        # test no byte range
+        mock_subprocess.reset_mock()
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual([val for val in response.streaming_content], STREAMING_GZIPPED_CONTENT)
+        mock_open.assert_called_once_with('/readviz/NA19675.junctions.bed.gz', 'rb')
+        mock_gzip_open.assert_not_called()
         mock_subprocess.assert_not_called()
 
     def test_receive_alignment_table_handler(self, mock_subprocess):

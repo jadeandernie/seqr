@@ -13,6 +13,7 @@ import Header from './Header'
 import PageHeader from './PageHeader'
 import Footer from './Footer'
 import WarningMessages from './WarningMessages'
+import ExternalResourceFlyout from '../panel/external-resources/ExternalResourceFlyout'
 
 const LayoutContainer = styled.div`
   height: calc(100% - 32px);
@@ -40,6 +41,7 @@ const BaseLayout = ({ children }) => (
       </Grid.Row>
     </ContentGrid>
     <Footer />
+    <ExternalResourceFlyout />
   </LayoutContainer>
 )
 

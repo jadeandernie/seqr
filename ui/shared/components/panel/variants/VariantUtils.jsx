@@ -19,9 +19,6 @@ export const TranscriptLink = styled.a.attrs(({ variant, transcript, idField = '
   font-weight: normal;
 `
 
-export const has37Coords = ({ genomeVersion, liftedOverGenomeVersion, liftedOverPos }) => (
-  genomeVersion === GENOME_VERSION_37 || (liftedOverGenomeVersion === GENOME_VERSION_37 && liftedOverPos))
-
 export const compHetGene = (variants) => {
   const sharedGeneIds = variants.slice(1).reduce(
     (acc, v) => acc.filter(geneId => geneId in (v.transcripts || {})), Object.keys(variants[0].transcripts || {}),

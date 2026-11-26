@@ -20,12 +20,11 @@ import { PermissiveGeneSearchLink } from '../../buttons/SearchResultsLink'
 import Modal from '../../modal/Modal'
 import { ButtonLink, HelpIcon } from '../../StyledComponents'
 import RnaSeqJunctionOutliersTable from '../../table/RnaSeqJunctionOutliersTable'
-import { getOtherGeneNames } from '../genes/GeneDetail'
+import ExternalLink from '../external-resources/ExternalLink'
 import Transcripts, { ConsequenceDetails, isManeSelect } from './Transcripts'
 import VariantGenes, { GeneLabelContent, omimPhenotypesDetail } from './VariantGene'
 import {
   getLocus,
-  has37Coords,
   Sequence,
   ProteinSequence,
   TranscriptLink,
@@ -33,10 +32,11 @@ import {
   SPLICE_OUTLIER_OVERLAP_ARGS,
 } from './VariantUtils'
 import {
-  GENOME_VERSION_37, GENOME_VERSION_38, getVariantMainTranscript, SVTYPE_LOOKUP, SVTYPE_DETAILS, SCREEN_LABELS,
+  GENOME_VERSION_37, getVariantMainTranscript, SVTYPE_LOOKUP, SVTYPE_DETAILS, SCREEN_LABELS,
   EXTENDED_INTRONIC_DESCRIPTION,
 } from '../../../utils/constants'
 import { camelcaseToTitlecase } from '../../../utils/stringUtils'
+import { getVariantResourceLinks } from '../../../utils/externalResources'
 
 const OverlappedIntervalLabels = React.memo(({ groupedIntervals, variant, getOverlapArgs, getLabels }) => {
   const chromIntervals = groupedIntervals[variant.chrom]
@@ -110,6 +110,8 @@ const DividedLink = styled.a.attrs({ target: '_blank', rel: 'noreferrer' })`
 `
 
 const DividedButtonLink = DividedLink.withComponent(ButtonLink)
+
+const DividedExternalLink = DividedLink.withComponent(ExternalLink)
 
 const BaseDividedGeneSearchLink = DividedLink.withComponent(PermissiveGeneSearchLink)
 const DividedGeneSearchLink = props => <BaseDividedGeneSearchLink {...props} />
@@ -211,21 +213,6 @@ const LOF_FILTER_MAP = {
   '3UTR_SPLICE': { title: "3'UTR", message: 'Essential splice variant LoF occurs in the UTR of the transcript' },
 }
 
-const getSvRegion = ({ chrom, endChrom, pos, end }, divider) => {
-  const endOffset = endChrom ? 0 : end - pos
-  return `${chrom}${divider}${pos}-${pos + endOffset}`
-}
-
-const getGeneNames = genes => genes.reduce((acc, gene) => [gene.geneSymbol, ...getOtherGeneNames(gene), ...acc], [])
-
-const getLitSearch = (genes, variations) => {
-  let search = `(${getGeneNames(genes).join(' OR ')})`
-  if (variations.length) {
-    search = `${search} AND (${variations.join(' OR ')})`
-  }
-  return search
-}
-
 const shouldShowNonDefaultTranscriptInfoIcon = (variant, transcript, transcriptsById) => {
   const allVariantTranscripts = Object.values(variant.transcripts || {}).flat() || []
   const canonical = allVariantTranscripts.find(t => t.canonical) || null
@@ -241,74 +228,10 @@ const shouldShowNonDefaultTranscriptInfoIcon = (variant, transcript, transcripts
   return result
 }
 
-const VARIANT_LINKS = [
-  {
-    name: 'gnomAD',
-    shouldShow: variant => !!variant.svType,
-    getHref: variant => `https://gnomad.broadinstitute.org/region/${getSvRegion(variant, '-')}?dataset=gnomad_sv_r4`,
-  },
-  {
-    name: 'Decipher',
-    shouldShow: ({ svType, genomeVersion }) => !!svType && genomeVersion === GENOME_VERSION_38,
-    getHref: variant => `https://www.deciphergenomics.org/search/patients/results?q=${getSvRegion(variant, ':')}`,
-  },
-  {
-    name: 'mitomap',
-    shouldShow: ({ svType, chrom }) => !svType && chrom === 'M',
-    getHref: () => 'https://www.mitomap.org/foswiki/bin/view/Main/SearchAllele',
-  },
-  {
-    name: 'Mitovisualize',
-    shouldShow: ({ svType, chrom, genes }) => !svType && chrom === 'M' && genes.some(
-      ({ gencodeGeneType }) => gencodeGeneType === 'Mt-tRNA' || gencodeGeneType === 'Mt-rRNA',
-    ),
-    getHref: ({ pos, ref, alt }) => `https://www.mitovisualize.org/variant/m-${pos}-${ref}-${alt}`,
-  },
-  {
-    name: 'Google',
-    shouldShow: ({ genes, variations }) => genes.length && variations.length,
-    getHref: ({ genes, variations }) => `https://scholar.google.com/scholar?q=${getLitSearch(genes, variations).replaceAll('=', '')}`,
-  },
-  {
-    name: 'pubmed',
-    shouldShow: ({ genes }) => genes.length,
-    getHref: ({ genes, variations }) => `https://www.ncbi.nlm.nih.gov/pubmed?term=${getLitSearch(genes, variations)}`,
-  },
-  {
-    name: 'AoU',
-    shouldShow: ({ svType }) => !svType,
-    getHref: ({ chrom, pos, ref, alt }) => `https://databrowser.researchallofus.org/variants/${chrom}-${pos}-${ref}-${alt}`,
-  },
-  {
-    name: 'Iranome',
-    shouldShow: ({ svType, chrom }) => !svType && chrom !== 'M',
-    getHref: ({ chrom, pos, ref, alt }) => `https://www.iranome.com/variant/${chrom}-${pos}-${ref}-${alt}`,
-  },
-  {
-    name: 'Geno2MP',
-    shouldShow: ({ svType, chrom }) => !svType && chrom !== 'M',
-    getHref: ({ chrom, pos }) => `https://geno2mp.gs.washington.edu/Geno2MP/#/gene/${chrom}:${pos}/chrLoc/${pos}/${pos}/${chrom}`,
-  },
-  {
-    name: 'Mastermind',
-    shouldShow: ({ svType, hgvsc }) => !svType && hgvsc,
-    getHref: ({ genes, hgvsc }) => `https://mastermind.genomenon.com/detail?gene=${genes[0].geneSymbol}&mutation=${genes[0].geneSymbol}:${hgvsc}`,
-  },
-  {
-    name: 'BCH',
-    shouldShow: (variant, user) => has37Coords(variant) && user.isAnalyst,
-    getHref: ({ chrom, pos, ref, alt, genomeVersion, liftedOverPos }) => (
-      `https://aggregator.bchresearch.org/variant.html?variant=${chrom}:${genomeVersion === GENOME_VERSION_37 ? pos : liftedOverPos}:${ref}:${alt}`
-    ),
-  },
-  {
-    name: 'LitVar2',
-    shouldShow: ({ CAID, rsid }) => !!CAID && !!rsid,
-    getHref: ({ CAID, rsid }) => (
-      `https://ncbi.nlm.nih.gov/research/litvar2/docsum?variant=litvar@${CAID}%23${rsid}%23%23&query=${CAID}`
-    ),
-  },
-]
+const getVariantTitle = ({ chrom, pos, end, ref, alt, svType }, mainGene) => {
+  const locus = svType ? `${svType} ${chrom}:${pos}-${end}` : `${chrom}:${pos} ${ref} > ${alt}`
+  return mainGene ? `${mainGene.geneSymbol} ${locus}` : locus
+}
 
 const getSampleType = (genotypes) => {
   const sampleTypes = [...new Set(Object.values(genotypes || {}).map(({ sampleType }) => sampleType).filter(s => s))]
@@ -348,7 +271,8 @@ const variantSearchLinks = (variant, mainTranscript, genesById, user) => {
     genes = Object.keys(transcripts || {}).map(geneId => genesById[geneId]).filter(gene => gene)
   }
 
-  const linkVariant = { genes, variations, hgvsc, ...variant }
+  const links = getVariantResourceLinks({ genes, variations, hgvsc, ...variant }, user)
+  const flyoutContext = { entity: 'variant', title: getVariantTitle(variant, mainGene), links }
 
   const seqrSearchLink = (
     <NavLink
@@ -374,9 +298,7 @@ const variantSearchLinks = (variant, mainTranscript, genesById, user) => {
 
   return [
     ...seqrLinks.map(props => <Popup size="tiny" {...props} />),
-    ...VARIANT_LINKS.filter(({ shouldShow }) => shouldShow(linkVariant, user)).map(
-      ({ name, getHref }) => <DividedLink key={name} href={getHref(linkVariant)}>{name}</DividedLink>,
-    ),
+    ...links.map(link => <DividedExternalLink key={link.key} link={link} context={flyoutContext} />),
   ]
 }
 

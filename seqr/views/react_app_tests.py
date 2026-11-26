@@ -94,7 +94,14 @@ class AppPageTest(object):
         self.assertEqual(self.get_initial_page_window('gaTrackingId', response), ga_token_id)
         self.assertEqual(self.get_initial_page_window('userEmail', response), user_email)
         nonce = self.get_initial_page_window('__webpack_nonce__', response)
-        self.assertIn('nonce-{}'.format(nonce), response.get('Content-Security-Policy'))
+        csp = response.get('Content-Security-Policy')
+        self.assertIn('nonce-{}'.format(nonce), csp)
+        frame_src = next(directive for directive in csp.split('; ') if directive.startswith('frame-src '))
+        self.assertSetEqual(set(frame_src.split(' ')[1:]), {
+            "'self'", 'https://gnomad.broadinstitute.org', 'https://www.gtexportal.org', 'https://www.uniprot.org',
+            'https://www.proteinatlas.org', 'https://monarchinitiative.org', 'https://geno2mp.gs.washington.edu',
+            'https://www.informatics.jax.org', 'https://ncbi.nlm.nih.gov',
+        })
 
         # test static assets are correctly loaded
         content = response.content.decode('utf-8')

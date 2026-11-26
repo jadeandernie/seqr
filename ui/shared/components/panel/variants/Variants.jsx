@@ -15,7 +15,8 @@ import Predictions from './Predictions'
 import Frequencies from './Frequencies'
 import VariantGenes, { VariantGene } from './VariantGene'
 import VariantIndividuals from './VariantIndividuals'
-import { compHetGene, has37Coords } from './VariantUtils'
+import { has37Coords } from '../../../utils/externalResources'
+import { compHetGene } from './VariantUtils'
 
 export const StyledVariantRow = styled(({ isSV, severityColor, ...props }) => <Grid.Row {...props} />)`  
   .column {

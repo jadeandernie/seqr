@@ -324,11 +324,11 @@ export const getTagTypeCounts = createSelector(
 // Counts from the loaded variants are only complete once all the tagged variants in the project are loaded
 export const getProjectSavedVariantTagTypeCounts = createSelector(
   getProjectGuid,
-  state => state.savedVariantTags,
+  state => state.projectSavedVariantTags,
   getSavedVariantTagTypeCounts,
   getTagTypeCounts,
-  (projectGuid, savedVariantTags, loadedTagTypeCounts, projectTagTypeCounts) => (
-    (savedVariantTags || {})[getSavedVariantTagKey(projectGuid)] ? loadedTagTypeCounts : projectTagTypeCounts
+  (projectGuid, projectSavedVariantTags, loadedTagTypeCounts, projectTagTypeCounts) => (
+    (projectSavedVariantTags || {})[getSavedVariantTagKey(projectGuid)] ? loadedTagTypeCounts : projectTagTypeCounts
   ),
 )
 

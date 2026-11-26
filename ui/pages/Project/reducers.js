@@ -20,7 +20,7 @@ const UPDATE_FAMILY_TABLE_FILTER_STATE = 'UPDATE_FAMILY_TABLE_FILTER_STATE'
 const UPDATE_CASE_REVIEW_TABLE_STATE = 'UPDATE_CASE_REVIEW_TABLE_STATE'
 const UPDATE_CURRENT_PROJECT = 'UPDATE_CURRENT_PROJECT'
 const RECEIVE_SAVED_VARIANT_FAMILIES = 'RECEIVE_SAVED_VARIANT_FAMILIES'
-const RECEIVE_SAVED_VARIANT_TAGS = 'RECEIVE_SAVED_VARIANT_TAGS'
+const RECEIVE_PROJECT_SAVED_VARIANT_TAGS = 'RECEIVE_PROJECT_SAVED_VARIANT_TAGS'
 const UPDATE_SAVED_VARIANT_TABLE_STATE = 'UPDATE_VARIANT_STATE'
 const REQUEST_MME_MATCHES = 'REQUEST_MME_MATCHES'
 const RECEIVE_MME_MATCHES = 'RECEIVE_MME_MATCHES'
@@ -133,7 +133,7 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
       return
     }
 
-    const loadedTags = state.savedVariantTags || {}
+    const loadedTags = state.projectSavedVariantTags || {}
     if (isProjectLoad && (
       loadedTags[getSavedVariantTagKey(projectGuid, projectTag)] ||
       (!loadAllFamilyVariants && loadedTags[getSavedVariantTagKey(projectGuid)])
@@ -160,7 +160,7 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
     (responseJson) => {
       if (isProjectLoad) {
         dispatch({
-          type: RECEIVE_SAVED_VARIANT_TAGS, updates: { [getSavedVariantTagKey(projectGuid, projectTag)]: true },
+          type: RECEIVE_PROJECT_SAVED_VARIANT_TAGS, updates: { [getSavedVariantTagKey(projectGuid, projectTag)]: true },
         })
       }
       // A tag specific response does not include all the variants for a family
@@ -447,7 +447,7 @@ export const reducers = {
   familyTagTypeCounts: createObjectsByIdReducer(RECEIVE_DATA, 'familyTagTypeCounts'),
   importStats: createObjectsByIdReducer(RECEIVE_DATA, 'importStats'),
   savedVariantFamilies: createSingleObjectReducer(RECEIVE_SAVED_VARIANT_FAMILIES),
-  savedVariantTags: createSingleObjectReducer(RECEIVE_SAVED_VARIANT_TAGS),
+  projectSavedVariantTags: createSingleObjectReducer(RECEIVE_PROJECT_SAVED_VARIANT_TAGS),
   familiesLoading: loadingReducer(REQUEST_FAMILIES, RECEIVE_FAMILIES),
   familyVariantSummaryLoading: loadingReducer(REQUEST_FAMILY_VARIANT_SUMMARY, RECEIVE_DATA),
   individualsLoading: loadingReducer(REQUEST_INDIVIDUALS, RECEIVE_DATA),

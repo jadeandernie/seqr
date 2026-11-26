@@ -8,6 +8,8 @@ import { FAMILY_FIELDS } from '../../constants'
 import { updateFamilies } from '../../reducers'
 import { getProjectFamiliesByGuid } from '../../selectors'
 
+const getFamilyLabel = family => family[FAMILY_FIELD_ID]
+
 const EditFamiliesForm = React.memo(props => (
   <EditRecordsForm
     modalName={props.modalName}
@@ -15,6 +17,7 @@ const EditFamiliesForm = React.memo(props => (
     entityKey="families"
     defaultSortColumn={FAMILY_FIELD_ID}
     filterColumn={FAMILY_FIELD_ID}
+    getRecordLabel={getFamilyLabel}
     columns={FAMILY_FIELDS}
     {...props}
   />

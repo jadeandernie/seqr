@@ -54,3 +54,38 @@ test('shows the analyst-only fields when the user is an analyst', () => {
     'familyId', 'individualId', 'paternalId', 'maternalId', 'sex', 'affected',
   ])
 })
+
+test('confirms which individuals will be deleted', () => {
+  const store = configureStore(STATE_WITH_2_FAMILIES)
+  const wrapper = mount(
+    <Provider store={store}>
+      {/* Not scoped to an analysis group, so individuals with the same ID in different families are shown */}
+      <EditIndividualsForm modalName="editIndividuals" />
+    </Provider>,
+  )
+
+  expect(wrapper.find('DispatchRequestButton').prop('buttonContent')).toEqual('Delete Selected')
+  expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(true)
+
+  const dataTable = wrapper.find('DataTable').instance()
+  const deleteButton = wrapper.find('DispatchRequestButton').instance()
+
+  wrapper.find('DataTable').prop('selectRows')(
+    { I021476_na19678_1: true, I021475_na19675_1: true, I021476_na19678_2: true },
+  )
+  wrapper.update()
+  expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(false)
+
+  wrapper.find('DispatchRequestButton').find('button').simulate('click')
+  // The form has its own confirm for closing with unsaved changes, so look up the delete button's confirm
+  const deleteConfirm = wrapper.find('DispatchRequestButton').find('Confirm')
+  expect(deleteConfirm.prop('open')).toBe(true)
+  expect(deleteConfirm.find('ModalContent').text()).toEqual([
+    'Are you sure you want to delete the following 3 individuals:',
+    'NA19675 (family 1), NA19678 (family 1), NA19678 (family 2)?',
+  ].join(' '))
+
+  // Compared with === as jest runs out of memory printing the difference between two component instances
+  expect(wrapper.find('DataTable').instance() === dataTable).toBe(true)
+  expect(wrapper.find('DispatchRequestButton').instance() === deleteButton).toBe(true)
+})

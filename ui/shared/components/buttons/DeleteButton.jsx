@@ -19,6 +19,7 @@ const DeleteButton = React.memo(({ initialValues, onSubmit, buttonText, size, ..
 DeleteButton.propTypes = {
   onSubmit: PropTypes.func,
   confirmDialog: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
+  getConfirmDialog: PropTypes.func,
   initialValues: PropTypes.object,
   buttonText: PropTypes.string,
   size: PropTypes.string,

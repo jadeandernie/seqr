@@ -18,6 +18,9 @@ class DispatchRequestButton extends React.PureComponent {
     /** Optional confirm dialog to show before submitting the request */
     confirmDialog: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
 
+    /** Optional callback to compute the confirm dialog content when it is shown, used instead of confirmDialog */
+    getConfirmDialog: PropTypes.func,
+
     /** child componenets */
     children: PropTypes.node,
 
@@ -36,9 +39,9 @@ class DispatchRequestButton extends React.PureComponent {
   }
 
   handleButtonClick = (event) => {
-    const { confirmDialog } = this.props
+    const { confirmDialog, getConfirmDialog } = this.props
     event.preventDefault()
-    if (confirmDialog) {
+    if (confirmDialog || getConfirmDialog) {
       this.setState({ isConfirmDialogVisible: true })
     } else {
       this.performAction()
@@ -87,7 +90,8 @@ class DispatchRequestButton extends React.PureComponent {
 
   render() {
     const {
-      buttonContainer, buttonContent, confirmDialog, children, onSuccess, onSubmit, hideNoRequestStatus, ...props
+      buttonContainer, buttonContent, confirmDialog, getConfirmDialog, children, onSuccess, onSubmit,
+      hideNoRequestStatus, ...props
     } = this.props
     const { requestStatus, requestErrorMessage, isConfirmDialogVisible } = this.state
     return React.cloneElement(buttonContainer || <span />, {
@@ -104,7 +108,7 @@ class DispatchRequestButton extends React.PureComponent {
         ) : null,
         <Confirm
           key="confirm"
-          content={confirmDialog}
+          content={(getConfirmDialog && isConfirmDialogVisible) ? getConfirmDialog() : confirmDialog}
           open={isConfirmDialogVisible}
           onConfirm={this.performAction}
           onCancel={this.hideConfirmDialog}

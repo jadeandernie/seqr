@@ -40,6 +40,7 @@ export const getVersion = state => state.meta.version
 export const getOauthLoginEnabled = state => !!state.meta.oauthLoginProvider
 export const getOauthLoginProvider = state => state.meta.oauthLoginProvider
 export const getVlmEnabled = state => state.meta.vlmEnabled
+export const getClinvarSubmissionMode = state => state.meta.clinvarSubmissionMode
 export const getHijakEnabled = state => state.meta.hijakEnabled
 export const getWarningMessages = state => state.meta.warningMessages
 export const getLastFeatureUpdate = state => state.meta.lastFeatureUpdate

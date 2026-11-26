@@ -16,6 +16,8 @@ from settings import (
     SOCIAL_AUTH_PROVIDER,
     VLM_CLIENT_ID,
 )
+from clinvar_submission.clinvar_utils import get_clinvar_mode
+from clinvar_submission.constants import MODE_DISABLED as CLINVAR_MODE_DISABLED
 from seqr.models import WarningMessage
 from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_set_json
 from seqr.views.apis.feature_updates_api import fetch_feature_updates
@@ -61,6 +63,7 @@ def render_app_html(request, additional_json=None, include_user=True, status=200
         'hijakEnabled': DEBUG or False,
         'oauthLoginProvider': SOCIAL_AUTH_PROVIDER,
         'vlmEnabled': bool(VLM_CLIENT_ID),
+        'clinvarSubmissionMode': None if get_clinvar_mode() == CLINVAR_MODE_DISABLED else get_clinvar_mode(),
         'warningMessages': [message.json() for message in WarningMessage.objects.all()],
         'lastFeatureUpdate': _get_latest_feature_update_date(),
     }}

@@ -146,6 +146,9 @@ from seqr.views.apis.project_categories_api import update_project_categories_han
 from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_project_from_workspace, \
     grant_workspace_access, validate_anvil_vcf, add_workspace_data, get_anvil_vcf_list, get_anvil_igv_options
 from matchmaker.views import external_api
+from clinvar_submission.views.clinvar_submission_api import clinvar_submission_draft, \
+    request_clinvar_submission_review, approve_clinvar_submission, submit_clinvar_submission, \
+    withdraw_clinvar_submission, project_clinvar_submissions, all_clinvar_submissions
 from seqr.views.utils.file_utils import save_temp_file
 from seqr.views.apis.feature_updates_api import get_feature_updates
 
@@ -344,6 +347,14 @@ api_endpoints = {
     'summary_data/hpo/(?P<hpo_id>[^/]+)': hpo_summary_data,
     'summary_data/success_story/(?P<success_story_types>[^/]+)': success_story,
     'summary_data/matchmaker': mme_details,
+    'summary_data/clinvar_submissions': all_clinvar_submissions,
+
+    'saved_variant/(?P<variant_guid>[^/]+)/clinvar_submission': clinvar_submission_draft,
+    'clinvar_submission/(?P<submission_guid>[^/]+)/request_review': request_clinvar_submission_review,
+    'clinvar_submission/(?P<submission_guid>[^/]+)/approve': approve_clinvar_submission,
+    'clinvar_submission/(?P<submission_guid>[^/]+)/submit': submit_clinvar_submission,
+    'clinvar_submission/(?P<submission_guid>[^/]+)/withdraw': withdraw_clinvar_submission,
+    'project/(?P<project_guid>[^/]+)/clinvar_submissions': project_clinvar_submissions,
     'summary_data/update_external_analysis': bulk_update_family_external_analysis,
     'summary_data/individual_metadata/(?P<project_guid>[^/]+)': individual_metadata,
 

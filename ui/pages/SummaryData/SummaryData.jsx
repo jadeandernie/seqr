@@ -3,7 +3,7 @@ import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import { Route, Switch } from 'react-router-dom'
 
-import { getUser } from 'redux/selectors'
+import { getUser, getClinvarSubmissionMode } from 'redux/selectors'
 import { Error404 } from 'shared/components/page/Errors'
 import { SimplePageHeader } from 'shared/components/page/PageHeaderLayout'
 import GeneDetail from 'shared/components/panel/genes/GeneDetail'
@@ -16,6 +16,7 @@ import LocusLists from './components/LocusLists'
 import ExternalAnalysis from './components/ExternalAnalysis'
 import Hpo from './components/Hpo'
 import IndividualMetadata from './components/IndividualMetadata'
+import ClinvarSubmissions from './components/ClinvarSubmissions'
 
 const GenePage = ({ match }) => (
   match.params.geneId ? <GeneDetail geneId={match.params.geneId} /> : <GeneInfoSearch />
@@ -40,20 +41,30 @@ const ANALYST_SUMMARY_DATA_PAGES = [
   { path: 'external_analysis', component: ExternalAnalysis },
 ]
 
-const getPages = ({ user }) => (
-  user.isAnalyst ? ANALYST_SUMMARY_DATA_PAGES : SUMMARY_DATA_PAGES
-)
+const CLINVAR_SUMMARY_DATA_PAGES = [
+  ...ANALYST_SUMMARY_DATA_PAGES,
+  { path: 'clinvar_submissions', component: ClinvarSubmissions },
+]
+
+const getPages = ({ user, clinvarSubmissionMode }) => {
+  if (!user.isAnalyst) {
+    return SUMMARY_DATA_PAGES
+  }
+  return clinvarSubmissionMode ? CLINVAR_SUMMARY_DATA_PAGES : ANALYST_SUMMARY_DATA_PAGES
+}
 
 const BaseSummaryDataPageHeader = ({ match, ...props }) => (
   <SimplePageHeader page="summary_data" subPage={match.params.subPage} pages={getPages(props)} />)
 
 BaseSummaryDataPageHeader.propTypes = {
   user: PropTypes.object,
+  clinvarSubmissionMode: PropTypes.string,
   match: PropTypes.object,
 }
 
 const mapStateToProps = state => ({
   user: getUser(state),
+  clinvarSubmissionMode: getClinvarSubmissionMode(state),
 })
 
 export const SummaryDataPageHeader = connect(mapStateToProps)(BaseSummaryDataPageHeader)
@@ -70,6 +81,7 @@ const SummaryData = ({ match, ...props }) => (
 
 SummaryData.propTypes = {
   user: PropTypes.object,
+  clinvarSubmissionMode: PropTypes.string,
   match: PropTypes.object,
 }
 

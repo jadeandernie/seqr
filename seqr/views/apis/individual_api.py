@@ -74,6 +74,8 @@ def update_individual_handler(request, individual_guid):
     })
 
 
+FEATURE_FIELDS = ['features', 'absentFeatures', 'nonstandardFeatures', 'absentNonstandardFeatures']
+
 
 @login_and_policies_required
 def update_individual_hpo_terms(request, individual_guid):
@@ -88,15 +90,14 @@ def update_individual_hpo_terms(request, individual_guid):
 
     request_json = json.loads(request.body)
 
-    feature_fields = ['features', 'absentFeatures', 'nonstandardFeatures', 'absentNonstandardFeatures']
     update_json = {
         key: _get_parsed_features(request_json[key]) if request_json.get(key) else None
-        for key in feature_fields
+        for key in FEATURE_FIELDS
     }
     update_individual_from_json(individual, update_json, user=request.user, allow_features_update=True)
     IndividualMetadataDict.reload(request.user)
 
-    individual_json = {k: getattr(individual, _to_snake_case(k)) for k in feature_fields}
+    individual_json = {k: getattr(individual, _to_snake_case(k)) for k in FEATURE_FIELDS}
     add_individual_hpo_details([individual_json])
 
     return create_json_response({
@@ -723,7 +724,7 @@ def import_gregor_metadata(request, project_guid):
     family_ids = {row['family_id'] for row in participant_rows if row['participant_id'] in participant_sample_lookup}
     individuals_by_participant = {row['participant_id']: {
         JsonConstants.INDIVIDUAL_ID_COLUMN: participant_sample_lookup.get(row['participant_id'], row['participant_id']),
-        **dict([_parse_participant_val(k, v, participant_sample_lookup) for k, v in row.items()]),
+        **_parse_participant_row(row, participant_sample_lookup),
         'population': parse_population(row),
         FEATURES_COL: [],
         ABSENT_FEATURES_COL: [],
@@ -878,6 +879,13 @@ def _parse_participant_val(column, value, participant_sample_lookup):
         elif value in participant_sample_lookup:
             value = participant_sample_lookup[value]
     return column, value
+
+
+def _parse_participant_row(row, participant_sample_lookup):
+    parsed_row = dict([_parse_participant_val(k, v, participant_sample_lookup) for k, v in row.items()])
+    # Features are only imported from the phenotype table. A participant column named for a feature field would
+    # otherwise be saved to that field as a raw string instead of a list of features
+    return {k: v for k, v in parsed_row.items() if k not in FEATURE_FIELDS}
 
 
 @login_and_policies_required

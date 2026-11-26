@@ -1400,6 +1400,20 @@ class IndividualAPITest(object):
         self.assertEqual(saved_variant.key, 100)
         self.assertDictEqual(saved_variant.genotypes, new_family_genotypes)
 
+        # Test participant table columns named for feature fields are not saved as raw strings
+        participant_table = [
+            row + (['nonstandard_features', 'absent_nonstandard_features'] if i == 0 else ['[]', 'short stature'])
+            for i, row in enumerate(LOAD_PARTICIPANT_TABLE)
+        ]
+        self._set_metadata_file_iter(genetic_findings_table)
+        self.gs_files['participant.tsv'] = iter(['\t'.join(row).encode() for row in participant_table])
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json()['individualsByGuid'], {})
+        self.assertSetEqual(set(Individual.objects.filter(
+            individual_id__in=[i['individual_id'] for i in individual_db_data],
+        ).values_list('nonstandard_features', 'absent_nonstandard_features')), {(None, None)})
+
     def test_get_hpo_terms(self):
         url = reverse(get_hpo_terms, args=['HP:0011458'])
         self.check_require_login(url)

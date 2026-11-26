@@ -4,6 +4,7 @@ import orderBy from 'lodash/orderBy'
 import { getVisibleFamilies, getVisibleFamiliesInSortedOrder, getProjectExportUrls, getCurrentAnalysisGroup,
   getCaseReviewStatusCounts, getProjectAnalysisGroupFamiliesByGuid, getIndividualTaggedVariants,
   getDefaultMmeSubmission, getMmeResultsBySubmission, getMmeDefaultContactEmail, getIndividualPhenotypeGeneScores,
+  getCompletenessByFamilyGuid, getProjectAnalysisGroupCompleteness,
 } from './selectors'
 
 import { STATE_WITH_2_FAMILIES } from './fixtures'
@@ -217,4 +218,73 @@ test('getIndividualPhenotypeGeneScores', () => {
   })
 
   expect(getIndividualPhenotypeGeneScores({ ...STATE_WITH_2_FAMILIES, phenotypeGeneScoresByIndividual: null })).toEqual({})
+})
+
+const COMPLETENESS_STATE = {
+  ...STATE_WITH_2_FAMILIES,
+  familiesByGuid: {
+    ...STATE_WITH_2_FAMILIES.familiesByGuid,
+    F011652_1: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_1,
+      completeness: { score: 1, numIndividuals: 1, numNoFeatures: 1 },
+    },
+    F011652_2: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_2,
+      individualGuids: [],
+      completeness: { score: 30, numIndividuals: 3, numNoFeatures: 2 },
+    },
+  },
+  individualsByGuid: {
+    ...STATE_WITH_2_FAMILIES.individualsByGuid,
+    I021476_na19678_1: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid.I021476_na19678_1, completeness: { score: 100, missing: [] },
+    },
+    I021474_na19679_1: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid.I021474_na19679_1,
+      completeness: { score: 60, missing: [{ field: 'features', label: 'Observed features (HPO terms)' }] },
+    },
+  },
+}
+
+test('getCompletenessByFamilyGuid', () => {
+  expect(getCompletenessByFamilyGuid(STATE_WITH_2_FAMILIES)).toEqual({ F011652_1: null, F011652_2: null })
+
+  // loaded individuals take precedence over the roll-up loaded with the family
+  expect(getCompletenessByFamilyGuid(COMPLETENESS_STATE)).toEqual({
+    F011652_1: { score: 80, numIndividuals: 2, numNoFeatures: 1 },
+    F011652_2: { score: 30, numIndividuals: 3, numNoFeatures: 2 },
+  })
+})
+
+test('getProjectAnalysisGroupCompleteness', () => {
+  expect(getProjectAnalysisGroupCompleteness(STATE_WITH_2_FAMILIES, {})).toBeNull()
+
+  expect(getProjectAnalysisGroupCompleteness(COMPLETENESS_STATE, {})).toEqual(
+    { score: 50, numIndividuals: 5, numNoFeatures: 3 },
+  )
+  expect(getProjectAnalysisGroupCompleteness(COMPLETENESS_STATE, { analysisGroupGuid: 'AG0000183_test_group' })).toEqual(
+    { score: 80, numIndividuals: 2, numNoFeatures: 1 },
+  )
+})
+
+test('getVisibleFamiliesInSortedOrder by clinical data completeness', () => {
+  const sortedGuids = familiesSortDirection => getVisibleFamiliesInSortedOrder({
+    ...COMPLETENESS_STATE,
+    familyTableState: { familiesSortOrder: 'SORT_BY_CLINICAL_DATA_COMPLETENESS', familiesSortDirection },
+  }, {}).map(({ familyGuid }) => familyGuid)
+
+  expect(sortedGuids(1)).toEqual(['F011652_2', 'F011652_1'])
+  expect(sortedGuids(-1)).toEqual(['F011652_1', 'F011652_2'])
+})
+
+test('getVisibleFamilies filtered by clinical data completeness', () => {
+  const visibleGuids = filter => getVisibleFamilies({
+    ...COMPLETENESS_STATE,
+    familyTableFilterState: { R0237_1000_genomes_demo: { firstSample: [filter] } },
+  }, {}).map(({ familyGuid }) => familyGuid)
+
+  expect(visibleGuids('SHOW_CLINICAL_DATA_COMPLETE')).toEqual([])
+  expect(visibleGuids('SHOW_CLINICAL_DATA_INCOMPLETE')).toEqual(['F011652_1', 'F011652_2'])
+  expect(visibleGuids('SHOW_CLINICAL_DATA_UNDER_HALF')).toEqual(['F011652_2'])
+  expect(visibleGuids('SHOW_CLINICAL_DATA_NO_FEATURES')).toEqual(['F011652_1', 'F011652_2'])
 })

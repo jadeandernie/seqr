@@ -40,6 +40,7 @@ import {
 import { updateIndividuals, updateIndividualIGV } from '../../reducers'
 import { getCurrentProject, getParentOptionsByIndividual } from '../../selectors'
 
+import { IndividualCompletenessLabel } from '../ClinicalDataCompleteness'
 import CaseReviewStatusDropdown from './CaseReviewStatusDropdown'
 import CollapsableLayout from './CollapsableLayout'
 
@@ -595,6 +596,7 @@ class IndividualRow extends React.PureComponent {
             {`ADDED ${new Date(createdDate).toLocaleDateString().toUpperCase()}`}
           </Detail>
         </div>
+        <IndividualCompletenessLabel completeness={individual.completeness} />
         <EditIndividualButton
           initialValues={individual}
           project={project}

@@ -356,3 +356,37 @@ test('renders disorders and candidate genes item inputs when editing', () => {
   // candidateGenes has no existing values, so a blank searchable gene input is rendered
   expect(wrapper.find('ForwardRef(Field)[name="candidateGenes[0].gene"]').length).toBe(1)
 })
+
+test('shows the clinical data completeness of affected individuals and what is missing', () => {
+  const renderRow = individual => mount(
+    <Provider store={configureStore(STATE_WITH_2_FAMILIES)}>
+      <MemoryRouter>
+        <IndividualRow individual={individual} />
+      </MemoryRouter>
+    </Provider>,
+  )
+  const individual = STATE_WITH_2_FAMILIES.individualsByGuid.I021475_na19675_1
+
+  const wrapper = renderRow({
+    ...individual,
+    completeness: {
+      score: 62,
+      missing: [
+        { field: 'features', label: 'Observed features (HPO terms)', weight: 30, level: 'individual' },
+        { field: 'mondoId', label: 'Family MONDO disease ID', weight: 4, level: 'family' },
+      ],
+    },
+  })
+  const label = wrapper.find('IndividualCompletenessLabel')
+  expect(label.text()).toEqual('Clinical data 62% partly complete')
+  const popupContent = mount(label.find('Popup').prop('content'))
+  expect(popupContent.find('ListItem').map(item => item.text())).toEqual(
+    ['Observed features (HPO terms)', 'Family MONDO disease ID'],
+  )
+
+  // unaffected individuals are not scored
+  const unscoredWrapper = renderRow({ ...individual, completeness: null })
+  expect(unscoredWrapper.find('IndividualCompletenessLabel').isEmptyRender()).toBe(true)
+  expect(unscoredWrapper.text()).not.toContain('Clinical data')
+  expect(renderRow(individual).text()).not.toContain('Clinical data')
+})

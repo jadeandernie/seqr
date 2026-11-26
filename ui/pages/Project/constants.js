@@ -1,6 +1,7 @@
 /* eslint-disable no-multi-spaces */
 
 import { stripMarkdown } from 'shared/utils/stringUtils'
+import { COMPLETENESS_FAMILY_FILTERS, createCompletenessSortKeyGetter } from 'shared/utils/completeness'
 import {
   CATEGORY_FAMILY_FILTERS,
   ASSIGNED_TO_ME_FILTER,
@@ -307,6 +308,7 @@ export const PROJECT_CATEGORY_FAMILY_FILTERS = {
       name: 'Required Metadata Missing',
       createFilter: family => !familyHasRequiredMetadata(family),
     },
+    ...COMPLETENESS_FAMILY_FILTERS,
   ],
   [FAMILY_FIELD_SAVED_VARIANTS]: [MME_TAG_NAME, ANALYST_HIGH_PRIORITY_TAG].map(tagName => ({
     value: tagName,
@@ -348,6 +350,7 @@ const SORT_BY_DATA_FIRST_LOADED_DATE = 'DATA_FIRST_LOADED_DATE'
 const SORT_BY_REVIEW_STATUS_CHANGED_DATE = 'REVIEW_STATUS_CHANGED_DATE'
 const SORT_BY_ANALYSIS_STATUS = 'SORT_BY_ANALYSIS_STATUS'
 const SORT_BY_ANALYSED_DATE = 'SORT_BY_ANALYSED_DATE'
+const SORT_BY_CLINICAL_DATA_COMPLETENESS = 'SORT_BY_CLINICAL_DATA_COMPLETENESS'
 
 const FAMILY_ANALYSIS_STATUS_SORT_LOOKUP = ALL_FAMILY_ANALYSIS_STATUS_OPTIONS.reduce(
   (acc, { value }, i) => ({ ...acc, [value]: i.toString(36) }), {},
@@ -401,6 +404,11 @@ export const FAMILY_SORT_OPTIONS = [
         (acc, status) => (status > acc ? status : acc), '2000-01-01T01:00:00.000Z',
       ) : family.caseReviewStatusLastModified || '2000-01-01T01:00:00.000Z'
     },
+  },
+  {
+    value: SORT_BY_CLINICAL_DATA_COMPLETENESS,
+    name: 'Clinical Data Completeness',
+    createSortKeyGetter: createCompletenessSortKeyGetter,
   },
 ]
 

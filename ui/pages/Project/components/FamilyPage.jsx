@@ -22,8 +22,9 @@ import { HelpIcon, ButtonLink } from 'shared/components/StyledComponents'
 
 import { loadFamilyVariantSummary } from '../reducers'
 import {
-  getCurrentProject, getFamilyVariantSummaryLoading, getFamilyTagTypeCounts,
+  getCurrentProject, getFamilyVariantSummaryLoading, getFamilyTagTypeCounts, getCompletenessByFamilyGuid,
 } from '../selectors'
+import { FamilyCompletenessLabel } from './ClinicalDataCompleteness'
 import IndividualRow from './FamilyTable/IndividualRow'
 import CreateVariantButtons from './CreateVariantButton'
 import VariantTagTypeBar from './VariantTagTypeBar'
@@ -170,12 +171,23 @@ const mapDispatchToProps = {
 
 const ExpandedFamily = connect(mapExpandedStateToProps, mapDispatchToProps)(BaseExpandedFamily)
 
+const mapCompletenessStateToProps = (state, ownProps) => ({
+  completeness: getCompletenessByFamilyGuid(state)[ownProps.familyGuid],
+})
+
+const FamilyCompleteness = connect(mapCompletenessStateToProps)(FamilyCompletenessLabel)
+
 const BaseFamilyDetail = React.memo(({ familyGuid, family, compact, tableName, showVariantDetails, ...props }) => {
   const familyDetail = (
     <Family
       family={family}
       compact={compact}
-      rightContent={showVariantDetails ? <VariantDetail family={family} compact={compact} /> : <div />}
+      rightContent={
+        <div>
+          <FamilyCompleteness familyGuid={familyGuid} />
+          {showVariantDetails && <VariantDetail family={family} compact={compact} />}
+        </div>
+      }
       {...props}
     />
   )

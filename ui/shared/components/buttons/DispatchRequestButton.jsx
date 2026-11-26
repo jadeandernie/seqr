@@ -35,6 +35,10 @@ class DispatchRequestButton extends React.PureComponent {
     isConfirmDialogVisible: false,
   }
 
+  componentWillUnmount() {
+    this.unmounted = true
+  }
+
   handleButtonClick = (event) => {
     const { confirmDialog } = this.props
     event.preventDefault()
@@ -59,7 +63,9 @@ class DispatchRequestButton extends React.PureComponent {
 
   handleRequestSuccess = () => {
     const { onSuccess } = this.props
-    this.setState({ requestStatus: SUCCEEDED })
+    if (!this.unmounted) {
+      this.setState({ requestStatus: SUCCEEDED })
+    }
     if (onSuccess) {
       onSuccess()
     }
@@ -67,7 +73,7 @@ class DispatchRequestButton extends React.PureComponent {
 
   handleRequestError = (error) => {
     const { requestStatus } = this.state
-    if (requestStatus !== NONE) {
+    if (requestStatus !== NONE && !this.unmounted) {
       this.setState({
         requestStatus: ERROR,
         requestErrorMessage: (

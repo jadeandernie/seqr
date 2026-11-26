@@ -15,6 +15,7 @@ import {
   SAMPLE_TYPE_GENOME,
   SIMPLIFIED_SEX_LOOKUP,
 } from 'shared/utils/constants'
+import { isHemiXVariant, hasMitoContamination, isCommonLowHeteroplasmyCall } from 'shared/utils/artifactUtils'
 import BaseFieldView from '../view-fields/BaseFieldView'
 import PedigreeIcon from '../../icons/PedigreeIcon'
 import { VerticalSpacer } from '../../Spacers'
@@ -75,22 +76,7 @@ const AlleleContainer = styled(Header).attrs({ size: 'medium' })`
 
 const WarningIcon = props => <Icon name="warning sign" color="yellow" {...props} />
 
-const PAR_REGIONS = {
-  37: {
-    X: [[60001, 2699521], [154931044, 155260561]],
-    Y: [[10001, 2649521], [59034050, 59363567]],
-  },
-  38: {
-    X: [[10001, 2781480], [155701383, 156030896]],
-    Y: [[10001, 2781480], [56887903, 57217416]],
-  },
-}
-
 const SAMPLE_TYPE_DISPLAY_ORDER = [SAMPLE_TYPE_GENOME, SAMPLE_TYPE_EXOME]
-
-const isHemiXVariant =
-  (variant, individual) => SIMPLIFIED_SEX_LOOKUP[individual.sex] === 'M' && (variant.chrom === 'X' || variant.chrom === 'Y') &&
-  PAR_REGIONS[variant.genomeVersion][variant.chrom].every(region => variant.pos < region[0] || variant.pos > region[1])
 
 const missingParentVariant = variant => (parentGuid) => {
   const parentGenotype = variant.genotypes[parentGuid] || {}
@@ -272,11 +258,11 @@ const getWarningsForGenotype = (genotype, variant, individual, isHemiX, isCompou
     }
   }
 
-  if (genotype.contamination) {
+  if (hasMitoContamination(genotype)) {
     warnings.push(`Contamination (${genotype.contamination}) > 0`)
   }
 
-  if (variant.commonLowHeteroplasmy && genotype.hl > 0) {
+  if (isCommonLowHeteroplasmyCall(variant, genotype)) {
     warnings.push('Common low heteroplasmy')
   }
 

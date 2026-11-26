@@ -1452,6 +1452,13 @@ const BASE_VARIANT_SORT_FIELD = {
 }
 export const VARIANT_SORT_FIELD = { ...BASE_VARIANT_SORT_FIELD, options: VARIANT_SORT_OPTONS }
 export const VARIANT_SEARCH_SORT_FIELD = { ...BASE_VARIANT_SORT_FIELD, options: VARIANT_SEARCH_SORT_OPTONS }
+export const HIGH_QUALITY_FILTER = {
+  vcf_filter: 'pass',
+  min_gq: 20,
+  min_ab: 25,
+  min_qs: 100,
+}
+
 export const VARIANT_HIDE_EXCLUDED_FIELD = {
   name: 'hideExcluded',
   component: InlineToggle,

@@ -15,6 +15,7 @@ import {
   GROUPED_VEP_CONSEQUENCES,
   SPLICE_AI_FIELD,
   SCREEN_LABELS,
+  HIGH_QUALITY_FILTER,
 } from 'shared/utils/constants'
 import { snakecaseToTitlecase } from 'shared/utils/stringUtils'
 
@@ -418,12 +419,7 @@ export const QUALITY_FILTER_OPTIONS = [
   ALL_QUALITY_FILTER,
   {
     text: 'High Quality',
-    value: {
-      vcf_filter: 'pass',
-      min_gq: 20,
-      min_ab: 25,
-      min_qs: 100,
-    },
+    value: HIGH_QUALITY_FILTER,
   },
   {
     text: 'All Passing Variants',

@@ -51,6 +51,7 @@ const TAG_OPTIONS = [
   'Validated',
   'Validation did not confirm',
   'Confident AR one hit',
+  'Hypomorphic',
   'Analyst high priority',
   'AIP',
   'seqr Prioritized',

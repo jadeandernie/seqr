@@ -310,6 +310,22 @@
 },
 {
     "model": "seqr.varianttagtype",
+    "pk": 350001,
+    "fields": {
+        "guid": "VTT_hypomorphic",
+        "created_date": "2026-11-26T00:00:00.000Z",
+        "created_by": null,
+        "last_modified_date": null,
+        "project": null,
+        "name": "Hypomorphic",
+        "category": "Collaboration",
+        "description": "To mark a hypomorphic variant, which causes a partial loss of gene function",
+        "color": "#a68b2c",
+        "order": 15.3
+    }
+},
+{
+    "model": "seqr.varianttagtype",
     "pk": 324531,
     "fields": {
         "guid": "VTT_multi_nucleotide_variant",

@@ -11,6 +11,3 @@ alias more='less'
 export TERM=xterm
 
 resize
-
-
-

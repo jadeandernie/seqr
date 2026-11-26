@@ -34,6 +34,9 @@ logger = SeqrLogger(__name__)
 BATCH_SIZE = 10000
 MAX_GENES_FOR_FILTER = 10000
 MAX_NO_LOCATION_COMP_HET_FAMILIES = 100
+# Above this many families, sample metadata is looked up from dictionaries instead of being written into the query,
+# which otherwise grows by ~50 bytes per sample and exceeds the default ClickHouse max_query_size at ~1,600 trios
+MAX_INLINE_SAMPLE_FAMILIES = 500
 MIN_MULTI_FAMILY_SEQR_AC = 5000
 
 TRANSCRIPT_CONSEQUENCES_FIELD = 'sortedTranscriptConsequences'
@@ -181,6 +184,7 @@ def _parse_dataset_type_query(genome_version, dataset_type, families, sample_dat
             annotate_affected_males=annotate_affected_males,
             has_location_filter=any(search_kwargs.get(field) for field in ['genes', 'intervals', 'variant_ids']),
             allow_no_samples=allow_no_samples,
+            limit_inline_samples=True,
         )
         sample_data_by_dataset_type[dataset_type] = sample_data
 
@@ -269,6 +273,7 @@ def _get_multi_data_type_comp_het_results(genome_version, all_families, sample_d
             Dataset.DATASET_TYPE_VARIANT_CALLS,
             inheritance_mode=COMPOUND_HET,
             inheritance_filter=search_kwargs.get('inheritance_filter'),
+            limit_inline_samples=True,
         )
     snv_indel_sample_data = sample_data_by_dataset_type[Dataset.DATASET_TYPE_VARIANT_CALLS]
     if not (snv_indel_sample_data or {}).get('num_families'):
@@ -284,6 +289,7 @@ def _get_multi_data_type_comp_het_results(genome_version, all_families, sample_d
                 sv_dataset_type,
                 inheritance_mode=COMPOUND_HET,
                 inheritance_filter=search_kwargs.get('inheritance_filter'),
+                limit_inline_samples=True,
             )
         sv_sample_data = sample_data_by_dataset_type[sv_dataset_type] or {}
         sv_families = set(sv_sample_data.get('sample_type_families', {}).get(sample_type, []))
@@ -602,8 +608,8 @@ def _get_valid_samples(families, dataset_type, sample_type, allow_no_samples):
     return individuals
 
 
-def _get_sample_metadata(individuals, affected_family_only, annotate_affected_males):
-    skip_individual_guid = individuals.values('family__project_id').distinct().count() > 1
+def _get_sample_metadata(individuals, affected_family_only, annotate_affected_males, skip_individual_guid):
+    skip_individual_guid = skip_individual_guid or individuals.values('family__project_id').distinct().count() > 1
     family_array_kwargs = {'distinct': True}
     if affected_family_only:
         family_array_kwargs['filter'] = Q(affected=Individual.AFFECTED_STATUS_AFFECTED)
@@ -628,7 +634,7 @@ def _get_sample_metadata(individuals, affected_family_only, annotate_affected_ma
     return individuals.aggregate(**annotations)
 
 
-def _get_sample_data(families, dataset_type, annotate_affected_males=False, allow_no_samples=False, inheritance_mode=None, inheritance_filter=None, has_location_filter=False):
+def _get_sample_data(families, dataset_type, annotate_affected_males=False, allow_no_samples=False, inheritance_mode=None, inheritance_filter=None, has_location_filter=False, limit_inline_samples=False):
     sample_type = None
     if dataset_type.startswith(Dataset.DATASET_TYPE_SV_CALLS):
         dataset_type, sample_type = dataset_type.split('_')
@@ -638,7 +644,11 @@ def _get_sample_data(families, dataset_type, annotate_affected_males=False, allo
 
     individual_affected_status = (inheritance_filter or {}).get('affected')
     affected_family_only = inheritance_mode and not individual_affected_status
-    sample_data = _get_sample_metadata(individuals, affected_family_only, annotate_affected_males)
+    # Filters on specific individuals are only applied when sample metadata is included in the query
+    has_individual_filter = bool(individual_affected_status or (inheritance_filter or {}).get('genotype'))
+    skip_individual_guid = limit_inline_samples and not has_individual_filter and \
+        families.count() > MAX_INLINE_SAMPLE_FAMILIES
+    sample_data = _get_sample_metadata(individuals, affected_family_only, annotate_affected_males, skip_individual_guid)
 
     family_guids = set(sample_data.pop('family_guids'))
     if not has_location_filter:

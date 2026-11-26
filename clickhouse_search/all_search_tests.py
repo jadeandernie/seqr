@@ -26,6 +26,7 @@ from clickhouse_search.models.reference_data_models import ClinvarMvSnvIndel, Cl
     Absplice2Dict, PromoterAIMv, PromoterAIDict, PextSnvIndelMv, PextSnvIndelDict, PextMitoMv, PextMitoDict, AlphagenomeMv, \
     AlphagenomeDict
 from clickhouse_search.models.search_models import EntriesSnvIndel, VariantsSnvIndel, EntriesGatkSv, EntriesGcnv
+from clickhouse_search.search import _get_sample_data, MAX_INLINE_SAMPLE_FAMILIES
 from clickhouse_search.test_utils import VARIANT1, VARIANT2, VARIANT3, VARIANT4, CACHED_CONSEQUENCES_BY_KEY, \
     VARIANT_ID_SEARCH, VARIANT_IDS, LOCATION_SEARCH, GENE_IDS, SELECTED_TRANSCRIPT_MULTI_FAMILY_VARIANT, \
     SELECTED_ANNOTATION_TRANSCRIPT_VARIANT_4, SELECTED_ANNOTATION_TRANSCRIPT_VARIANT_3, COMP_HET_ALL_PASS_FILTERS, \
@@ -48,6 +49,9 @@ from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, GENE_VARIAN
 from seqr.views.apis.variant_search_api import query_variants_handler, get_variant_gene_breakdown, export_variants_handler, \
     query_single_variant_handler, variant_lookup_handler
 
+
+# ClickHouse rejects queries longer than max_query_size, which defaults to 256 KiB
+DEFAULT_MAX_QUERY_SIZE = 262144
 
 SEARCH_RESPONSE_KEYS = {
     'genesById', 'locusListsByGuid', 'mmeSubmissionsByGuid', 'phenotypeGeneScores', 'rnaSeqData', 'savedVariantsByGuid',
@@ -2688,6 +2692,85 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         self._assert_expected_search(
             [VARIANT2, VARIANT1, SV_VARIANT1, GCNV_VARIANT1, MITO_VARIANT1], search_hash=search_hash, sort='cadd',
         )
+
+    def _test_large_project_search(self, search_test):
+        # Searches of more than one family use the sample lookup for large projects and return identical results
+        with mock.patch('clickhouse_search.search.MAX_INLINE_SAMPLE_FAMILIES', 1):
+            search_test()
+
+    def test_large_project_search(self):
+        self._test_large_project_search(self.test_single_project_search)
+
+    def test_large_project_inheritance_filter(self):
+        self._test_large_project_search(self.test_inheritance_filter)
+
+    def test_large_project_quality_filter(self):
+        self._test_large_project_search(self.test_quality_filter)
+
+    def test_large_project_both_sample_types_search(self):
+        self._test_large_project_search(self.test_both_sample_types_search)
+
+    @mock.patch('clickhouse_search.search.MAX_INLINE_SAMPLE_FAMILIES', 2)
+    def test_large_project_sample_data(self):
+        families = Family.objects.filter(guid__in=DEFAULT_PROJECT_FAMILIES[0]['familyGuids'])
+        sample_data = _get_sample_data(families, 'SNV_INDEL', limit_inline_samples=True, annotate_affected_males=True)
+        self.assertDictEqual(sample_data, {
+            'project_guids': ['R0001_1kg'], 'num_families': 3, 'num_unaffected': 3, 'affected_male_family_guids': ['F000003_3'],
+            'sample_type_families': {'WES': ['F000002_2', 'F000003_3', 'F000005_5']},
+        })
+
+        # Sample metadata is included in the query for smaller searches and when required to filter or map individuals
+        self.assertEqual(len(_get_sample_data(families, 'SNV_INDEL')['samples']), 5)
+        self.assertEqual(len(_get_sample_data(
+            families, 'SNV_INDEL', limit_inline_samples=True, inheritance_filter={'affected': {'I000004_hg00731': 'N'}},
+        )['samples']), 5)
+        self.assertEqual(len(_get_sample_data(
+            families, 'SNV_INDEL', limit_inline_samples=True, inheritance_filter={'genotype': {'I000004_hg00731': 'ref_ref'}},
+        )['samples']), 5)
+        self.assertEqual(len(_get_sample_data(
+            families.exclude(guid='F000005_5'), 'SNV_INDEL', limit_inline_samples=True,
+        )['samples']), 4)
+
+    @staticmethod
+    def _search_query_size(num_families, inline_samples, **search):
+        search = {'freqs': {'callset': {'ac': 1000}}, **search}
+        family_guids = [f'F{i:07d}_fam{i:05d}' for i in range(num_families)]
+        sample_data = {
+            'project_guids': ['R0001_1kg'], 'num_families': num_families, 'sample_type_families': {'WGS': family_guids},
+        }
+        if inline_samples:
+            sample_data['samples'] = [{
+                'affected': 'N' if i else 'A', 'sex': 'M' if i % 2 else 'F', 'sample_type': 'WGS', 'family_guid': family_guid,
+                'sample_id': f'{family_guid[1:8]}_{i:02d}', 'individual_guid': f'I{family_guid[1:8]}_{family_guid[1:8]}_{i:02d}',
+            } for family_guid in family_guids for i in range(3)]
+        else:
+            sample_data['num_unaffected'] = 2 * num_families
+        entries = EntriesSnvIndel.objects.filter_locus(**search).search(sample_data, **search)
+        results = VariantsSnvIndel.objects.subquery_join(entries).search(**search).result_values()
+        sql, params = results.query.get_compiler(using='clickhouse').as_sql()
+        return len((sql % tuple(repr(param) for param in params)).encode())
+
+    def test_large_project_query_size(self):
+        # Including sample metadata for trios adds ~160 bytes per family, compared to ~20 bytes for the sample lookup
+        self.assertLess(self._search_query_size(1000, inline_samples=True), DEFAULT_MAX_QUERY_SIZE)
+        self.assertGreater(self._search_query_size(2000, inline_samples=True), DEFAULT_MAX_QUERY_SIZE)
+        self.assertGreater(
+            self._search_query_size(1500, inline_samples=True, inheritance_mode='x_linked_recessive'), DEFAULT_MAX_QUERY_SIZE,
+        )
+        self.assertLess(self._search_query_size(2000, inline_samples=False), DEFAULT_MAX_QUERY_SIZE / 5)
+        self.assertLess(
+            self._search_query_size(2000, inline_samples=False, inheritance_mode='x_linked_recessive'), DEFAULT_MAX_QUERY_SIZE / 5,
+        )
+        self.assertLess(self._search_query_size(10000, inline_samples=False), DEFAULT_MAX_QUERY_SIZE)
+
+        # The family filter alone exceeds the default limit for the largest projects
+        self.assertGreater(self._search_query_size(15000, inline_samples=False), DEFAULT_MAX_QUERY_SIZE)
+
+        # Compound het searches include the sample metadata twice
+        self.assertLess(2 * self._search_query_size(
+            MAX_INLINE_SAMPLE_FAMILIES, inline_samples=True, inheritance_mode='x_linked_recessive',
+        ), DEFAULT_MAX_QUERY_SIZE)
+
 
 class ClickhouseDeleteDataTests(ClickhouseSearchTestCase):
     databases = '__all__'

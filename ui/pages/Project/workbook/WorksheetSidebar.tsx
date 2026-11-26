@@ -2,7 +2,8 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import styled from 'styled-components'
 
-import { getQueryStatus, getRollUpStatus, getWorkbookPath } from './selectors'
+import NewResultsBadge from './NewResultsBadge'
+import { getNumUnreviewed, getQueryStatus, getRollUpStatus, getWorkbookPath } from './selectors'
 import StatusIcon from './StatusIcon'
 import {
   ByGuid, TargetDisplay, Workbook, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
@@ -78,6 +79,7 @@ const WorksheetSidebar = React.memo((
 ) => {
   const targetGuid = selectedTarget?.workbookTargetGuid
   const statusLabel = selectedTarget ? `Status for ${selectedTarget.name}` : 'Status'
+  const targetContext = `for ${selectedTarget?.name}`
   const getStatus = ({ worksheetQueryGuid }: WorksheetQuery) => getQueryStatus(
     resultsByQueryTarget, worksheetQueryGuid, targetGuid,
   )
@@ -90,6 +92,10 @@ const WorksheetSidebar = React.memo((
             {workbook.canEdit && <AddQueryButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <UpdateWorksheetButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <DeleteWorksheetButton workbook={workbook} worksheet={worksheet} />}
+            <NewResultsBadge
+              count={getNumUnreviewed(resultsByQueryTarget, worksheet.queries, targetGuid)}
+              context={`in this worksheet ${targetContext}`}
+            />
             <StatusIcon
               status={getRollUpStatus(worksheet.queries.map(getStatus))}
               label={`Worksheet ${statusLabel.toLowerCase()}`}
@@ -112,6 +118,10 @@ const WorksheetSidebar = React.memo((
                       </RowLabel>
                       {workbook.canEdit && <RenameQueryButton workbook={workbook} query={query} />}
                       {workbook.canEdit && <DeleteQueryButton workbook={workbook} query={query} />}
+                      <NewResultsBadge
+                        count={getNumUnreviewed(resultsByQueryTarget, [query], targetGuid)}
+                        context={`of this query ${targetContext}`}
+                      />
                       <StatusIcon status={getStatus(query)} label={statusLabel} />
                     </QueryRow>
                   </li>

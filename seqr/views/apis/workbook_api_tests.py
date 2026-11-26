@@ -5,12 +5,16 @@ import mock
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db import connection
 from django.db.utils import IntegrityError
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls.base import reverse
 
-from seqr.models import AnalysisGroup, Family, Individual, Project, VariantSearch, VariantSearchResults, Workbook, \
-    WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult
+from clickhouse_search.search import InvalidSearchException
+from seqr.models import AnalysisGroup, Family, Individual, Project, SavedVariant, VariantSearch, VariantSearchResults, \
+    VariantTag, VariantTagType, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult, \
+    WorksheetQueryRun
 from seqr.views.apis.analysis_group_api import delete_analysis_group_handler
 from seqr.views.apis.variant_search_api import delete_saved_search_handler, get_variant_gene_breakdown, \
     query_variants_handler
@@ -20,7 +24,7 @@ from seqr.views.apis.workbook_api import project_workbooks_handler, create_workb
     reorder_worksheets_handler, update_worksheet_handler, delete_worksheet_handler, create_worksheet_query_handler, \
     reorder_worksheet_queries_handler, update_worksheet_query_handler, delete_worksheet_query_handler, \
     update_worksheet_query_result_handler, run_worksheet_query_handler, worksheet_query_group_summary_handler, \
-    _get_search_hash
+    mark_worksheet_query_result_reviewed_handler, worksheet_query_result_history_handler, _get_search_hash
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase
 
 PROJECT_GUID = 'R0001_1kg'
@@ -83,7 +87,8 @@ QUERY_RESULT_JSON = {
     'worksheetQueryResultGuid': QUERY_RESULT_GUID, 'worksheetQueryGuid': RESTRICTIVE_QUERY_GUID,
     'workbookTargetGuid': FAMILY_TARGET_GUID, 'status': 'I', 'statusLastModifiedDate': '2026-11-20T10:04:00Z',
     'statusLastModifiedBy': MANAGER_NAME, 'note': 'Reviewing candidates', 'searchHash': None, 'lastRunDate': None,
-    'lastRunBy': None, 'numResults': None, 'lastModifiedDate': '2026-11-20T10:04:00Z',
+    'lastRunBy': None, 'numResults': None, 'lastModifiedDate': '2026-11-20T10:04:00Z', 'hasUnreviewed': False,
+    'numUnreviewed': 0, 'lastRun': None,
 }
 WORKBOOK_DETAIL_JSON = {
     'workbooksByGuid': {WORKBOOK_GUID: WORKBOOK_JSON},
@@ -99,6 +104,33 @@ WORKBOOK_DETAIL_JSON = {
 }
 
 SEARCH_HASH_REGEX = '^WB[0-9a-f]{48}$'
+
+FAMILY_GUID = 'F000001_1'
+SNV_VARIANT = {'variantId': '1-100-A-T', 'key': 11, 'familyGuids': [FAMILY_GUID], 'transcripts': {'ENSG00000177000': []}}
+PAIR_VARIANT_1 = {'variantId': '1-200-C-G', 'key': 12, 'familyGuids': [FAMILY_GUID], 'transcripts': {'ENSG00000097046': []}}
+PAIR_VARIANT_2 = {'variantId': '1-300-G-A', 'key': 13, 'familyGuids': [FAMILY_GUID], 'transcripts': {'ENSG00000097046': []}}
+PAIR_VARIANT_3 = {'variantId': '1-400-G-A', 'key': 14, 'familyGuids': [FAMILY_GUID], 'transcripts': {}}
+MITO_VARIANT = {'variantId': 'M-500-T-C', 'key': 11, 'familyGuids': [FAMILY_GUID], 'mitomapPathogenic': None, 'transcripts': {}}
+SV_VARIANT = {
+    'variantId': 'DEL:chr1:600-700', 'key': 11, 'familyGuids': [FAMILY_GUID], 'endChrom': '1',
+    'sortedTranscriptConsequences': [{'geneId': 'ENSG00000186092'}],
+}
+ADDED_VARIANT = {'variantId': '1-800-A-T', 'key': 15, 'familyGuids': [FAMILY_GUID], 'transcripts': {}}
+SNV_KEY = [FAMILY_GUID, 'SNV_INDEL', '1-100-A-T']
+PAIR_KEY = [FAMILY_GUID, 'SNV_INDEL', '1-200-C-G', 'SNV_INDEL', '1-300-G-A']
+NEW_PAIR_KEY = [FAMILY_GUID, 'SNV_INDEL', '1-300-G-A', 'SNV_INDEL', '1-400-G-A']
+SV_PAIR_KEY = [FAMILY_GUID, 'SNV_INDEL', '1-300-G-A', 'SV_WGS', 'DEL:chr1:600-700']
+MITO_KEY = [FAMILY_GUID, 'MITO', 'M-500-T-C']
+SV_KEY = [FAMILY_GUID, 'SV_WGS', 'DEL:chr1:600-700']
+ADDED_KEY = [FAMILY_GUID, 'SNV_INDEL', '1-800-A-T']
+INITIAL_RESULTS = [SNV_VARIANT, [PAIR_VARIANT_1, PAIR_VARIANT_2]]
+# The same results after a reload: other ClickHouse keys, another order of results and another order in the pair
+RELOADED_INITIAL_RESULTS = [[{**PAIR_VARIANT_2, 'key': 3}, {**PAIR_VARIANT_1, 'key': 2}], {**SNV_VARIANT, 'key': 1}]
+INITIAL_KEYS = [SNV_KEY, PAIR_KEY]
+CHANGED_RESULTS = [
+    SNV_VARIANT, MITO_VARIANT, SV_VARIANT, [PAIR_VARIANT_3, PAIR_VARIANT_2], [SV_VARIANT, PAIR_VARIANT_2],
+]
+CHANGED_KEYS = [MITO_KEY, SNV_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, SV_KEY]
 
 MTHFR_GENE_ID = 'ENSG00000177000'
 CDC7_GENE_ID = 'ENSG00000097046'
@@ -915,7 +947,8 @@ class WorkbookAPITest(object):
             'worksheetQueryResultGuid': query_result_guid, 'worksheetQueryGuid': RECESSIVE_QUERY_GUID,
             'workbookTargetGuid': GROUP_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': 'A note', 'searchHash': None, 'lastRunDate': None, 'lastRunBy': None,
-            'numResults': None, 'lastModifiedDate': mock.ANY,
+            'numResults': None, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False, 'numUnreviewed': 0,
+            'lastRun': None,
         }})
         self.assertEqual(WorksheetQueryResult.objects.get(guid=query_result_guid).created_by, self.collaborator_user)
         self._assert_workbook_counts(query_results=2)
@@ -978,7 +1011,9 @@ class WorkbookAPITest(object):
         search_url = reverse(query_variants_handler, args=[search_hash])
         with mock.patch('seqr.views.apis.variant_search_api._get_variants_with_cache') as mock_get_variants, \
                 mock.patch('seqr.views.apis.variant_search_api._process_variants') as mock_process_variants:
-            mock_get_variants.return_value = [{}, {}, {}]
+            mock_get_variants.return_value = [
+                {'variantId': variant_id, 'familyGuids': ['F000001_1']} for variant_id in ['1-1-A-T', '1-2-A-T', '1-3-A-T']
+            ]
             mock_process_variants.return_value = {}
             response = self.client.get(search_url)
         self.assertEqual(response.status_code, 200)
@@ -996,7 +1031,7 @@ class WorkbookAPITest(object):
         response = self._post(url)
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {'searchHash': search_hash, 'worksheetQueryResultsByGuid': {QUERY_RESULT_GUID: {
-            **ran_query_result_json, 'lastRunBy': MANAGER_NAME, 'numResults': 3,
+            **ran_query_result_json, 'lastRunBy': MANAGER_NAME, 'numResults': 3, 'lastRun': mock.ANY,
         }}})
         self.assertNotEqual(response.json()['worksheetQueryResultsByGuid'][QUERY_RESULT_GUID]['lastRunDate'], last_run_date)
         self.assertEqual(VariantSearchResults.objects.filter(search_hash__startswith='WB').count(), 1)
@@ -1018,7 +1053,8 @@ class WorkbookAPITest(object):
             'worksheetQueryResultGuid': query_result_guid, 'worksheetQueryGuid': RESTRICTIVE_QUERY_GUID,
             'workbookTargetGuid': GROUP_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': None, 'searchHash': group_search_hash, 'lastRunDate': mock.ANY,
-            'lastRunBy': MANAGER_NAME, 'numResults': None, 'lastModifiedDate': mock.ANY,
+            'lastRunBy': MANAGER_NAME, 'numResults': None, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False,
+            'numUnreviewed': 0, 'lastRun': None,
         }
         self.assertDictEqual(response_json['worksheetQueryResultsByGuid'], {query_result_guid: group_query_result_json})
         self.assertIsNotNone(response_json['worksheetQueryResultsByGuid'][query_result_guid]['lastRunDate'])
@@ -1258,7 +1294,8 @@ class WorkbookAPITest(object):
             'worksheetQueryResultGuid': query_result_guid, 'worksheetQueryGuid': RECESSIVE_QUERY_GUID,
             'workbookTargetGuid': FAMILY_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': None, 'searchHash': None, 'lastRunDate': last_run_date,
-            'lastRunBy': MANAGER_NAME, 'numResults': 4, 'lastModifiedDate': mock.ANY,
+            'lastRunBy': MANAGER_NAME, 'numResults': 4, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False,
+            'numUnreviewed': 0, 'lastRun': None,
         })
 
         response = self._post(url)
@@ -1272,6 +1309,336 @@ class WorkbookAPITest(object):
         self.assertIsNone(results_model.variant_search.name)
         self.assertDictEqual(results_model.variant_search.search, RECESSIVE_SEARCH)
         self._assert_workbook_counts(query_results=2)
+
+
+    def _load_search_results(self, search_hash, results=None, error=None, page=None):
+        url = reverse(query_variants_handler, args=[search_hash])
+        with mock.patch('seqr.views.apis.variant_search_api._get_variants_with_cache') as mock_get_variants, \
+                mock.patch('seqr.views.apis.variant_search_api._process_variants') as mock_process_variants:
+            mock_get_variants.return_value = results
+            mock_get_variants.side_effect = error
+            mock_process_variants.return_value = {}
+            response = self.client.get(f'{url}?page={page}' if page else url)
+        self.assertEqual(response.status_code, 400 if error else 200)
+        return response
+
+    def _assert_runs(self, cell, expected_runs):
+        runs = WorksheetQueryRun.objects.filter(cell=cell).order_by('id').values(
+            'status', 'num_results', 'result_keys', 'new_keys', 'removed_keys', 'num_new', 'num_removed', 'error',
+            'trigger', 'created_by__username')
+        self.assertListEqual(list(runs), [{
+            'status': 'C', 'num_results': None, 'result_keys': None, 'new_keys': [], 'removed_keys': [], 'num_new': 0,
+            'num_removed': 0, 'error': None, 'trigger': 'M', 'created_by__username': 'test_user_collaborator', **run,
+        } for run in expected_runs])
+
+    def _assert_review(self, cell, has_unreviewed, num_unreviewed=None, stored_has_unreviewed=None):
+        cell.refresh_from_db()
+        self.assertEqual(cell.has_unreviewed, has_unreviewed if stored_has_unreviewed is None else stored_has_unreviewed)
+        response = self.client.get(reverse(workbook_detail_handler, args=[WORKBOOK_GUID]))
+        self.assertEqual(response.status_code, 200)
+        cell_json = response.json()['worksheetQueryResultsByGuid'][cell.guid]
+        self.assertEqual(cell_json['hasUnreviewed'], has_unreviewed)
+        self.assertEqual(cell_json['numUnreviewed'], num_unreviewed or 0)
+        return cell_json
+
+    def _tag_excluded(self, variant_id, family_guid=FAMILY_GUID):
+        saved_variant = SavedVariant.objects.create(
+            variant_id=variant_id, family=Family.objects.get(guid=family_guid), xpos=1000000100, ref='A', alt='T')
+        tag = VariantTag.objects.create(variant_tag_type=VariantTagType.objects.get(name='Excluded'), metadata='Benign')
+        tag.saved_variants.add(saved_variant)
+        return saved_variant
+
+    def test_worksheet_query_run_history(self):
+        cell_args = [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID]
+        run_url = reverse(run_worksheet_query_handler, args=cell_args)
+        history_url = reverse(worksheet_query_result_history_handler, args=cell_args)
+        review_url = reverse(mark_worksheet_query_result_reviewed_handler, args=cell_args)
+        self.check_collaborator_login(history_url)
+        cell = WorksheetQueryResult.objects.get(guid=QUERY_RESULT_GUID)
+
+        # A cell that was never run has no history and nothing to review
+        with NO_FAMILY_ACCESS_PATCH:
+            self.assertEqual(self.client.get(history_url).status_code, 403)
+        empty_history = {
+            'runs': [], 'totalRuns': 0, 'unreviewedResults': [], 'totalUnreviewedResults': 0, 'genesById': {},
+        }
+        response = self.client.get(history_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {
+            **empty_history, 'worksheetQueryResultsByGuid': {QUERY_RESULT_GUID: QUERY_RESULT_JSON},
+        })
+        no_cell_args = [WORKBOOK_GUID, RECESSIVE_QUERY_GUID, FAMILY_TARGET_GUID]
+        response = self.client.get(reverse(worksheet_query_result_history_handler, args=no_cell_args))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {**empty_history, 'worksheetQueryResultsByGuid': {}})
+        no_results_error = 'This query has no results for 1 to mark as reviewed'
+        self._assert_no_family_access(review_url)
+        self._assert_error(self._post(review_url), no_results_error)
+        self._assert_error(
+            self._post(reverse(mark_worksheet_query_result_reviewed_handler, args=no_cell_args)), no_results_error)
+
+        # Running a cell records nothing until its results are loaded. The first results are the baseline for
+        # later runs and do not alert
+        response = self._post(run_url)
+        self.assertEqual(response.status_code, 200)
+        search_hash = response.json()['searchHash']
+        last_modified_date = response.json()['worksheetQueryResultsByGuid'][QUERY_RESULT_GUID]['lastModifiedDate']
+        self._assert_runs(cell, [])
+        self._load_search_results(search_hash, INITIAL_RESULTS)
+        initial_run = {'num_results': 2, 'result_keys': INITIAL_KEYS}
+        self._assert_runs(cell, [initial_run])
+        cell_json = self._assert_review(cell, False)
+        self.assertEqual(cell_json['numResults'], 2)
+        self.assertDictEqual(cell_json['lastRun'], {
+            'runId': mock.ANY, 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'trigger': 'M', 'status': 'C',
+            'error': None, 'numResults': 2, 'numNew': 0, 'numRemoved': 0, 'isUnchanged': False,
+        })
+        self.assertListEqual(cell.reviewed_keys, INITIAL_KEYS)
+        self.assertEqual(cell_json['lastModifiedDate'], last_modified_date)
+
+        # Loading other pages of the same results or the same results after a reload records nothing
+        self._load_search_results(search_hash, INITIAL_RESULTS, page=2)
+        self._load_search_results(search_hash, RELOADED_INITIAL_RESULTS)
+        self._assert_runs(cell, [initial_run])
+
+        # Refreshing a cell with unchanged results is recorded once, without keys
+        self.assertEqual(self._post(run_url).status_code, 200)
+        self._load_search_results(search_hash, RELOADED_INITIAL_RESULTS)
+        self._load_search_results(search_hash, INITIAL_RESULTS)
+        unchanged_run = {'num_results': 2}
+        self._assert_runs(cell, [initial_run, unchanged_run])
+        cell_json = self._assert_review(cell, False)
+        self.assertTrue(cell_json['lastRun']['isUnchanged'])
+
+        # Changed results are recorded when they are loaded, also when the cell was not refreshed by a user
+        self._load_search_results(search_hash, CHANGED_RESULTS)
+        changed_run = {
+            'num_results': 5, 'result_keys': CHANGED_KEYS, 'new_keys': [MITO_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, SV_KEY],
+            'removed_keys': [PAIR_KEY], 'num_new': 4, 'num_removed': 1,
+        }
+        runs = [initial_run, unchanged_run, changed_run]
+        self._assert_runs(cell, runs)
+        cell_json = self._assert_review(cell, True, num_unreviewed=4)
+        self.assertEqual(cell_json['numResults'], 5)
+        self.assertDictEqual(cell_json['lastRun'], {
+            'runId': mock.ANY, 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'trigger': 'M', 'status': 'C',
+            'error': None, 'numResults': 5, 'numNew': 4, 'numRemoved': 1, 'isUnchanged': False,
+        })
+        self.assertListEqual(cell.reviewed_keys, INITIAL_KEYS)
+        self._load_search_results(search_hash, CHANGED_RESULTS)
+        self._assert_runs(cell, runs)
+
+        # Variants tagged as excluded for the family never alert, a pair is excluded when either variant is
+        other_family_variant = self._tag_excluded('M-500-T-C', family_guid='F000002_2')
+        self._assert_review(cell, True, num_unreviewed=4)
+        mito_variant = self._tag_excluded('M-500-T-C')
+        self._assert_review(cell, True, num_unreviewed=3)
+        pair_variant = self._tag_excluded('1-400-G-A')
+        self._assert_review(cell, True, num_unreviewed=2)
+        sv_variant = self._tag_excluded('DEL:chr1:600-700')
+        self._assert_review(cell, False, stored_has_unreviewed=True)
+        response = self.client.get(history_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(response.json()['unreviewedResults'], [])
+        sv_variant.delete()
+        cell_json = self._assert_review(cell, True, num_unreviewed=2)
+
+        # The history has the newest runs first, with the genes of unreviewed results when the results are stored
+        with mock.patch('seqr.views.apis.variant_search_api.safe_redis_get_wildcard_json') as mock_get_cached_results:
+            mock_get_cached_results.return_value = CHANGED_RESULTS
+            response = self.client.get(history_url)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {
+            'worksheetQueryResultsByGuid', 'runs', 'totalRuns', 'unreviewedResults', 'totalUnreviewedResults', 'genesById',
+        })
+        self.assertDictEqual(response_json['worksheetQueryResultsByGuid'], {QUERY_RESULT_GUID: cell_json})
+        run_json = {
+            'runId': mock.ANY, 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'trigger': 'M', 'status': 'C',
+            'error': None, 'numResults': 2, 'numNew': 0, 'numRemoved': 0, 'isUnchanged': False,
+        }
+        self.assertListEqual(response_json['runs'], [
+            {**run_json, 'numResults': 5, 'numNew': 4, 'numRemoved': 1}, {**run_json, 'isUnchanged': True}, run_json,
+        ])
+        run_ids = [run['runId'] for run in response_json['runs']]
+        self.assertListEqual(run_ids, sorted(run_ids, reverse=True))
+        self.assertEqual(response_json['totalRuns'], 3)
+        self.assertListEqual(response_json['unreviewedResults'], [
+            {'familyGuid': FAMILY_GUID, 'variantIds': ['1-300-G-A', 'DEL:chr1:600-700'], 'geneIds': [CDC7_GENE_ID, OR4F5_GENE_ID]},
+            {'familyGuid': FAMILY_GUID, 'variantIds': ['DEL:chr1:600-700'], 'geneIds': [OR4F5_GENE_ID]},
+        ])
+        self.assertEqual(response_json['totalUnreviewedResults'], 2)
+        self.assertSetEqual(set(response_json['genesById'].keys()), {CDC7_GENE_ID, OR4F5_GENE_ID})
+
+        # The results are listed without genes when they are no longer stored, and the history is bounded
+        with mock.patch('seqr.views.apis.variant_search_api.safe_redis_get_wildcard_json') as mock_get_cached_results, \
+                mock.patch('seqr.views.apis.workbook_api.MAX_HISTORY_RUNS', 2), \
+                mock.patch('seqr.views.apis.workbook_api.MAX_UNREVIEWED_RESULTS', 1):
+            mock_get_cached_results.return_value = None
+            response = self.client.get(history_url)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertListEqual([run['runId'] for run in response_json['runs']], run_ids[:2])
+        self.assertEqual(response_json['totalRuns'], 3)
+        self.assertListEqual(response_json['unreviewedResults'], [
+            {'familyGuid': FAMILY_GUID, 'variantIds': ['1-300-G-A', 'DEL:chr1:600-700'], 'geneIds': []},
+        ])
+        self.assertEqual(response_json['totalUnreviewedResults'], 2)
+        self.assertDictEqual(response_json['genesById'], {})
+        for saved_variant in [other_family_variant, mito_variant, pair_variant]:
+            saved_variant.delete()
+        self._assert_review(cell, True, num_unreviewed=4)
+
+        # A failed search is recorded once per refresh, is not diffed and does not change what is unreviewed
+        self._load_search_results(search_hash, error=InvalidSearchException('This search returned too many results'))
+        self._assert_runs(cell, runs)
+        self.assertEqual(self._post(run_url).status_code, 200)
+        self._load_search_results(search_hash, error=InvalidSearchException('This search returned too many results'))
+        self._load_search_results(search_hash, error=InvalidSearchException('This search returned too many results'))
+        runs.append({'status': 'T', 'error': 'This search returned too many results'})
+        self._assert_runs(cell, runs)
+        cell_json = self._assert_review(cell, True, num_unreviewed=4)
+        self.assertEqual(cell_json['numResults'], 5)
+        self.assertDictEqual(cell_json['lastRun'], {
+            'runId': mock.ANY, 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'trigger': 'M', 'status': 'T',
+            'error': 'This search returned too many results', 'numResults': None, 'numNew': 0, 'numRemoved': 0,
+            'isUnchanged': False,
+        })
+        self.assertEqual(self._post(run_url).status_code, 200)
+        self._load_search_results(search_hash, error=InvalidSearchException('Invalid search'))
+        runs.append({'status': 'E', 'error': 'Invalid search'})
+        self._assert_runs(cell, runs)
+        self._load_search_results(search_hash, CHANGED_RESULTS)
+        self._assert_runs(cell, runs)
+        self._assert_review(cell, True, num_unreviewed=4)
+
+        # Marking as reviewed adds the results of the last completed run to the reviewed results
+        self._assert_no_family_access(review_url)
+        cell_json = self._assert_review(cell, True, num_unreviewed=4)
+        response = self._post(review_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'worksheetQueryResultsByGuid': {QUERY_RESULT_GUID: {
+            **cell_json, 'hasUnreviewed': False, 'numUnreviewed': 0, 'lastModifiedDate': mock.ANY,
+        }}})
+        self.assertNotEqual(
+            response.json()['worksheetQueryResultsByGuid'][QUERY_RESULT_GUID]['lastModifiedDate'], cell_json['lastModifiedDate'])
+        self._assert_review(cell, False)
+        reviewed_keys = [MITO_KEY, SNV_KEY, PAIR_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, SV_KEY]
+        self.assertListEqual(cell.reviewed_keys, reviewed_keys)
+        self.assertEqual(self._post(review_url).status_code, 200)
+        self._assert_review(cell, False)
+        self.assertListEqual(cell.reviewed_keys, reviewed_keys)
+        self._assert_runs(cell, runs)
+
+        # Removed results are recorded and do not alert, and neither do reviewed results that return
+        self._load_search_results(search_hash, CHANGED_RESULTS[1:])
+        runs.append({
+            'num_results': 4, 'result_keys': [MITO_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, SV_KEY], 'removed_keys': [SNV_KEY],
+            'num_removed': 1,
+        })
+        self._assert_runs(cell, runs)
+        self._assert_review(cell, False)
+        self._load_search_results(search_hash, CHANGED_RESULTS)
+        runs.append({'num_results': 5, 'result_keys': CHANGED_KEYS, 'new_keys': [SNV_KEY], 'num_new': 1})
+        self._assert_runs(cell, runs)
+        self._assert_review(cell, False)
+
+        # Only results that were not reviewed alert, until they are removed
+        self._load_search_results(search_hash, CHANGED_RESULTS + [ADDED_VARIANT])
+        runs.append({
+            'num_results': 6, 'result_keys': [MITO_KEY, SNV_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, ADDED_KEY, SV_KEY],
+            'new_keys': [ADDED_KEY], 'num_new': 1,
+        })
+        self._assert_runs(cell, runs)
+        self._assert_review(cell, True, num_unreviewed=1)
+        self._load_search_results(search_hash, CHANGED_RESULTS)
+        runs.append({'num_results': 5, 'result_keys': CHANGED_KEYS, 'removed_keys': [ADDED_KEY], 'num_removed': 1})
+        self._assert_runs(cell, runs)
+        self._assert_review(cell, False)
+        self.assertListEqual(cell.reviewed_keys, reviewed_keys)
+
+        # Every cell with the same search and families gets a run, by the user that loaded the results
+        self.login_manager()
+        WorksheetQuery.objects.filter(guid=PERMISSIVE_QUERY_GUID).update(search=RESTRICTIVE_SEARCH)
+        response = self._post(reverse(run_worksheet_query_handler, args=[WORKBOOK_GUID, PERMISSIVE_QUERY_GUID, FAMILY_TARGET_GUID]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['searchHash'], search_hash)
+        other_cell = WorksheetQueryResult.objects.get(guid=next(iter(response.json()['worksheetQueryResultsByGuid'])))
+        self._load_search_results(search_hash, INITIAL_RESULTS)
+        runs.append({
+            'num_results': 2, 'result_keys': INITIAL_KEYS, 'new_keys': [PAIR_KEY],
+            'removed_keys': [MITO_KEY, NEW_PAIR_KEY, SV_PAIR_KEY, SV_KEY], 'num_new': 1, 'num_removed': 4,
+            'created_by__username': 'test_user_manager',
+        })
+        self._assert_runs(cell, runs)
+        self._assert_runs(other_cell, [{**initial_run, 'created_by__username': 'test_user_manager'}])
+        self._assert_review(cell, False)
+        self._assert_review(other_cell, False)
+
+        # A result of an analysis group has a key for every family, so a variant in another family is new
+        group_args = [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID]
+        response = self._post(reverse(run_worksheet_query_handler, args=group_args))
+        self.assertEqual(response.status_code, 200)
+        group_search_hash = response.json()['searchHash']
+        group_cell = WorksheetQueryResult.objects.get(guid=next(iter(response.json()['worksheetQueryResultsByGuid'])))
+        self._load_search_results(group_search_hash, [
+            {**SNV_VARIANT, 'familyGuids': ['F000003_3', FAMILY_GUID]},
+            [{**PAIR_VARIANT_1, 'familyGuids': ['F000003_3', FAMILY_GUID]}, {**PAIR_VARIANT_2, 'familyGuids': ['F000003_3']}],
+        ])
+        group_keys = [SNV_KEY, ['F000003_3', *SNV_KEY[1:]], ['F000003_3', *PAIR_KEY[1:]]]
+        group_runs = [{'num_results': 2, 'result_keys': group_keys, 'created_by__username': 'test_user_manager'}]
+        self._assert_runs(group_cell, group_runs)
+        self._load_search_results(group_search_hash, [{**SNV_VARIANT, 'familyGuids': ['F000003_3', FAMILY_GUID, 'F000005_5']}])
+        group_runs.append({
+            'num_results': 1, 'result_keys': [SNV_KEY, ['F000003_3', *SNV_KEY[1:]], ['F000005_5', *SNV_KEY[1:]]],
+            'new_keys': [['F000005_5', *SNV_KEY[1:]]], 'removed_keys': [['F000003_3', *PAIR_KEY[1:]]], 'num_new': 1,
+            'num_removed': 1, 'created_by__username': 'test_user_manager',
+        })
+        self._assert_runs(group_cell, group_runs)
+        self._assert_review(group_cell, True, num_unreviewed=1)
+        self._tag_excluded('1-100-A-T')
+        self._assert_review(group_cell, True, num_unreviewed=1)
+        self._tag_excluded('1-100-A-T', family_guid='F000005_5')
+        self._assert_review(group_cell, False, stored_has_unreviewed=True)
+        self._assert_runs(cell, runs)
+
+        # Run history is removed with its cell
+        self.assertEqual(WorksheetQueryRun.objects.count(), len(runs) + 3)
+        group_cell.delete()
+        self.assertEqual(WorksheetQueryRun.objects.count(), len(runs) + 1)
+
+        for handler in [mark_worksheet_query_result_reviewed_handler, worksheet_query_result_history_handler]:
+            invalid_args = [
+                [WORKBOOK_GUID, NO_ACCESS_QUERY_GUID, FAMILY_TARGET_GUID],
+                [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, NO_ACCESS_TARGET_GUID],
+                ['WB0000000_invalid', RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID],
+            ]
+            for args in invalid_args:
+                self.assertEqual(self._post(reverse(handler, args=args)).status_code, 404)
+            self.login_collaborator()
+            response = self._post(reverse(handler, args=[NO_ACCESS_WORKBOOK_GUID, NO_ACCESS_QUERY_GUID, NO_ACCESS_TARGET_GUID]))
+            self.assertEqual(response.status_code, 403)
+
+    def test_search_without_workbook_cells(self):
+        self.login_collaborator()
+        results_model = VariantSearchResults.objects.create(
+            search_hash='abc', variant_search=VariantSearch.objects.create(search={}))
+        results_model.families.set(Family.objects.filter(guid=FAMILY_GUID))
+
+        with mock.patch('seqr.views.utils.workbook_utils._record_runs') as mock_record_runs, \
+                CaptureQueriesContext(connection) as queries:
+            self._load_search_results('abc', INITIAL_RESULTS)
+        mock_record_runs.assert_not_called()
+        workbook_queries = [q['sql'] for q in queries.captured_queries if 'seqr_worksheetquery' in q['sql']]
+        self.assertEqual(len(workbook_queries), 1)
+        self.assertRegex(workbook_queries[0], '^SELECT "seqr_worksheetqueryresult"."id" FROM "seqr_worksheetqueryresult" WHERE')
+
+        # The error of a search that is not linked to a cell is returned unchanged
+        with mock.patch('seqr.views.utils.workbook_utils._record_runs') as mock_record_runs:
+            response = self._load_search_results('abc', error=InvalidSearchException('Invalid search'))
+        self.assertEqual(response.json()['error'], 'Invalid search')
+        mock_record_runs.assert_not_called()
+        self.assertEqual(WorksheetQueryRun.objects.count(), 0)
 
 
 class LocalWorkbookAPITest(AuthenticationTestCase, WorkbookAPITest):

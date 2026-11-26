@@ -142,7 +142,8 @@ from seqr.views.apis.workbook_api import project_workbooks_handler, create_workb
     reorder_workbook_targets_handler, delete_workbook_target_handler, create_worksheet_handler, \
     reorder_worksheets_handler, update_worksheet_handler, delete_worksheet_handler, create_worksheet_query_handler, \
     reorder_worksheet_queries_handler, update_worksheet_query_handler, delete_worksheet_query_handler, \
-    update_worksheet_query_result_handler, run_worksheet_query_handler, worksheet_query_group_summary_handler
+    update_worksheet_query_result_handler, run_worksheet_query_handler, worksheet_query_group_summary_handler, \
+    mark_worksheet_query_result_reviewed_handler, worksheet_query_result_history_handler
 from seqr.views.apis.project_api import create_project_handler, update_project_handler, delete_project_handler, \
     project_page_data, project_families, project_overview, project_mme_submisssions, project_individuals, \
     project_analysis_groups, update_project_workspace, project_family_notes, project_collaborators, project_locus_lists, \
@@ -277,6 +278,8 @@ api_endpoints = {
     'workbook/(?P<workbook_guid>[^/]+)/queries/(?P<query_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/update': update_worksheet_query_result_handler,
     'workbook/(?P<workbook_guid>[^/]+)/queries/(?P<query_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/run': run_worksheet_query_handler,
     'workbook/(?P<workbook_guid>[^/]+)/queries/(?P<query_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/summary': worksheet_query_group_summary_handler,
+    'workbook/(?P<workbook_guid>[^/]+)/queries/(?P<query_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/mark_reviewed': mark_worksheet_query_result_reviewed_handler,
+    'workbook/(?P<workbook_guid>[^/]+)/queries/(?P<query_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/history': worksheet_query_result_history_handler,
 
     'search/variant/(?P<variant_id>[^/]+)': query_single_variant_handler,
     'search/(?P<search_hash>[^/]+)': query_variants_handler,

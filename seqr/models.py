@@ -1228,6 +1228,11 @@ class WorksheetQueryResult(ModelWithGUID):
     last_run_date = models.DateTimeField(null=True, blank=True)
     last_run_by = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
     num_results = models.IntegerField(null=True, blank=True)
+    # Result keys (see WorksheetQueryRun) that do not raise an alert when they are in the latest results
+    reviewed_keys = models.JSONField(default=list)
+    # Whether the latest results have keys that are not in reviewed_keys. Variants tagged as excluded are not
+    # subtracted here as tags change independently of runs, they are subtracted when the alert is computed
+    has_unreviewed = models.BooleanField(default=False, db_index=True)
 
     def __unicode__(self):
         return f'{self.query_id}_{self.target_id}'
@@ -1244,6 +1249,51 @@ class WorksheetQueryResult(ModelWithGUID):
 
         json_fields = ['guid', 'status', 'note', 'last_run_date', 'num_results', 'last_modified_date']
         audit_fields = {'status'}
+
+
+class WorksheetQueryRun(models.Model):
+    """
+    An append-only record of the results a worksheet query returned for a target.
+
+    A result key is a list that identifies one result for one family, and does not change when data is reloaded:
+    [family guid, dataset type, variant id] for a variant and [family guid, dataset type, variant id, dataset type,
+    variant id] for a compound heterozygous pair, with the 2 variants of a pair in sorted order. A result for several
+    families has one key per family. The ClickHouse key of a variant is not used as it is internal to a ClickHouse
+    database, while the variant id is the same id that saved variants are stored with.
+    """
+    TRIGGER_MANUAL = 'M'
+    TRIGGER_SCHEDULED = 'S'
+    TRIGGER_DATA_LOAD = 'D'
+    TRIGGER_CHOICES = (
+        (TRIGGER_MANUAL, 'Manual'),
+        (TRIGGER_SCHEDULED, 'Scheduled'),
+        (TRIGGER_DATA_LOAD, 'Data load'),
+    )
+
+    STATUS_COMPLETED = 'C'
+    STATUS_TOO_MANY_RESULTS = 'T'
+    STATUS_ERROR = 'E'
+    STATUS_CHOICES = (
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_TOO_MANY_RESULTS, 'Too many results'),
+        (STATUS_ERROR, 'Error'),
+    )
+
+    cell = models.ForeignKey('WorksheetQueryResult', on_delete=models.CASCADE)
+    created_by = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
+    created_date = models.DateTimeField(default=timezone.now, db_index=True)
+    trigger = models.CharField(max_length=1, choices=TRIGGER_CHOICES, default=TRIGGER_MANUAL)
+    status = models.CharField(max_length=1, choices=STATUS_CHOICES, default=STATUS_COMPLETED)
+    error = models.TextField(null=True, blank=True)
+    num_results = models.IntegerField(null=True, blank=True)
+    # A digest of the result keys, to detect changed results without reading the keys of the previous run
+    keys_hash = models.CharField(max_length=64, null=True, blank=True)
+    # Null for a run that failed, and for a run with the same results as the run before it
+    result_keys = models.JSONField(null=True, blank=True)
+    new_keys = models.JSONField(default=list)
+    removed_keys = models.JSONField(default=list)
+    num_new = models.IntegerField(default=0)
+    num_removed = models.IntegerField(default=0)
 
 
 class BulkOperationBase(models.Model):

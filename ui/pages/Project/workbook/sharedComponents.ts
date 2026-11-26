@@ -5,8 +5,9 @@ import BaseUpdateButton from '../../../shared/components/buttons/UpdateButton'
 import BaseDeleteButton from '../../../shared/components/buttons/DeleteButton'
 import BaseSearchResultsLink from '../../../shared/components/buttons/SearchResultsLink'
 import { CATEGORY_NAMES } from '../../../shared/components/panel/HpoPanel'
+import BaseVariants from '../../../shared/components/panel/variants/Variants'
 import BaseVariantSearchResults from '../../Search/components/VariantSearchResults'
-import { Option } from './types'
+import { DisplayVariant, Option } from './types'
 
 // Prop types for the javascript components used by the workbook pages
 
@@ -46,6 +47,14 @@ interface VariantSearchResultsProps {
   match: { params: { searchHash: string } }
   history: RouterHistory
   location: RouterLocation
+  variantsComponent?: React.ElementType
+}
+
+interface VariantsProps {
+  variants: DisplayVariant[]
+  compoundHetToggle?: unknown
+  searchHash?: string
+  linkToSavedVariants?: boolean
 }
 
 interface SearchResultsLinkProps {
@@ -63,4 +72,5 @@ export const DeleteButton = BaseDeleteButton as unknown as React.ComponentType<D
 export const VariantSearchResults = (
   BaseVariantSearchResults as unknown as React.ComponentType<VariantSearchResultsProps>
 )
+export const Variants = BaseVariants as unknown as React.ComponentType<VariantsProps>
 export const SearchResultsLink = BaseSearchResultsLink as unknown as React.ComponentType<SearchResultsLinkProps>

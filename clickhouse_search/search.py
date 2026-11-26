@@ -22,7 +22,7 @@ from reference_data.models import GeneInfo, GeneConstraint, Omim, GENOME_VERSION
 from seqr.models import Dataset, PhenotypePrioritization, Family, Individual
 from seqr.utils.gene_utils import parse_locus_list_items
 from seqr.utils.logging_utils import SeqrLogger
-from clickhouse_search.constants import MAX_VARIANTS, XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY, \
+from clickhouse_search.constants import MAX_VARIANTS, TOO_MANY_RESULTS_ERROR, XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY, \
     PRIORITIZED_GENE_SORT, COMPOUND_HET, COMPOUND_HET_ALLOW_HOM_ALTS, RECESSIVE, AFFECTED, \
     X_LINKED_RECESSIVE, X_LINKED_RECESSIVE_MALE_AFFECTED
 from seqr.utils.constants import MALE_SEXES
@@ -244,7 +244,7 @@ def _get_x_linked_male_search_results(entry_qs, variants_qs, dataset_type, user,
 def _evaluate_results(result_q, is_comp_het=False):
     results = [list(result[1:]) if is_comp_het else result for result in result_q[:MAX_VARIANTS + 1]]
     if len(results) > MAX_VARIANTS:
-        raise InvalidSearchException('This search returned too many results')
+        raise InvalidSearchException(TOO_MANY_RESULTS_ERROR)
     return results
 
 def _get_multi_data_type_comp_het_results(genome_version, all_families, sample_data_by_dataset_type, user, exclude_key_pairs, searched_dataset_types, annotations=None, annotations_secondary=None, **search_kwargs):

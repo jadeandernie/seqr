@@ -8,7 +8,8 @@ import DataLoader from '../../../shared/components/DataLoader'
 import { WORK_PANE_ID } from './constants'
 import { loadWorkbookPage } from './reducers'
 import {
-  getQueryResultsByQueryTarget, getWorkbook, getWorkbookDetailIsLoading, getWorkbookDetailLoadingError,
+  getNumUnreviewedByTarget, getQueryResultsByQueryTarget, getWorkbook, getWorkbookDetailIsLoading,
+  getWorkbookDetailLoadingError,
   getWorkbookPath, getWorkbookSelection, getWorkbookTargets, getWorkbookWorksheets,
 } from './selectors'
 import TargetTabs, { getTargetTabId } from './TargetTabs'
@@ -41,14 +42,15 @@ interface WorkbookContentProps {
   targets: TargetDisplay[]
   worksheets: WorksheetDisplay[]
   resultsByQueryTarget: ByGuid<ByGuid<WorksheetQueryResult>>
+  numUnreviewedByTarget: ByGuid<number>
   targetGuid?: string
   queryGuid?: string
   pathname: string
 }
 
-const WorkbookContent = React.memo((
-  { workbook, targets, worksheets, resultsByQueryTarget, targetGuid, queryGuid, pathname }: WorkbookContentProps,
-) => {
+const WorkbookContent = React.memo(({
+  workbook, targets, worksheets, resultsByQueryTarget, numUnreviewedByTarget, targetGuid, queryGuid, pathname,
+}: WorkbookContentProps) => {
   const { target, query } = getWorkbookSelection(targets, worksheets, targetGuid, queryGuid)
   const path = getWorkbookPath(workbook, target?.workbookTargetGuid, query?.worksheetQueryGuid)
   if (path !== pathname) {
@@ -77,6 +79,7 @@ const WorkbookContent = React.memo((
         targets={targets}
         selectedTarget={target}
         queryGuid={query?.worksheetQueryGuid}
+        numUnreviewedByTarget={numUnreviewedByTarget}
       />
       <Body>
         <WorksheetSidebar
@@ -97,6 +100,7 @@ interface WorkbookPageProps extends RouteComponentProps<WorkbookParams> {
   targets: TargetDisplay[]
   worksheets: WorksheetDisplay[]
   resultsByQueryTarget: ByGuid<ByGuid<WorksheetQueryResult>>
+  numUnreviewedByTarget: ByGuid<number>
   loading: boolean
   errorMessage?: string | null
   load: (workbookGuid: string) => void
@@ -121,6 +125,7 @@ const WorkbookPage = React.memo((
       targets={props.targets}
       worksheets={props.worksheets}
       resultsByQueryTarget={props.resultsByQueryTarget}
+      numUnreviewedByTarget={props.numUnreviewedByTarget}
     />
   </DataLoader>
 ))
@@ -130,6 +135,7 @@ const mapStateToProps = (state: WorkbookReduxState, { match }: RouteComponentPro
   targets: getWorkbookTargets(state, match.params),
   worksheets: getWorkbookWorksheets(state, match.params),
   resultsByQueryTarget: getQueryResultsByQueryTarget(state),
+  numUnreviewedByTarget: getNumUnreviewedByTarget(state),
   loading: getWorkbookDetailIsLoading(state),
   errorMessage: getWorkbookDetailLoadingError(state),
 })

@@ -6,8 +6,8 @@ import { HttpRequestHelper } from '../../../shared/utils/httpRequestHelper'
 import { loadSavedSearches } from '../../Search/reducers'
 import { loadCurrentProjectAnalysisGroups, loadFamilies } from '../reducers'
 import {
-  ByGuid, GroupSummary, RequestError, Workbook, WorkbookResponse, WorkbookStatus, WorkbookTarget, WorkbookThunk,
-  Worksheet,
+  ByGuid, CellHistory, GroupSummary, RequestError, Workbook, WorkbookResponse, WorkbookStatus, WorkbookTarget,
+  WorkbookThunk, Worksheet,
 } from './types'
 
 const REQUEST_WORKBOOKS = 'REQUEST_WORKBOOKS'
@@ -16,6 +16,8 @@ const REQUEST_WORKBOOK_DETAIL = 'REQUEST_WORKBOOK_DETAIL'
 const RECEIVE_WORKBOOK_DETAIL = 'RECEIVE_WORKBOOK_DETAIL'
 const REQUEST_WORKBOOK_GROUP_SUMMARY = 'REQUEST_WORKBOOK_GROUP_SUMMARY'
 const RECEIVE_WORKBOOK_GROUP_SUMMARY = 'RECEIVE_WORKBOOK_GROUP_SUMMARY'
+const REQUEST_WORKBOOK_CELL_HISTORY = 'REQUEST_WORKBOOK_CELL_HISTORY'
+const RECEIVE_WORKBOOK_CELL_HISTORY = 'RECEIVE_WORKBOOK_CELL_HISTORY'
 
 interface TargetValues {
   familyGuids?: string[]
@@ -42,6 +44,8 @@ interface WorksheetQueryValues {
   savedSearchGuid?: string
   delete?: boolean
 }
+
+type CellHistoryResponse = CellHistory & WorkbookResponse & { genesById?: object }
 
 interface QueryResultValues {
   status?: WorkbookStatus
@@ -252,6 +256,40 @@ export const loadGroupSummary = (
   ).get(geneId ? { geneId } : {})
 }
 
+let currentCellHistoryRequest = 0
+
+// The cell in the response is always stored, as it has the alert of the cell after its results were loaded
+export const loadCellHistory = (
+  workbookGuid: string, worksheetQueryGuid: string, workbookTargetGuid: string,
+): WorkbookThunk => (dispatch) => {
+  const cellKey = getCellKey(worksheetQueryGuid, workbookTargetGuid)
+  currentCellHistoryRequest += 1
+  const request = currentCellHistoryRequest
+  dispatch({ type: REQUEST_WORKBOOK_CELL_HISTORY })
+  return new HttpRequestHelper(
+    `${queryTargetPath(workbookGuid, worksheetQueryGuid, workbookTargetGuid)}/history`,
+    ({ worksheetQueryResultsByGuid = {}, genesById = {}, ...history }: CellHistoryResponse) => {
+      dispatch({ type: RECEIVE_DATA, updatesById: { worksheetQueryResultsByGuid, genesById } })
+      if (request === currentCellHistoryRequest) {
+        dispatch({ type: RECEIVE_WORKBOOK_CELL_HISTORY, newValue: { cellKey, history } })
+      }
+    },
+    (e: RequestError) => {
+      if (request === currentCellHistoryRequest) {
+        dispatch({ type: RECEIVE_WORKBOOK_CELL_HISTORY, newValue: { cellKey, error: e.body?.errors?.[0] || e.message } })
+      }
+    },
+  ).get()
+}
+
+export const markWorksheetQueryResultReviewed = (
+  workbookGuid: string, worksheetQueryGuid: string, workbookTargetGuid: string,
+): WorkbookThunk => (dispatch, getState) => postWorkbookData(
+  `${queryTargetPath(workbookGuid, worksheetQueryGuid, workbookTargetGuid)}/mark_reviewed`,
+)(dispatch, getState).then(
+  () => loadCellHistory(workbookGuid, worksheetQueryGuid, workbookTargetGuid)(dispatch, getState),
+)
+
 export const reducers = {
   workbooksByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbooksByGuid'),
   workbookTargetsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbookTargetsByGuid'),
@@ -262,4 +300,6 @@ export const reducers = {
   workbookDetailLoading: loadingReducer(REQUEST_WORKBOOK_DETAIL, RECEIVE_WORKBOOK_DETAIL),
   workbookGroupSummary: createSingleValueReducer(RECEIVE_WORKBOOK_GROUP_SUMMARY, {}),
   workbookGroupSummaryLoading: loadingReducer(REQUEST_WORKBOOK_GROUP_SUMMARY, RECEIVE_WORKBOOK_GROUP_SUMMARY),
+  workbookCellHistory: createSingleValueReducer(RECEIVE_WORKBOOK_CELL_HISTORY, {}),
+  workbookCellHistoryLoading: loadingReducer(REQUEST_WORKBOOK_CELL_HISTORY, RECEIVE_WORKBOOK_CELL_HISTORY),
 }

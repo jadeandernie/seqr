@@ -1,12 +1,13 @@
 import { createSelector } from 'reselect'
 
+import { EXCLUDED_TAG_NAME } from '../../../shared/utils/constants'
 import { genericComparator } from '../../../shared/utils/sortUtils'
 import {
   STATUS_FINDINGS, STATUS_IN_PROGRESS, STATUS_NOT_REVIEWED, STATUS_NOTHING_FOUND,
 } from './constants'
 import {
-  ByGuid, GroupSummaryState, NamedEntity, Option, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorkbookTarget,
-  WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
+  ByGuid, CellHistoryState, DisplayVariant, GroupSummaryState, NamedEntity, Option, TargetDisplay, Workbook,
+  WorkbookReduxState, WorkbookStatus, WorkbookTarget, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
 } from './types'
 
 interface WorkbookProps {
@@ -35,6 +36,13 @@ const NO_GROUP_SUMMARY: GroupSummaryState = {}
 // Only the summary of the given cell, so that the summary of another cell is never shown
 export const getCellGroupSummary = (state: WorkbookReduxState, cellKey: string): GroupSummaryState => (
   state.workbookGroupSummary.cellKey === cellKey ? state.workbookGroupSummary : NO_GROUP_SUMMARY
+)
+
+const NO_CELL_HISTORY: CellHistoryState = {}
+
+// Only the history of the given cell, so that the history of another cell is never shown
+export const getCellHistory = (state: WorkbookReduxState, cellKey: string): CellHistoryState => (
+  state.workbookCellHistory.cellKey === cellKey ? state.workbookCellHistory : NO_CELL_HISTORY
 )
 
 const sortBy = <T>(entities: T[], field: keyof T): T[] => [...entities].sort(
@@ -186,4 +194,76 @@ export const splitTargetTabs = (
   const selected = targets.slice(max).find(target => target.workbookTargetGuid === selectedGuid)
   const visible = selected ? [...targets.slice(0, max - 1), selected] : targets.slice(0, max)
   return { visible, overflow: targets.filter(target => !visible.includes(target)) }
+}
+
+export const getNumUnreviewed = (
+  resultsByQueryTarget: ByGuid<ByGuid<WorksheetQueryResult>>, queries: WorksheetQuery[], workbookTargetGuid?: string,
+): number => queries.reduce(
+  (total, query) => total + (resultsByQueryTarget[query.worksheetQueryGuid]?.[workbookTargetGuid]?.numUnreviewed || 0), 0,
+)
+
+export const getNumUnreviewedByTarget = createSelector(
+  getWorksheetQueryResultsByGuid,
+  (resultsByGuid): ByGuid<number> => Object.values(resultsByGuid).reduce((acc, result) => ({
+    ...acc, [result.workbookTargetGuid]: (acc[result.workbookTargetGuid] || 0) + (result.numUnreviewed || 0),
+  }), {} as ByGuid<number>),
+)
+
+export const NO_EXCLUDED_REASON = 'No reason given'
+
+const getFamilyVariantKey = (familyGuid: string, variantId: string) => `${familyGuid}/${variantId}`
+
+// Like "Hide Excluded" for saved variants: a variant is excluded for a family when it has a tag named Excluded
+export const getExcludedReasonsByFamilyVariant = createSelector(
+  (state: WorkbookReduxState) => state.savedVariantsByGuid,
+  (state: WorkbookReduxState) => state.variantTagsByGuid,
+  (savedVariantsByGuid, tagsByGuid): ByGuid<string> => Object.values(savedVariantsByGuid).reduce((acc, variant) => {
+    const excludedTags = variant.tagGuids.map(tagGuid => tagsByGuid[tagGuid]).filter(
+      tag => tag?.name === EXCLUDED_TAG_NAME,
+    )
+    if (!excludedTags.length) {
+      return acc
+    }
+    const reason = excludedTags.map(tag => tag.metadata).find(metadata => metadata) || NO_EXCLUDED_REASON
+    return variant.familyGuids.reduce(
+      (familyAcc, familyGuid) => ({ ...familyAcc, [getFamilyVariantKey(familyGuid, variant.variantId)]: reason }), acc,
+    )
+  }, {} as ByGuid<string>),
+)
+
+export interface ExcludedGroup {
+  reason: string
+  variants: DisplayVariant[]
+}
+
+export interface SplitVariants {
+  included: DisplayVariant[]
+  excludedGroups: ExcludedGroup[]
+  numExcluded: number
+}
+
+// A compound heterozygous pair is excluded when either of its variants is
+export const splitExcludedVariants = (
+  displayVariants: DisplayVariant[], excludedReasons: ByGuid<string>,
+): SplitVariants => {
+  const included: DisplayVariant[] = []
+  const excludedByReason: ByGuid<DisplayVariant[]> = {}
+  displayVariants.forEach((displayVariant) => {
+    const variants = Array.isArray(displayVariant) ? displayVariant : [displayVariant]
+    const reason = variants.reduce((acc, { variantId, familyGuids = [] }) => acc || familyGuids.map(
+      familyGuid => excludedReasons[getFamilyVariantKey(familyGuid, variantId)],
+    ).find(familyReason => familyReason), undefined as string | undefined)
+    if (reason) {
+      excludedByReason[reason] = [...(excludedByReason[reason] || []), displayVariant]
+    } else {
+      included.push(displayVariant)
+    }
+  })
+  return {
+    included,
+    excludedGroups: sortBy(
+      Object.entries(excludedByReason).map(([reason, variants]) => ({ reason, variants })), 'reason',
+    ),
+    numExcluded: displayVariants.length - included.length,
+  }
 }

@@ -2,6 +2,7 @@
 
 ## dev
 * Adds workbooks, worksheets and worksheet queries for running search patterns across families and analysis groups (REQUIRES DB MIGRATION)
+* Adds a run history to workbook queries, with alerts for new results since the last review (REQUIRES DB MIGRATION)
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
 
 ## 11/24/26

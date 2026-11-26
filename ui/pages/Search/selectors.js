@@ -20,6 +20,7 @@ import {
 import { getVariantMainGeneId, getVariantSummary, FAMILY_ANALYSIS_STATUS_LOOKUP } from 'shared/utils/constants'
 import { compareObjects } from 'shared/utils/sortUtils'
 import { compHetGene } from 'shared/components/panel/variants/VariantUtils'
+import { searchedRnaDataTypes } from './geneEvidence'
 
 export const getSearchContextIsLoading = state => state.searchContextLoading.isLoading
 export const getMultiProjectSearchContextIsLoading = state => state.multiProjectSearchContextLoading.isLoading
@@ -212,6 +213,12 @@ export const getDatasetTypes = createSelector(
       ...acc, ...(projectDatasetTypes[projectGuid] || [])]), new Set())
     return [...datasetTypes].sort().join(',')
   },
+)
+
+export const getRnaDataTypes = createSelector(
+  (state, props) => props.projectFamilies,
+  getFamiliesByGuid,
+  searchedRnaDataTypes,
 )
 
 export const getHasHgmdPermission = createSelector(

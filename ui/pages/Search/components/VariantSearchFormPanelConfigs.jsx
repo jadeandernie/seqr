@@ -1,4 +1,5 @@
 import React from 'react'
+import PropTypes from 'prop-types'
 import { FormSpy } from 'react-final-form'
 import styled from 'styled-components'
 import { Form, Grid, Header, List, Loader, Table } from 'semantic-ui-react'
@@ -40,6 +41,10 @@ import {
   CLINVAR_FIELD,
   PATHOGENICITY_FILTER_OPTIONS, QUALITY_FILTER_OPTIONS, SV_GROUPS, VARIANT_ANNOTATION_LAYOUT_GROUPS,
 } from '../constants'
+import {
+  GENE_EVIDENCE_NAME, GENE_EVIDENCE_TYPES, GENE_EVIDENCE_MATCH_FIELD, GENE_EVIDENCE_MATCH_ANY,
+  GENE_EVIDENCE_MATCH_OPTIONS, geneEvidenceSummary,
+} from '../geneEvidence'
 import LocusListItemsFilter from './filters/LocusListItemsFilter'
 import PaMoiSelector from './filters/PaMoiSelector'
 import PaLocusListSelector from './filters/PaLocusListSelector'
@@ -510,6 +515,36 @@ export const QUALITY_PANEL = {
     [DATASET_TYPE_VARIANT_SV]: SNP_QUALITY_FILTER_FIELDS.concat(SV_QUALITY_FILTER_FIELDS),
   },
   fieldProps: { control: LazyLabeledSlider, format: val => val || null },
+}
+
+const GeneEvidenceSummary = React.memo(({ value }) => <i>{geneEvidenceSummary(value) || 'No gene evidence required'}</i>)
+
+GeneEvidenceSummary.propTypes = {
+  value: PropTypes.object,
+}
+
+export const GENE_EVIDENCE_PANEL = {
+  name: GENE_EVIDENCE_NAME,
+  headerProps: {
+    title: 'Gene Evidence',
+    inputSize: 8,
+    inputProps: { component: GeneEvidenceSummary, format: val => val || {} },
+  },
+  fields: [
+    ...GENE_EVIDENCE_TYPES.map(({ name, label, labelHelp }) => ({
+      name, label, labelHelp, component: AlignedBooleanCheckbox, width: 5,
+    })),
+    {
+      name: GENE_EVIDENCE_MATCH_FIELD,
+      label: 'Require',
+      labelHelp: 'When multiple types of evidence are selected, return variants in genes with any of the selected evidence or only in genes with all of the selected evidence',
+      component: RadioGroup,
+      options: GENE_EVIDENCE_MATCH_OPTIONS,
+      format: val => val || GENE_EVIDENCE_MATCH_ANY,
+      width: 6,
+    },
+  ],
+  helpText: 'Only return variants in genes that also have the selected evidence from other data types loaded for the searched families. All other search criteria still apply to the variants, and a compound heterozygous pair is returned when the gene shared by both variants has the evidence. When searching multiple families, a variant is returned for each family where the gene has the evidence in that family.',
 }
 
 const SUBSCRIPTION = { values: true }

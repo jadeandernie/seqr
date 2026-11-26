@@ -18,6 +18,7 @@ import {
   FREQUENCY_PANEL,
   LOCATION_PANEL,
   QUALITY_PANEL,
+  GENE_EVIDENCE_PANEL,
   EXCLUDE_PANEL,
   ANNOTATION_SECONDARY_NAME,
   PATHOGENICITY_PANEL_NAME,
@@ -28,7 +29,8 @@ import {
   HGMD_FIELD,
   ALL_RECESSIVE_INHERITANCE_FILTERS,
 } from '../constants'
-import { getDatasetTypes, getHasHgmdPermission } from '../selectors'
+import { GENE_EVIDENCE_NAME, geneEvidenceFieldNames } from '../geneEvidence'
+import { getDatasetTypes, getHasHgmdPermission, getRnaDataTypes } from '../selectors'
 
 const ToggleHeader = styled(Header).attrs({ size: 'huge', block: true })`
   margin-top: 0px !important;
@@ -95,6 +97,7 @@ const PANELS = [
   FREQUENCY_PANEL,
   LOCATION_PANEL,
   QUALITY_PANEL,
+  GENE_EVIDENCE_PANEL,
   EXCLUDE_PANEL,
 ]
 
@@ -171,6 +174,8 @@ class VariantSearchFormPanels extends React.PureComponent {
     hasHgmdPermission: PropTypes.bool,
     inheritance: PropTypes.string,
     datasetTypes: PropTypes.string,
+    rnaDataTypes: PropTypes.string,
+    geneEvidence: PropTypes.object,
   }
 
   state = { active: {} }
@@ -191,8 +196,9 @@ class VariantSearchFormPanels extends React.PureComponent {
   }
 
   render() {
-    const { hasHgmdPermission, inheritance, datasetTypes } = this.props
+    const { hasHgmdPermission, inheritance, datasetTypes, rnaDataTypes, geneEvidence } = this.props
     const { active } = this.state
+    const geneEvidenceFields = geneEvidenceFieldNames(rnaDataTypes, geneEvidence)
     return (
       <div>
         <ExpandCollapseCategoryContainer>
@@ -211,6 +217,15 @@ class VariantSearchFormPanels extends React.PureComponent {
           {PANELS.reduce((acc, { name, headerProps, fields, ...panelContentProps }, i) => {
             if (name === ANNOTATION_SECONDARY_NAME && !hasSecondaryAnnotation(inheritance)) {
               return acc
+            }
+            const isGeneEvidence = name === GENE_EVIDENCE_NAME
+            if (isGeneEvidence && !geneEvidenceFields.length) {
+              return acc
+            }
+            let panelFields = fields
+            if (isGeneEvidence) {
+              panelFields = geneEvidenceFields.length > 1 ? fields :
+                fields.filter(field => geneEvidenceFields.includes(field.name))
             }
             const showHgmd = name === PATHOGENICITY_PANEL_NAME && hasHgmdPermission
             const isActive = !!active[name]
@@ -247,7 +262,7 @@ class VariantSearchFormPanels extends React.PureComponent {
                 <PanelContent
                   name={name}
                   datasetTypes={datasetTypes}
-                  fields={showHgmd ? HGMD_PATHOGENICITY_FIELDS : fields}
+                  fields={showHgmd ? HGMD_PATHOGENICITY_FIELDS : panelFields}
                   {...panelContentProps}
                 />
               </Accordion.Content>,
@@ -263,6 +278,7 @@ class VariantSearchFormPanels extends React.PureComponent {
 const mapStateToProps = (state, ownProps) => ({
   hasHgmdPermission: getHasHgmdPermission(state, ownProps),
   datasetTypes: getDatasetTypes(state, ownProps),
+  rnaDataTypes: getRnaDataTypes(state, ownProps),
 })
 
 const ConnectedVariantSearchFormPanels = connect(mapStateToProps)(VariantSearchFormPanels)
@@ -276,6 +292,7 @@ export default props => (
         {...props}
         projectFamilies={values.projectFamilies}
         inheritance={values.search?.inheritance}
+        geneEvidence={values.search?.[GENE_EVIDENCE_NAME]}
       />
     )}
   </FormSpy>

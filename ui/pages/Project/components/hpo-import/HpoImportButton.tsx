@@ -74,7 +74,7 @@ interface ModalState {
 
 // Both the manual form and the automatic import register a confirmation message while they hold unsaved changes
 const mapStateToProps = (state: ModalState, ownProps: HpoImportProps) => ({
-  hasUnsavedChanges: !!(state.modal[ownProps.modalId] || {}).confirmOnClose,
+  hasUnsavedChanges: !!state.modal[ownProps.modalId].confirmOnClose,
 })
 
 export const HpoImportModes = connect(mapStateToProps)(BaseHpoImportModes)

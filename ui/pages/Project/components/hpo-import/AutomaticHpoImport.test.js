@@ -514,7 +514,7 @@ test('never puts the note text in a request, the redux store, browser storage or
   expect(wrapper.text()).toContain('Added 3 HPO terms to NA19675')
 
   // the checks below would fail if the note were sent anywhere
-  expect(containsNoteText(`prefix ${NOTE.slice(20, 40)} suffix`)).toBe(true)
+  expect(containsNoteText(`prefix ${NOTE.slice(75, 87)} suffix`)).toBe(true)
   expect(containsNoteText('{"notes":"Quuxley"}')).toBe(true)
   expect(containsNoteText(JSON.stringify(DEFAULT_SAVE_BODY))).toBe(false)
 

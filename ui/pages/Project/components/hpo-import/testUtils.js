@@ -77,55 +77,43 @@ const jsonResponse = (json, ok = true) => Promise.resolve({
   ok, status: ok ? 200 : 400, statusText: 'Bad Request', json: () => Promise.resolve(json),
 })
 
-const addLabels = features => features && features.map(feature => ({ ...feature, label: LABELS[feature.id] }))
+const addLabels = features => features.map(feature => ({ ...feature, label: LABELS[feature.id] }))
 
-// Routes the global fetch() mock: the vocabulary, the HPO terms save endpoint and the term search
+// Routes the global fetch() mock to the vocabulary and the HPO terms save endpoint, the only requests expected
 export const mockApi = ({ vocabulary = { version: '2025-03-03', terms: VOCABULARY }, saveError } = {}) => {
   fetch.mockImplementation((url, options) => {
     if (url.startsWith('/api/hpo_vocabulary')) {
       return vocabulary ? jsonResponse(vocabulary) : jsonResponse({ error: 'Vocabulary unavailable' }, false)
     }
-    const saveMatch = url.match(/^\/api\/individual\/([^/]+)\/update_hpo_terms$/)
-    if (saveMatch) {
-      if (saveError) {
-        return jsonResponse({ error: saveError }, false)
-      }
-      const body = JSON.parse(options.body)
-      return jsonResponse({
-        [saveMatch[1]]: {
-          features: addLabels(body.features),
-          absentFeatures: addLabels(body.absentFeatures),
-          nonstandardFeatures: body.nonstandardFeatures,
-          absentNonstandardFeatures: body.absentNonstandardFeatures,
-        },
-      })
+    const [, individualGuid] = url.match(/^\/api\/individual\/([^/]+)\/update_hpo_terms$/)
+    if (saveError) {
+      return jsonResponse({ error: saveError }, false)
     }
-    return jsonResponse({})
+    const body = JSON.parse(options.body)
+    return jsonResponse({
+      [individualGuid]: {
+        features: addLabels(body.features),
+        absentFeatures: addLabels(body.absentFeatures),
+        nonstandardFeatures: body.nonstandardFeatures,
+        absentNonstandardFeatures: body.absentNonstandardFeatures,
+      },
+    })
   })
 }
 
-export const getFetchCalls = () => fetch.mock.calls.map(([url, options]) => ({
-  url, method: (options || {}).method, body: (options || {}).body,
-}))
+export const getFetchCalls = () => fetch.mock.calls.map(([url, { method, body }]) => ({ url, method, body }))
 
 export const getSaveCalls = () => getFetchCalls().filter(({ url }) => url.includes('update_hpo_terms')).map(
   ({ url, method, body }) => ({ url, method, body: JSON.parse(body) }),
 )
 
 const WINDOW_SIZE = 10
+const NOTE_WINDOWS = Array.from(
+  { length: NOTE.length - WINDOW_SIZE + 1 }, (_, i) => NOTE.slice(i, i + WINDOW_SIZE),
+)
 
 // True if any identifying detail or any 10 character stretch of the note occurs in the given string
-export const containsNoteText = (haystack, note = NOTE) => {
-  if (SENTINELS.some(sentinel => haystack.includes(sentinel))) {
-    return true
-  }
-  for (let i = 0; i + WINDOW_SIZE <= note.length; i += 1) {
-    if (haystack.includes(note.slice(i, i + WINDOW_SIZE))) {
-      return true
-    }
-  }
-  return false
-}
+export const containsNoteText = haystack => [...SENTINELS, ...NOTE_WINDOWS].some(text => haystack.includes(text))
 
 // Lets pending requests resolve and the resulting state updates render
 export const flush = async (wrapper) => {

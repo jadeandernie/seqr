@@ -39,6 +39,9 @@ class ReferenceDataCommandTestCase(AuthenticationTestCase):
         self.mock_clingen_version = self.mock_clingen_version_patcher.start()
         self.mock_clingen_version.return_value = '2025-02-05'
         self.addCleanup(self.mock_clingen_version_patcher.stop)
+        self.mock_reactome_version_patcher = mock.patch('reference_data.models.ReactomePathway.get_current_version')
+        self.mock_reactome_version_patcher.start().return_value = 'Wed, 19 Mar 2025 08:00:00 GMT'
+        self.addCleanup(self.mock_reactome_version_patcher.stop)
         self.mock_hpo_version_patcher = mock.patch('reference_data.models.HumanPhenotypeOntology.get_current_version')
         self.mock_hpo_version_patcher.start().return_value = '2025-03-03'
         self.addCleanup(self.mock_hpo_version_patcher.stop)

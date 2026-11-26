@@ -829,6 +829,40 @@ class ClinGen(GeneMetadataModel):
         return super().get_file_iterator(csv.reader(f))
 
 
+class ReactomePathway(GeneMetadataModel):
+
+    URL = 'https://reactome.org/download/current/Ensembl2Reactome.txt'
+    SPECIES = 'Homo sapiens'
+
+    pathway_id = models.CharField(max_length=20, db_index=True)
+    name = models.TextField()
+
+    class Meta:
+        unique_together = ('gene', 'pathway_id')
+        json_fields = ['pathway_id', 'name']
+
+    @classmethod
+    def get_current_version(cls, **kwargs):
+        return cls._get_file_last_modified(**kwargs)
+
+    @staticmethod
+    def get_file_header(f):
+        return ['gene_id', 'pathway_id', 'url', 'name', 'evidence_code', 'species']
+
+    @classmethod
+    def parse_gene_record(cls, record):
+        # The file covers all species and, for human, also lists transcript and protein ids
+        if record['species'] != cls.SPECIES or not record['gene_id'].startswith('ENSG'):
+            return None
+        return {field: record[field] for field in ['gene_id', 'pathway_id', 'name']}
+
+    @classmethod
+    def get_record_models(cls, records, **kwargs):
+        # A gene is listed once per evidence code for the same pathway
+        unique_records = {(record['gene_id'], record['pathway_id']): record for record in records}
+        return super().get_record_models(unique_records.values(), **kwargs)
+
+
 class DataVersions(models.Model):
     data_model_name = models.CharField(max_length=30, primary_key=True)
     version = models.CharField(max_length=40)

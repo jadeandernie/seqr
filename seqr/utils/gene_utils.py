@@ -4,7 +4,7 @@ from django.db.models import Q, prefetch_related_objects, Prefetch
 from django.db.models.functions import Length
 
 from reference_data.models import GeneInfo, GeneConstraint, dbNSFPGene, Omim, MGI, PrimateAI, GeneCopyNumberSensitivity, \
-    GenCC, ClinGen, GeneShet
+    GenCC, ClinGen, GeneShet, ReactomePathway
 from seqr.utils.xpos_utils import get_xpos
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_for_models, _get_empty_json_for_model, \
     get_json_for_gene_notes_by_gene_id
@@ -95,6 +95,10 @@ def _add_mgi(gene):
     model = _get_gene_model(gene, 'mgi')
     return {'mgiMarkerId': model.marker_id if model else None}
 
+def _add_reactome(gene):
+    pathways = _get_json_for_models(gene.reactomepathway_set.all())
+    return {'reactomePathways': sorted(pathways, key=lambda pathway: (pathway['name'], pathway['pathwayId']))}
+
 OMIM = 'omim'
 CONSTRAINT = 'constraint'
 CN_SENSITIVITY = 'cn_sensitivity'
@@ -104,6 +108,7 @@ GENCC = 'gencc'
 PRIMATE_AI = 'primate_ai'
 MGI_FIELD = 'mgi'
 CLINGEN = 'clingen'
+REACTOME = 'reactome'
 NOTES= 'notes'
 VARIANT_GENE_DISPLAY_FIELDS = {
     OMIM: (Omim, _add_omim),
@@ -120,6 +125,7 @@ VARIANT_GENE_FIELDS = {
 VARIANT_GENE_FIELDS.update(VARIANT_GENE_DISPLAY_FIELDS)
 ALL_GENE_FIELDS = {
     MGI_FIELD: (MGI, _add_mgi),
+    REACTOME: (ReactomePathway, _add_reactome),
     NOTES: (None, None),
 }
 ALL_GENE_FIELDS.update(VARIANT_GENE_FIELDS)

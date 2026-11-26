@@ -787,7 +787,7 @@ GENE_VARIANT_FIELDS = {
 }
 GENE_VARIANT_FIELDS.update(GENE_VARIANT_DISPLAY_FIELDS)
 
-GENE_DETAIL_FIELDS = {'notes', 'mgiMarkerId'}
+GENE_DETAIL_FIELDS = {'notes', 'mgiMarkerId', 'reactomePathways'}
 GENE_DETAIL_FIELDS.update(GENE_VARIANT_FIELDS)
 
 GOOGLE_API_TOKEN_URL = 'https://oauth2.googleapis.com/token'  # nosec

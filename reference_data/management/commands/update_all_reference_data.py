@@ -6,7 +6,7 @@ from clickhouse_search.models.postgres_dicts import GeneIdDict, OmimDict
 from panelapp.models import PanelAppAU, PanelAppUK
 from reference_data.utils.gene_utils import get_genes_by_id_and_symbol
 from reference_data.models import GeneInfo, TranscriptInfo, HumanPhenotypeOntology, RefseqTranscript, GeneConstraint, \
-    GeneCopyNumberSensitivity, GeneShet, Omim, dbNSFPGene, PrimateAI, MGI, GenCC, ClinGen, DataVersions
+    GeneCopyNumberSensitivity, GeneShet, Omim, dbNSFPGene, PrimateAI, MGI, GenCC, ClinGen, ReactomePathway, DataVersions
 from seqr.utils.communication_utils import safe_post_to_slack
 from settings import SEQR_SLACK_DATA_ALERTS_NOTIFICATION_CHANNEL
 
@@ -24,6 +24,7 @@ REFERENCE_DATA_MODELS = [
     GenCC,
     ClinGen,
     GeneShet,
+    ReactomePathway,
     HumanPhenotypeOntology,
     PanelAppAU,
     PanelAppUK,

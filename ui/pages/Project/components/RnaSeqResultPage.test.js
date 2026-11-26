@@ -17,7 +17,26 @@ jest.mock('./RnaSeqOutliers', () => function MockRnaSeqOutliers({ title }) {
   return <div className="mock-rna-seq-outliers">{title}</div>
 })
 
+// RnaSeqPathways loads its own data and is covered by its own test; double it here so these tests can drive the
+// pathway selection RnaSeqResultPage owns without an extra request
+jest.mock('./RnaSeqPathways', () => function MockRnaSeqPathways({ selectedPathway }) {
+  return <div className="mock-rna-seq-pathways">{selectedPathway ? selectedPathway.name : 'No pathway'}</div>
+})
+
 configure({ adapter: new Adapter() })
+
+const PATHWAY = {
+  pathwayId: 'R-HSA-162699',
+  name: 'Synthesis of dolichyl-phosphate mannose',
+  numGenes: 4,
+  numMeasured: 2,
+  numOutliers: 1,
+  outlierGeneIds: ['ENSG00000228198'],
+  measuredGeneIds: ['ENSG00000164458', 'ENSG00000228198'],
+  medianZScore: 7.5,
+}
+
+const getHighlightedGeneIds = wrapper => wrapper.find('MockRnaSeqOutliers').map(node => node.prop('highlightGeneIds'))
 
 test('renders a single tissue type as plain text and the outlier plot for it', () => {
   const store = configureStore([thunk])(STATE_WITH_2_FAMILIES)
@@ -159,4 +178,67 @@ test('renders empty page missing per-individual data', () => {
   )
 
   expect(wrapper.text()).toEqual('Error 404: Page Not Found')
+})
+
+test('highlights the genes of the selected pathway in the expression outlier plot only', () => {
+  const store = configureStore([thunk])(STATE_WITH_2_FAMILIES)
+  const wrapper = mount(
+    <Provider store={store}>
+      <RnaSeqResultPage match={{ params: { individualGuid: 'I021476_na19678_1' } }} />
+    </Provider>,
+  )
+
+  const pathwayProps = wrapper.find('MockRnaSeqPathways').props()
+  expect(pathwayProps.individualGuid).toEqual('I021476_na19678_1')
+  expect(pathwayProps.sampleType).toEqual('M-T')
+  expect(pathwayProps.genesById).toBe(STATE_WITH_2_FAMILIES.genesById)
+  expect(pathwayProps.selectedPathway).toBe(null)
+  expect(getHighlightedGeneIds(wrapper)).toEqual([null, null])
+
+  pathwayProps.onSelect(PATHWAY)
+  wrapper.update()
+
+  expect(wrapper.find('MockRnaSeqPathways').prop('selectedPathway')).toBe(PATHWAY)
+  expect(getHighlightedGeneIds(wrapper)).toEqual([['ENSG00000164458', 'ENSG00000228198'], null])
+
+  wrapper.find('MockRnaSeqPathways').props().onSelect(null)
+  wrapper.update()
+
+  expect(wrapper.find('.mock-rna-seq-pathways').text()).toEqual('No pathway')
+  expect(getHighlightedGeneIds(wrapper)).toEqual([null, null])
+})
+
+test('clears the selected pathway when the tissue changes', () => {
+  const individualData = STATE_WITH_2_FAMILIES.rnaSeqDataByIndividual.I021476_na19678_1
+  const store = configureStore([thunk])({
+    ...STATE_WITH_2_FAMILIES,
+    rnaSeqDataByIndividual: {
+      ...STATE_WITH_2_FAMILIES.rnaSeqDataByIndividual,
+      I021476_na19678_1: {
+        ...individualData,
+        outliers: {
+          ...individualData.outliers,
+          ENSG00000228198: [...individualData.outliers.ENSG00000228198, {
+            geneId: 'ENSG00000228198', isSignificant: true, pValue: 0.001, zScore: -4, tissueType: 'F', sequencingType: 'W',
+          }],
+        },
+      },
+    },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <RnaSeqResultPage match={{ params: { individualGuid: 'I021476_na19678_1' } }} />
+    </Provider>,
+  )
+
+  wrapper.find('MockRnaSeqPathways').props().onSelect(PATHWAY)
+  wrapper.update()
+  expect(wrapper.find('.mock-rna-seq-pathways').text()).toEqual(PATHWAY.name)
+
+  wrapper.find('Dropdown').props().onChange(null, { value: 'F-W' })
+  wrapper.update()
+
+  expect(wrapper.find('MockRnaSeqPathways').prop('sampleType')).toEqual('F-W')
+  expect(wrapper.find('MockRnaSeqPathways').prop('selectedPathway')).toBe(null)
+  expect(getHighlightedGeneIds(wrapper)).toEqual([null])
 })

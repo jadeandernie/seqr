@@ -2,6 +2,9 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds Reactome pathway reference data and a pathway summary of RNA-seq expression outliers (REQUIRES DB MIGRATION)
+  * The pathways are loaded by the `update_all_reference_data` command, so reference data must be reloaded before
+  the pathway summary and gene pathways are shown
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

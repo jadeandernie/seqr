@@ -28,6 +28,7 @@ from seqr.views.utils.permissions_utils import get_project_and_check_edit_permis
     get_project_and_check_pm_permissions, login_and_policies_required, has_project_edit_permission, external_anvil_project_can_edit, \
     pm_or_data_manager_required, check_workspace_perm, check_family_view_permission
 from seqr.views.utils.project_context_utils import add_project_tag_type_counts
+from seqr.views.utils.rna_seq_pathway_utils import get_individual_rna_seq_pathways
 from seqr.views.utils.individual_utils import delete_individuals, add_or_update_individuals_and_families
 from seqr.views.utils.variant_utils import bulk_create_tagged_variants, get_saved_variant_annotations
 
@@ -897,6 +898,16 @@ def get_individual_rna_seq_data(request, individual_guid):
     return create_json_response({
         'rnaSeqData': outlier_data,
         'genesById': genes_to_show,
+    })
+
+
+@login_and_policies_required
+def get_individual_rna_seq_pathways_handler(request, individual_guid):
+    individual = Individual.objects.get(guid=individual_guid)
+    check_family_view_permission(individual.family, request.user)
+
+    return create_json_response({
+        'rnaSeqPathways': {individual_guid: get_individual_rna_seq_pathways(individual)},
     })
 
 

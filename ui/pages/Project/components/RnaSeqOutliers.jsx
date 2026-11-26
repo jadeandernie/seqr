@@ -13,6 +13,7 @@ import { camelcaseToTitlecase } from 'shared/utils/stringUtils'
 const GRAPH_HEIGHT = 400
 const GRAPH_WIDTH = 600
 const GRAPH_MARGIN = { top: 10, bottom: 40, right: 30, left: 45 }
+const HIGHLIGHT_COLOR = '#2185d0'
 
 class RnaSeqOutliersGraph extends React.PureComponent {
 
@@ -21,6 +22,7 @@ class RnaSeqOutliersGraph extends React.PureComponent {
     genesById: PropTypes.object,
     xField: PropTypes.string.isRequired,
     yField: PropTypes.string,
+    highlightGeneIds: PropTypes.arrayOf(PropTypes.string),
   }
 
   componentDidMount() {
@@ -28,15 +30,20 @@ class RnaSeqOutliersGraph extends React.PureComponent {
   }
 
   componentDidUpdate(prevProp) {
-    const { data } = this.props
-    if (data !== prevProp.data) {
+    const { data, highlightGeneIds } = this.props
+    if (data !== prevProp.data || highlightGeneIds !== prevProp.highlightGeneIds) {
       select(this.container).selectAll('*').remove()
       this.initPlot()
     }
   }
 
   initPlot = () => {
-    const { data: dataArray, genesById, xField, yField = 'pValue' } = this.props
+    const { data, genesById, xField, yField = 'pValue', highlightGeneIds } = this.props
+
+    // Highlighted points are drawn last so they are not covered by the other points
+    const highlighted = new Set(highlightGeneIds || [])
+    const isHighlighted = d => highlighted.has(d.geneId)
+    const dataArray = highlighted.size ? [...data.filter(d => !isHighlighted(d)), ...data.filter(isHighlighted)] : data
 
     const x = scaleLinear().domain(extent(dataArray.map(d => d[xField]))).range([0, GRAPH_WIDTH])
     const y = scaleLog().domain(extent(dataArray.map(d => d[yField]))).range([0, GRAPH_HEIGHT])
@@ -55,8 +62,8 @@ class RnaSeqOutliersGraph extends React.PureComponent {
     dataPoints.append('circle')
       .attr('cx', d => x(d[xField]))
       .attr('cy', d => y(d[yField]))
-      .attr('r', 3)
-      .style('fill', 'None')
+      .attr('r', d => (isHighlighted(d) ? 5 : 3))
+      .style('fill', d => (isHighlighted(d) ? HIGHLIGHT_COLOR : 'None'))
       .style('stroke', d => (d.isSignificant ? 'red' : 'lightgrey'))
 
     dataPoints.append('text')

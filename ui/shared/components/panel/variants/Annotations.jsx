@@ -25,7 +25,6 @@ import Transcripts, { ConsequenceDetails, isManeSelect } from './Transcripts'
 import VariantGenes, { GeneLabelContent, omimPhenotypesDetail } from './VariantGene'
 import {
   getLocus,
-  has37Coords,
   Sequence,
   ProteinSequence,
   TranscriptLink,
@@ -241,11 +240,24 @@ const shouldShowNonDefaultTranscriptInfoIcon = (variant, transcript, transcripts
   return result
 }
 
+const GNOMAD_SV_DATASETS = { [GENOME_VERSION_37]: 'gnomad_sv_r2_1', [GENOME_VERSION_38]: 'gnomad_sv_r4' }
+
+const getGenomeVersionCoords = (
+  { chrom, pos, genomeVersion, liftedOverGenomeVersion, liftedOverChrom, liftedOverPos }, linkGenomeVersion,
+) => {
+  if (!linkGenomeVersion || genomeVersion === linkGenomeVersion) {
+    return { chrom, pos }
+  }
+  return liftedOverGenomeVersion === linkGenomeVersion && liftedOverPos ?
+    { chrom: liftedOverChrom || chrom, pos: liftedOverPos } : null
+}
+
+// Links with a genomeVersion are built from coordinates on that build, and hidden if the variant has none
 const VARIANT_LINKS = [
   {
     name: 'gnomAD',
-    shouldShow: variant => !!variant.svType,
-    getHref: variant => `https://gnomad.broadinstitute.org/region/${getSvRegion(variant, '-')}?dataset=gnomad_sv_r4`,
+    shouldShow: ({ svType, genomeVersion }) => !!svType && !!GNOMAD_SV_DATASETS[genomeVersion],
+    getHref: variant => `https://gnomad.broadinstitute.org/region/${getSvRegion(variant, '-')}?dataset=${GNOMAD_SV_DATASETS[variant.genomeVersion]}`,
   },
   {
     name: 'Decipher',
@@ -276,16 +288,19 @@ const VARIANT_LINKS = [
   },
   {
     name: 'AoU',
+    genomeVersion: GENOME_VERSION_38,
     shouldShow: ({ svType }) => !svType,
     getHref: ({ chrom, pos, ref, alt }) => `https://databrowser.researchallofus.org/variants/${chrom}-${pos}-${ref}-${alt}`,
   },
   {
     name: 'Iranome',
+    genomeVersion: GENOME_VERSION_37,
     shouldShow: ({ svType, chrom }) => !svType && chrom !== 'M',
     getHref: ({ chrom, pos, ref, alt }) => `https://www.iranome.com/variant/${chrom}-${pos}-${ref}-${alt}`,
   },
   {
     name: 'Geno2MP',
+    genomeVersion: GENOME_VERSION_37,
     shouldShow: ({ svType, chrom }) => !svType && chrom !== 'M',
     getHref: ({ chrom, pos }) => `https://geno2mp.gs.washington.edu/Geno2MP/#/gene/${chrom}:${pos}/chrLoc/${pos}/${pos}/${chrom}`,
   },
@@ -296,9 +311,10 @@ const VARIANT_LINKS = [
   },
   {
     name: 'BCH',
-    shouldShow: (variant, user) => has37Coords(variant) && user.isAnalyst,
-    getHref: ({ chrom, pos, ref, alt, genomeVersion, liftedOverPos }) => (
-      `https://aggregator.bchresearch.org/variant.html?variant=${chrom}:${genomeVersion === GENOME_VERSION_37 ? pos : liftedOverPos}:${ref}:${alt}`
+    genomeVersion: GENOME_VERSION_37,
+    shouldShow: (variant, user) => user.isAnalyst,
+    getHref: ({ chrom, pos, ref, alt }) => (
+      `https://aggregator.bchresearch.org/variant.html?variant=${chrom}:${pos}:${ref}:${alt}`
     ),
   },
   {
@@ -374,9 +390,12 @@ const variantSearchLinks = (variant, mainTranscript, genesById, user) => {
 
   return [
     ...seqrLinks.map(props => <Popup size="tiny" {...props} />),
-    ...VARIANT_LINKS.filter(({ shouldShow }) => shouldShow(linkVariant, user)).map(
-      ({ name, getHref }) => <DividedLink key={name} href={getHref(linkVariant)}>{name}</DividedLink>,
-    ),
+    ...VARIANT_LINKS.map(({ name, genomeVersion: linkGenomeVersion, shouldShow, getHref }) => {
+      const coords = getGenomeVersionCoords(variant, linkGenomeVersion)
+      return coords && shouldShow(linkVariant, user) && (
+        <DividedLink key={name} href={getHref({ ...linkVariant, ...coords })}>{name}</DividedLink>
+      )
+    }).filter(link => link),
   ]
 }
 

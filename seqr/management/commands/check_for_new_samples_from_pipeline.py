@@ -13,6 +13,7 @@ from reference_data.models import GENOME_VERSION_LOOKUP
 from seqr.models import Family, Dataset, Project, Individual, SavedVariant
 from seqr.utils.communication_utils import safe_post_to_slack, send_project_email
 from seqr.utils.file_utils import file_iter, list_files, is_google_bucket_file_path
+from seqr.utils.known_variant_utils import find_known_variant_matches, notify_known_variant_matches
 from seqr.utils.add_data_utils import notify_search_data_loaded, update_airtable_loading_tracking_status
 from seqr.views.utils.airtable_utils import AirtableSession, LOADABLE_PDO_STATUSES, AVAILABLE_PDO_STATUS
 from seqr.views.utils.export_utils import write_multiple_files
@@ -98,15 +99,28 @@ class Command(BaseCommand):
             return
 
         logger.info(f'Loading new samples from {len(new_runs)} run(s)')
+        loaded_family_guids = set()
         for run_dir, run_details in new_runs.items():
             try:
                 metadata_path = os.path.join(run_dir, 'metadata.json')
-                self._load_new_samples(metadata_path, **run_details)
+                loaded_family_guids.update(self._load_new_samples(metadata_path, **run_details))
             except Exception as e:
                 logger.error(f'Error loading {run_details["run_version"]}: {e}')
 
         # Reset cached results for all projects, as seqr AFs will have changed for all projects when new data is added
         reset_cached_search_results(project=None)
+
+        self._check_known_variants(loaded_family_guids)
+
+    @staticmethod
+    def _check_known_variants(family_guids):
+        try:
+            matches = find_known_variant_matches(Family.objects.filter(guid__in=family_guids))
+            if matches:
+                logger.info(f'Found {len(matches)} new known variant matches')
+                notify_known_variant_matches(matches)
+        except Exception as e:
+            logger.error(f'Error checking known variants: {e}')
 
     @classmethod
     def _get_runs(cls, **kwargs):
@@ -279,6 +293,8 @@ class Command(BaseCommand):
         for project, family_guids in families_by_project.items():
             updated_saved_variants = cls._update_project_saved_variant_genotypes(project, family_guids, clickhouse_dataset_type)
             logger.info(f'Updated {len(updated_saved_variants)} variants in {len(family_guids)} families for project {project.name}')
+
+        return set(family_project_map.keys())
 
     @classmethod
     def _is_internal_project(cls, project):

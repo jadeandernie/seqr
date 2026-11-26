@@ -7,7 +7,7 @@ import mock
 import responses
 
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase
-from seqr.models import Project, Family, Individual, Dataset, SavedVariant
+from seqr.models import Project, Family, Individual, Dataset, SavedVariant, KnownVariantCheck, KnownVariantMatch
 
 SEQR_URL = 'https://seqr.broadinstitute.org/'
 PROJECT_GUID = 'R0003_test'
@@ -787,6 +787,112 @@ class LocalCheckNewSamplesTest(AuthenticationTestCase, CheckNewSamplesTest):
         self.addCleanup(patcher.stop)
         self.set_up()
         super().setUp()
+
+    def _set_up_known_variant_checks(self, mock_key_lookup, mock_family_keys):
+        Project.objects.filter(id__in=[1, 3]).update(genome_version=38)
+        for variant_id, verdict in [('1-248367227-TC-T', 'C'), ('1-9310123-T-C', 'B'), ('2-1234-A-C', 'S')]:
+            KnownVariantCheck.objects.create(
+                created_by=self.manager_user, variant_id=variant_id, genome_version='38', dataset_type='SNV_INDEL',
+                verdict=verdict,
+            )
+        mock_key_lookup.return_value = {'1-248367227-TC-T': 100, '1-9310123-T-C': 22}
+        carrier_families = {('F000001_1', 100), ('F000012_12', 100), ('F000014_14', 100), ('F000012_12', 22)}
+        mock_family_keys.side_effect = lambda genome_version, dataset_type, project_guids, family_guids, keys: {
+            (family_guid, key) for family_guid, key in carrier_families if family_guid in family_guids and key in keys
+        }
+        self.mock_glob.return_value = LOCAL_RUN_PATHS
+        self._set_loading_files()
+        self.mock_redis.return_value.get.return_value = None
+        self.mock_email.reset_mock()
+        self.reset_logs()
+
+    def _get_log_messages(self):
+        return [json.loads(log)['message'] for log in self._log_stream.getvalue().split('\n') if log]
+
+    @mock.patch('seqr.utils.file_utils.os.path.isfile', lambda *args: True)
+    @mock.patch('seqr.management.commands.check_for_new_samples_from_pipeline.get_clickhouse_genotypes', lambda *args: {})
+    @mock.patch('seqr.utils.known_variant_utils.BASE_URL', SEQR_URL)
+    @mock.patch('seqr.utils.known_variant_utils.get_clickhouse_family_keys')
+    @mock.patch('seqr.utils.known_variant_utils.get_clickhouse_key_lookup')
+    def test_known_variant_matches(self, mock_key_lookup, mock_family_keys):
+        self._set_up_known_variant_checks(mock_key_lookup, mock_family_keys)
+
+        call_command('check_for_new_samples_from_pipeline')
+
+        # Only the families which were just loaded are checked, in a single lookup per data type
+        mock_key_lookup.assert_called_once_with('38', 'SNV_INDEL', ['1-248367227-TC-T', '1-9310123-T-C', '2-1234-A-C'])
+        mock_family_keys.assert_called_once_with(
+            '38', 'SNV_INDEL', ['R0001_1kg', PROJECT_GUID, EXTERNAL_PROJECT_GUID],
+            ['F000002_2', 'F000011_11', 'F000012_12', 'F000014_14'], [22, 100],
+        )
+        self.assertSetEqual(
+            set(KnownVariantMatch.objects.values_list('known_variant_check__variant_id', 'family__guid', 'status')),
+            {('1-248367227-TC-T', 'F000012_12', 'N'), ('1-248367227-TC-T', 'F000014_14', 'N'),
+             ('1-9310123-T-C', 'F000012_12', 'N')},
+        )
+        logs = self._get_log_messages()
+        self.assertListEqual(logs[-4:], [
+            'Reset 2 cached results', 'create 3 KnownVariantMatchs', 'Found 3 new known variant matches', 'DONE',
+        ])
+
+        # One notification per project summarises the new matches by verdict, without any variant detail
+        match_email_calls = [
+            call for call in self.mock_email.call_args_list
+            if call.kwargs['subject'] == 'New known variant matches in seqr'
+        ]
+        self.assertListEqual(match_email_calls, [
+            mock.call(
+                body='Dear seqr user,\n\nThis is to notify you that 2 new known variant matches (1 Confirmed causal, '
+                     '1 Benign or artefact (expected noise)) were found in seqr project Test Reprocessed Project. '
+                     'Matches are listed on the project and family pages, where they can be marked as relevant or '
+                     'dismissed.\n\nAll the best,\nThe seqr team',
+                subject='New known variant matches in seqr', to=['test_user_manager@test.com'],
+            ),
+            mock.call(
+                body='Dear seqr user,\n\nThis is to notify you that 1 new known variant match (1 Confirmed causal) '
+                     'was found in seqr project Non-Analyst Project. Matches are listed on the project and family '
+                     'pages, where they can be marked as relevant or dismissed.\n\nAll the best,\nThe seqr team',
+                subject='New known variant matches in seqr', to=['test_user_collaborator@test.com'],
+            ),
+        ])
+        self.mock_email.return_value.attach_alternative.assert_any_call(
+            'Dear seqr user,<br /><br />This is to notify you that 1 new known variant match (1 Confirmed causal) '
+            f'was found in seqr project <a href={SEQR_URL}project/{EXTERNAL_PROJECT_GUID}/project_page>Non-Analyst '
+            'Project</a>. Matches are listed on the project and family pages, where they can be marked as relevant '
+            'or dismissed.<br /><br />All the best,<br />The seqr team', 'text/html',
+        )
+        self.assertEqual(
+            self.manager_user.notifications.order_by('-id').first().verb,
+            'Found 2 new known variant matches (1 Confirmed causal, 1 Benign or artefact (expected noise))',
+        )
+        self.assertEqual(
+            self.collaborator_user.notifications.order_by('-id').first().verb,
+            'Found 1 new known variant match (1 Confirmed causal)',
+        )
+
+    @mock.patch('seqr.utils.file_utils.os.path.isfile', lambda *args: True)
+    @mock.patch('seqr.management.commands.check_for_new_samples_from_pipeline.get_clickhouse_genotypes', lambda *args: {})
+    @mock.patch('seqr.utils.known_variant_utils.get_clickhouse_family_keys')
+    @mock.patch('seqr.utils.known_variant_utils.get_clickhouse_key_lookup')
+    def test_known_variant_matching_error(self, mock_key_lookup, mock_family_keys):
+        self._set_up_known_variant_checks(mock_key_lookup, mock_family_keys)
+        mock_key_lookup.side_effect = Exception('ClickHouse is unavailable')
+
+        # A failure to check known variants is logged and does not fail the command or undo the load
+        call_command('check_for_new_samples_from_pipeline')
+
+        mock_key_lookup.assert_called_once()
+        mock_family_keys.assert_not_called()
+        self.assertEqual(KnownVariantMatch.objects.count(), 0)
+        logs = self._get_log_messages()
+        self.assertListEqual(logs[-3:], [
+            'Reset 2 cached results', 'Error checking known variants: ClickHouse is unavailable', 'DONE',
+        ])
+        self.assertEqual(Dataset.objects.filter(data_source__in=['auto__2023-08-09', 'auto__2024-09-14']).count(), 4)
+        self.assertFalse(any(
+            call.kwargs['subject'] == 'New known variant matches in seqr' for call in self.mock_email.call_args_list
+        ))
+        self.mock_redis.return_value.delete.assert_called_with('search_results__*', 'variant_lookup_results__*')
 
     def _set_empty_loading_files(self):
         self.mock_glob.return_value = []

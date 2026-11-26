@@ -60,8 +60,8 @@ test('shows a message when the project has no workbooks', async () => {
 test('shows the error when the workbooks fail to load', async () => {
   const { wrapper } = await renderWorkbooks({ [LIST_URL]: { status: 403, json: { error: 'Permission Denied' } } })
 
-  expect(wrapper.find('Message').prop('error')).toBe(true)
-  expect(wrapper.find('Message').text()).toEqual('Permission Denied')
+  expect(wrapper.find('Message').first().prop('error')).toBe(true)
+  expect(wrapper.find('Message').first().text()).toEqual('Permission Denied')
   expect(wrapper.find('table').exists()).toBe(false)
 })
 

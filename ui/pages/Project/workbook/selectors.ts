@@ -6,8 +6,9 @@ import {
   STATUS_FINDINGS, STATUS_IN_PROGRESS, STATUS_NOT_REVIEWED, STATUS_NOTHING_FOUND,
 } from './constants'
 import {
-  ByGuid, CellHistoryState, DisplayVariant, GroupSummaryState, NamedEntity, Option, TargetDisplay, Workbook,
-  WorkbookReduxState, WorkbookStatus, WorkbookTarget, Worksheet, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
+  ByGuid, CellHistoryState, DisplayVariant, GroupSummaryState, NamedEntity, Option, TargetDisplay, TemplateGroup,
+  Workbook, WorkbookReduxState, WorkbookStatus, WorkbookTarget, Worksheet, WorksheetDisplay, WorksheetQuery,
+  WorksheetQueryResult, WorksheetTemplate,
 } from './types'
 
 interface WorkbookProps {
@@ -285,3 +286,65 @@ export const getNextRerunDate = (
   }
   return new Date(new Date(queryResult.lastRunDate).getTime() + (intervalDays * DAY_MILLISECONDS))
 }
+
+const getWorksheetTemplatesByGuid = (state: WorkbookReduxState) => state.worksheetTemplatesByGuid
+export const getWorksheetTemplatesIsLoading = (state: WorkbookReduxState) => state.worksheetTemplatesLoading.isLoading
+export const getWorksheetTemplatesLoadingError = (state: WorkbookReduxState) => (
+  state.worksheetTemplatesLoading.errorMessage
+)
+
+export const getWorksheetTemplates = createSelector(
+  getWorksheetTemplatesByGuid,
+  (templatesByGuid): WorksheetTemplate[] => sortBy(Object.values(templatesByGuid), 'name'),
+)
+
+export const isTemplateInProject = (template: WorksheetTemplate, projectGuid: string | null): boolean => (
+  template.projectGuids.includes(projectGuid)
+)
+
+// Every template is in at most one group. Templates of other projects are only listed where templates are managed
+export const getTemplateGroups = createSelector(
+  getWorksheetTemplates,
+  getCurrentProjectGuid,
+  (templates, projectGuid): TemplateGroup[] => {
+    const isMine = (template: WorksheetTemplate) => !template.isPublic && template.isCreator
+    return [
+      { title: 'Default templates', templates: templates.filter(template => template.isPublic) },
+      { title: 'My templates', templates: templates.filter(isMine) },
+      {
+        title: 'Project templates',
+        templates: templates.filter(
+          template => !template.isPublic && !template.isCreator && isTemplateInProject(template, projectGuid),
+        ),
+      },
+    ].filter(group => group.templates.length > 0)
+  },
+)
+
+export const getCanSetTemplatePublic = (state: WorkbookReduxState): boolean => (
+  !!(state.user.isAnalyst || state.user.isDataManager)
+)
+
+const getCurrentProject = (state: WorkbookReduxState) => state.projectsByGuid[state.currentProjectGuid]
+
+export const getCanEditCurrentProject = (state: WorkbookReduxState): boolean => !!getCurrentProject(state)?.canEdit
+
+export const getCollaboratorsIsLoading = (state: WorkbookReduxState) => (
+  !!state.projectCollaboratorsLoading.isLoading
+)
+
+export const getEditorName = ({ displayName, email }: { displayName?: string, email?: string }): string => (
+  displayName || email
+)
+
+// The creator of a workbook can always edit it, so is not offered as an editor
+export const getEditorOptions = createSelector(
+  getCurrentProject,
+  (state: WorkbookReduxState, workbook: Workbook) => workbook,
+  (project, workbook): Option[] => sortBy([
+    ...(project?.collaborators || []).filter(collaborator => getEditorName(collaborator) !== workbook.createdBy),
+    ...(workbook.editors || []),
+  ].map(editor => ({ value: editor.username, text: getEditorName(editor) })).filter(
+    ({ value }, i, options) => options.findIndex(option => option.value === value) === i,
+  ), 'text'),
+)

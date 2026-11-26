@@ -13,9 +13,9 @@ import { DeleteButton, FormField, UpdateButton } from './sharedComponents'
 import { Option, TargetDisplay, Workbook, WorkbookReduxState, Worksheet, WorksheetQuery } from './types'
 
 const validateName = (value?: string) => (value && value.trim() ? undefined : 'Name is required')
-const formatList = (value?: string[]) => value || []
+export const formatList = (value?: string[]) => value || []
 
-const NAME_FIELD: FormField = { name: 'name', label: 'Name', validate: validateName }
+export const NAME_FIELD: FormField = { name: 'name', label: 'Name', validate: validateName }
 const NAME_FIELDS = [NAME_FIELD]
 const WORKBOOK_FIELDS: FormField[] = [NAME_FIELD, { name: 'description', label: 'Description' }]
 
@@ -40,7 +40,7 @@ interface IconTriggerProps {
   onClick?: () => void
 }
 
-const IconTrigger = ({ icon, label, onClick }: IconTriggerProps) => (
+export const IconTrigger = ({ icon, label, onClick }: IconTriggerProps) => (
   <ButtonLink icon={icon} size="small" aria-label={label} title={label} onClick={onClick} />
 )
 

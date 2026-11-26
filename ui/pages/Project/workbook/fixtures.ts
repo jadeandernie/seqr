@@ -1,6 +1,6 @@
 import { STATE_WITH_2_FAMILIES } from '../fixtures'
 import {
-  GroupSummary, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult,
+  GroupSummary, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult, WorksheetTemplate,
 } from './types'
 
 export const PROJECT_GUID = 'R0237_1000_genomes_demo'
@@ -27,6 +27,8 @@ export const WORKBOOK: Workbook = {
   canEdit: true,
   rerunIntervalDays: null,
   notifyOnNewResults: false,
+  editors: [],
+  canManageEditors: true,
 }
 
 export const OTHER_WORKBOOK: Workbook = {
@@ -53,10 +55,12 @@ export const GROUP_TARGET: WorkbookTarget = {
 
 export const DE_NOVO_WORKSHEET: Worksheet = {
   worksheetGuid: DE_NOVO_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'De Novo', order: 0, rerunIntervalDays: null,
+  templateGuid: null,
 }
 
 export const RECESSIVE_WORKSHEET: Worksheet = {
   worksheetGuid: RECESSIVE_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'Recessive', order: 1, rerunIntervalDays: null,
+  templateGuid: null,
 }
 
 const QUERY = { createdDate: '2026-11-20T10:03:00Z', createdBy: 'Test Manager User' }
@@ -171,6 +175,67 @@ export const WORKBOOK_DETAIL = {
     [RECESSIVE_QUERY_GUID]: RECESSIVE_QUERY,
   },
   worksheetQueryResultsByGuid: { [QUERY_RESULT_GUID]: QUERY_RESULT },
+}
+
+export const DEFAULT_TEMPLATE_GUID = 'WST0000001_de_novo_dominant'
+export const MY_TEMPLATE_GUID = 'WST0000002_my_trios'
+export const PROJECT_TEMPLATE_GUID = 'WST0000003_project_panel'
+export const OTHER_TEMPLATE_GUID = 'WST0000004_other_project'
+
+export const DEFAULT_TEMPLATE: WorksheetTemplate = {
+  worksheetTemplateGuid: DEFAULT_TEMPLATE_GUID,
+  name: 'De Novo / Dominant',
+  description: 'The default de novo and dominant searches',
+  queries: [
+    { name: 'De Novo/Dominant Restrictive', search: { inheritance: { mode: 'de_novo' } } },
+    { name: 'De Novo/Dominant Permissive', search: { inheritance: { mode: 'de_novo' } } },
+  ],
+  isPublic: true,
+  createdDate: '2026-11-20T10:00:00Z',
+  createdBy: null,
+  lastModifiedDate: '2026-11-20T10:00:00Z',
+  projectGuids: [],
+  isCreator: false,
+  canEdit: false,
+}
+
+export const MY_TEMPLATE: WorksheetTemplate = {
+  ...DEFAULT_TEMPLATE,
+  worksheetTemplateGuid: MY_TEMPLATE_GUID,
+  name: 'My trios',
+  description: null,
+  queries: [{ name: 'Recessive', search: { inheritance: { mode: 'recessive' } } }],
+  isPublic: false,
+  createdBy: 'Test User',
+  isCreator: true,
+  canEdit: true,
+}
+
+export const PROJECT_TEMPLATE: WorksheetTemplate = {
+  ...MY_TEMPLATE,
+  worksheetTemplateGuid: PROJECT_TEMPLATE_GUID,
+  name: 'Project panel',
+  description: 'Shared with this project',
+  createdBy: 'Test Manager User',
+  projectGuids: [PROJECT_GUID],
+  isCreator: false,
+  canEdit: false,
+}
+
+// Visible through another project of the user, so only listed where templates are managed
+export const OTHER_TEMPLATE: WorksheetTemplate = {
+  ...PROJECT_TEMPLATE,
+  worksheetTemplateGuid: OTHER_TEMPLATE_GUID,
+  name: 'Another project panel',
+  description: null,
+  projectGuids: ['R0002_other'],
+}
+
+export const TEMPLATES = {
+  [DEFAULT_TEMPLATE_GUID]: DEFAULT_TEMPLATE,
+  [MY_TEMPLATE_GUID]: MY_TEMPLATE,
+  [PROJECT_TEMPLATE_GUID]: PROJECT_TEMPLATE,
+  [OTHER_TEMPLATE_GUID]: OTHER_TEMPLATE,
 }
 
 export const SAVED_SEARCHES = {

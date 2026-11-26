@@ -3,11 +3,12 @@ import { RouterHistory, RouterLocation } from 'react-router-dom'
 
 import BaseUpdateButton from '../../../shared/components/buttons/UpdateButton'
 import BaseDeleteButton from '../../../shared/components/buttons/DeleteButton'
+import BaseDispatchRequestButton from '../../../shared/components/buttons/DispatchRequestButton'
 import BaseSearchResultsLink from '../../../shared/components/buttons/SearchResultsLink'
 import { CATEGORY_NAMES } from '../../../shared/components/panel/HpoPanel'
 import BaseVariants from '../../../shared/components/panel/variants/Variants'
 import BaseVariantSearchResults from '../../Search/components/VariantSearchResults'
-import { DisplayVariant, Option } from './types'
+import { DisplayVariant, Option, TemplateGroup } from './types'
 
 // Prop types for the javascript components used by the workbook pages
 
@@ -19,6 +20,7 @@ export interface FormField {
   color?: string
   validate?: (value?: string) => string | undefined
   format?: (value?: string[]) => string[]
+  groups?: TemplateGroup[]
 }
 
 interface UpdateButtonProps<V> {
@@ -31,6 +33,14 @@ interface UpdateButtonProps<V> {
   editIconName?: string
   trigger?: React.ReactNode
   showErrorPanel?: boolean
+  formContainer?: React.ReactNode
+  submitButtonText?: string
+  modalSize?: string
+}
+
+interface DispatchRequestButtonProps {
+  onSubmit: () => Promise<void>
+  buttonContent: string
 }
 
 interface DeleteButtonProps {
@@ -68,6 +78,9 @@ export const HPO_CATEGORY_NAMES: Record<string, string> = CATEGORY_NAMES
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const UpdateButton = BaseUpdateButton as unknown as React.ComponentType<UpdateButtonProps<any>>
+export const DispatchRequestButton = (
+  BaseDispatchRequestButton as unknown as React.ComponentType<DispatchRequestButtonProps>
+)
 export const DeleteButton = BaseDeleteButton as unknown as React.ComponentType<DeleteButtonProps>
 export const VariantSearchResults = (
   BaseVariantSearchResults as unknown as React.ComponentType<VariantSearchResultsProps>

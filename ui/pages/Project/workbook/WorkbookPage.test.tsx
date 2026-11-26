@@ -178,12 +178,14 @@ test('shows the controls to edit the structure of a workbook the user can edit',
 
   expect(getButtonLabels(wrapper)).toEqual([
     'Automatic reruns of workbook Trio analysis',
+    'Share workbook Trio analysis',
     'Remove 1',
     'Remove Test Group',
     'Add families or analysis groups',
     'Add a query to worksheet De Novo',
     'Rename worksheet De Novo',
     'Automatic reruns of worksheet De Novo',
+    'Save worksheet De Novo as a template',
     'Delete worksheet De Novo',
     'Rename query De novo restrictive',
     'Delete query De novo restrictive',
@@ -192,10 +194,12 @@ test('shows the controls to edit the structure of a workbook the user can edit',
     'Add a query to worksheet Recessive',
     'Rename worksheet Recessive',
     'Automatic reruns of worksheet Recessive',
+    'Save worksheet Recessive as a template',
     'Delete worksheet Recessive',
     'Rename query Recessive',
     'Delete query Recessive',
     'Add Worksheet',
+    'New Worksheet from Template',
     'Save Note',
     'Run',
   ])
@@ -206,7 +210,10 @@ test('only shows the status, note and run controls for a workbook the user can n
     withDetail({ workbooksByGuid: { [WORKBOOK_GUID]: { ...WORKBOOK, canEdit: false } } }),
   )
 
-  expect(getButtonLabels(wrapper)).toEqual(['Save Note', 'Run'])
+  expect(getButtonLabels(wrapper)).toEqual([
+    'Share workbook Trio analysis', 'Save worksheet De Novo as a template', 'Save worksheet Recessive as a template',
+    'Save Note', 'Run',
+  ])
   expect(wrapper.find('div[role="tabpanel"] Dropdown').first().prop('aria-label')).toEqual('Status')
   expect(getTabs(wrapper)).toHaveLength(2)
   expect(getSidebar(wrapper)).toHaveLength(2)
@@ -535,7 +542,8 @@ test('prompts for targets and queries when the workbook has none', async () => {
   expect(empty.wrapper.find('div[role="tabpanel"]').prop('aria-labelledby')).toBeUndefined()
   expect(empty.wrapper.find('nav[aria-label="Worksheets"]').text()).toContain('No worksheets')
   expect(getButtonLabels(empty.wrapper)).toEqual([
-    'Automatic reruns of workbook Trio analysis', 'Add families or analysis groups', 'Add Worksheet',
+    'Automatic reruns of workbook Trio analysis', 'Share workbook Trio analysis', 'Add families or analysis groups',
+    'Add Worksheet', 'New Worksheet from Template',
   ])
 
   const noQueries = await renderWorkbook(withDetail({ worksheetQueriesByGuid: {}, worksheetQueryResultsByGuid: {} }))

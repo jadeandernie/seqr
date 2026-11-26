@@ -49,10 +49,11 @@ class _FakeBlob(object):
 
     def upload_from_filename(self, local_path):
         self._bucket.record('upload_from_filename', self.path, local_path)
-        content = self._bucket.gcs.local_files.get(local_path, b'')
-        if os.path.isfile(local_path):
+        try:
             with open(local_path, 'rb') as f:
                 content = f.read()
+        except FileNotFoundError:
+            content = self._bucket.gcs.local_files.get(local_path, b'')
         self._bucket.gcs.add_file(self.path, content)
 
     def download_to_filename(self, local_path):

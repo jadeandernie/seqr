@@ -107,31 +107,39 @@ class DataTable extends React.PureComponent {
   }
 
   handleFilter = (e, data) => {
-    this.setState({ filter: data.value.toLowerCase() })
+    this.setState({ filter: data.value.toLowerCase(), activePage: 1 })
+  }
+
+  filteredData = () => {
+    const { data, getRowFilterVal } = this.props
+    const { filter } = this.state
+    return filter ? data.filter(row => getRowFilterVal(row).toLowerCase().includes(filter)) : data
   }
 
   allSelected = () => {
-    const { data, selectedRows } = this.props
-    return data.length > 0 && Object.keys(selectedRows).length === data.length &&
-      Object.values(selectedRows).every(isSelected => isSelected)
+    const { selectedRows, idField } = this.props
+    const filteredData = this.filteredData()
+    return filteredData.length > 0 && filteredData.every(row => selectedRows[row[idField]])
   }
 
   someSelected = () => {
-    const { data, selectedRows, idField } = this.props
-    return data.some(row => selectedRows[row[idField]]) && data.some(row => !selectedRows[row[idField]])
+    const { selectedRows, idField } = this.props
+    const filteredData = this.filteredData()
+    return filteredData.some(row => selectedRows[row[idField]]) &&
+      filteredData.some(row => !selectedRows[row[idField]])
   }
 
   selectAll = () => {
-    const { data, selectRows, includeSelectedRowData, idField } = this.props
+    const { selectRows, selectedRows, includeSelectedRowData, idField } = this.props
     if (!selectRows) {
       return
     }
 
     const allSelected = !this.allSelected()
     selectRows(
-      data.reduce((acc, row) => (
+      this.filteredData().reduce((acc, row) => (
         { ...acc, [row[idField]]: (allSelected && includeSelectedRowData) ? row : allSelected }
-      ), {}),
+      ), { ...selectedRows }),
     )
   }
 
@@ -181,11 +189,10 @@ class DataTable extends React.PureComponent {
       fixedWidth, includeSelectedRowData, filterContainer, getRowFilterVal, loadingProps = {}, maxHeight,
       formatProps, ...tableProps
     } = this.props
-    const { column, direction, activePage, filter } = this.state
+    const { column, direction, activePage: selectedPage, filter } = this.state
     const sortedDirection = direction || (defaultSortDescending ? DESCENDING : ASCENDING)
 
-    let totalRows = data.length
-    let sortedData = data.sort(compareObjects(column || defaultSortColumn))
+    let sortedData = [...data].sort(compareObjects(column || defaultSortColumn))
     if (sortedDirection === DESCENDING) {
       sortedData = sortedData.reverse()
     }
@@ -194,9 +201,11 @@ class DataTable extends React.PureComponent {
 
     if (filter) {
       sortedData = sortedData.filter(row => getRowFilterVal(row).toLowerCase().includes(filter))
-      totalRows = sortedData.length
     }
-    const isPaginated = rowsPerPage && sortedData.length > rowsPerPage
+    const totalRows = sortedData.length
+    const isPaginated = rowsPerPage && totalRows > rowsPerPage
+    const totalPages = isPaginated ? Math.ceil(totalRows / rowsPerPage) : 1
+    const activePage = Math.min(selectedPage, totalPages)
     if (isPaginated) {
       sortedData = sortedData.slice((activePage - 1) * rowsPerPage, activePage * rowsPerPage)
     }
@@ -288,7 +297,7 @@ class DataTable extends React.PureComponent {
                       {`Showing rows ${rowSummary}  `}
                       <Pagination
                         activePage={activePage}
-                        totalPages={Math.ceil(totalRows / rowsPerPage)}
+                        totalPages={totalPages}
                         onPageChange={this.handlePageChange}
                         size="mini"
                       />

@@ -39,6 +39,7 @@ import {
   CASE_REVIEW_INDIVIDUAL_EXPORT_DATA,
   SAMPLE_EXPORT_DATA,
   PROJECT_CATEGORY_FAMILY_FILTERS,
+  getSavedVariantTagKey,
 } from './constants'
 
 const FAMILY_SORT_LOOKUP = FAMILY_SORT_OPTIONS.reduce(
@@ -318,6 +319,17 @@ export const getAnalysisGroupTagTypeCounts = createSelector(
 export const getTagTypeCounts = createSelector(
   getCurrentProject,
   project => project?.variantTagTypes?.reduce((acc, { name, numTags }) => ({ ...acc, [name]: numTags }), {}),
+)
+
+// Counts from the loaded variants are only complete once all the tagged variants in the project are loaded
+export const getProjectSavedVariantTagTypeCounts = createSelector(
+  getProjectGuid,
+  state => state.savedVariantTags,
+  getSavedVariantTagTypeCounts,
+  getTagTypeCounts,
+  (projectGuid, savedVariantTags, loadedTagTypeCounts, projectTagTypeCounts) => (
+    (savedVariantTags || {})[getSavedVariantTagKey(projectGuid)] ? loadedTagTypeCounts : projectTagTypeCounts
+  ),
 )
 
 export const getVariantGeneId = ({ variantGuid, geneId }, variantGeneId) => `${variantGuid}-${variantGeneId || geneId}`

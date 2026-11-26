@@ -519,3 +519,5 @@ export const TAG_FORM_FIELD = {
   parse: value => (value || []).map(name => ({ name })),
   validate: value => (value && value.length ? undefined : 'Required'),
 }
+
+export const getSavedVariantTagKey = (projectGuid, tag) => `${projectGuid}/${tag || SHOW_ALL}`

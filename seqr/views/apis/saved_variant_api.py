@@ -13,6 +13,7 @@ from seqr.views.utils.json_to_orm_utils import update_model_from_json, get_or_cr
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import get_json_for_saved_variants_with_tags, get_json_for_variant_note, \
     get_json_for_saved_variants_child_entities, get_json_for_gene_notes_by_gene_id, STRUCTURED_METADATA_TAG_TYPES
+from seqr.views.utils.project_context_utils import MME_TAG_NAME
 from seqr.views.utils.permissions_utils import get_project_analysis_groups_and_check_view_permission, check_project_edit_permission, \
     login_and_policies_required, check_family_view_permission, check_user_created_object_permissions, \
     has_project_edit_permission
@@ -22,12 +23,14 @@ from seqr.views.utils.variant_utils import get_variants_response, parse_saved_va
 logger = logging.getLogger(__name__)
 
 INCLUDE_LOCUS_LISTS_PARAM = 'includeLocusLists'
+NOTE_TAG_NAME = 'Has Notes'
 
 @login_and_policies_required
 def saved_variant_data(request, project_guid, variant_guids=None):
     project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
     family_guids = request.GET['families'].split(',') if request.GET.get('families') else None
     variant_guids = variant_guids.split(',') if variant_guids else None
+    tag = request.GET.get('tag')
 
     variant_query = SavedVariant.objects.filter(family__analysisgroup__in=analysis_groups) \
         if analysis_groups else SavedVariant.objects.filter(family__project=project)
@@ -41,18 +44,37 @@ def saved_variant_data(request, project_guid, variant_guids=None):
             if not family_guids:
                 raise PermissionDenied(f'{request.user} does not have sufficient permissions for requested families')
         variant_query = variant_query.filter(family__guid__in=family_guids)
+    elif tag:
+        variant_query = _filter_tagged_variants(variant_query, tag)
     else:
         get_note_only = bool(request.GET.get('includeNoteVariants'))
         variant_query = variant_query.filter(varianttag__isnull=get_note_only).distinct()
 
     add_locus_list_detail = request.GET.get(INCLUDE_LOCUS_LISTS_PARAM) == 'true'
     response = get_variants_response(request, variant_query, add_locus_list_detail=add_locus_list_detail, genome_version= project.genome_version)
-    if 'individualsByGuid' in response and not family_guids:
+    is_tag_subset = bool(tag) and not (variant_guids or family_guids)
+    if 'individualsByGuid' in response and not family_guids and not is_tag_subset:
         if 'projectsByGuid' not in response:
             response['projectsByGuid'] = {project_guid: {}}
         response['projectsByGuid'][project_guid]['familiesLoaded'] = True
 
     return create_json_response(response)
+
+
+def _filter_tagged_variants(variant_query, tag):
+    if tag == NOTE_TAG_NAME:
+        tag_q = Q(variantnote__isnull=False)
+    elif tag == MME_TAG_NAME:
+        tag_q = Q(matchmakersubmissiongenes__isnull=False)
+    else:
+        tag_q = Q(varianttag__variant_tag_type__name=tag)
+    tagged_variants = variant_query.filter(tag_q).values('id')
+    # Include variants linked to the tagged variants by a shared tag or note, as they are displayed together
+    return variant_query.filter(
+        Q(id__in=tagged_variants) |
+        Q(varianttag__saved_variants__in=tagged_variants) |
+        Q(variantnote__saved_variants__in=tagged_variants)
+    ).distinct()
 
 
 @login_and_policies_required

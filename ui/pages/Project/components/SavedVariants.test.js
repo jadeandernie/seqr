@@ -189,6 +189,10 @@ test('loadVariants resets the page and only reloads when the initial load or the
   // changed family selection: reloads
   mockLatestProps.loadVariants({ ...match.params, familyGuid: 'F011652_2' })
   expect(store.getActions().filter(a => a.type === REQUEST_SAVED_VARIANTS).length).toEqual(2)
+
+  // changed tag: reloads
+  mockLatestProps.loadVariants({ ...match.params, tag: 'Review' })
+  expect(store.getActions().filter(a => a.type === REQUEST_SAVED_VARIANTS).length).toEqual(3)
 })
 
 test('tableSummaryComponent renders the tag type bar and excludes tags based on the hide filters', () => {
@@ -450,7 +454,91 @@ test('loadVariants requests note variants for the "Has Notes" tag', async () => 
   await flushAll()
 
   expect(getLastFetchUrl()).toContain('/api/project/R0237_1000_genomes_demo/saved_variants?')
-  expect(getLastFetchUrl()).toContain('includeNoteVariants=true')
+  expect(getLastFetchUrl()).toContain(`tag=${encodeURIComponent('Has Notes')}`)
+})
+
+const mountProjectTag = (state, tag) => {
+  const store = configureStore([thunk])(state)
+  mount(
+    <Provider store={store}>
+      <MemoryRouter initialEntries={[`/project/R0237_1000_genomes_demo/saved_variants${tag ? `/${tag}` : ''}`]}>
+        <RoutedSavedVariants match={{ url: '/project/R0237_1000_genomes_demo/saved_variants' }} />
+      </MemoryRouter>
+    </Provider>,
+  )
+  return store
+}
+
+test('loadVariants requests only the variants for a project tag and tracks the tag instead of the families', async () => {
+  mockFetchResponse({ familiesByGuid: { F011652_1: {} }, savedVariantsByGuid: {} })
+  const store = mountProjectTag(STATE_WITH_2_FAMILIES, 'Review')
+
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+
+  expect(getLastFetchUrl()).toContain('/api/project/R0237_1000_genomes_demo/saved_variants?')
+  expect(getLastFetchUrl()).toContain('tag=Review')
+  expect(store.getActions()).toContainEqual(
+    { type: 'RECEIVE_SAVED_VARIANT_TAGS', updates: { 'R0237_1000_genomes_demo/Review': true } },
+  )
+  expect(store.getActions().map(a => a.type)).not.toContain('RECEIVE_SAVED_VARIANT_FAMILIES')
+})
+
+test('loadVariants requests all tagged project variants without a tag and tracks them as loaded', async () => {
+  mockFetchResponse({ familiesByGuid: { F011652_1: {} }, savedVariantsByGuid: {} })
+  const store = mountProjectTag({
+    ...STATE_WITH_2_FAMILIES, savedVariantTags: { 'R0237_1000_genomes_demo/Review': true },
+  })
+
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+
+  expect(getLastFetchUrl()).toContain('/api/project/R0237_1000_genomes_demo/saved_variants?')
+  expect(getLastFetchUrl()).not.toContain('tag=')
+  expect(store.getActions()).toContainEqual(
+    { type: 'RECEIVE_SAVED_VARIANT_TAGS', updates: { 'R0237_1000_genomes_demo/ALL': true } },
+  )
+  expect(store.getActions()).toContainEqual(
+    expect.objectContaining({ type: 'RECEIVE_SAVED_VARIANT_FAMILIES', updates: { F011652_1: { loaded: true } } }),
+  )
+})
+
+test('loadVariants only re-requests a project tag that is not covered by the loaded tags', async () => {
+  const tagLoadedState = {
+    ...STATE_WITH_2_FAMILIES, savedVariantTags: { 'R0237_1000_genomes_demo/Review': true, 'R0001_other/Excluded': true },
+  }
+  mountProjectTag(tagLoadedState, 'Review')
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+  expect(fetch).not.toHaveBeenCalled()
+
+  mountProjectTag(tagLoadedState, 'Excluded')
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+  expect(getLastFetchUrl()).toContain('tag=Excluded')
+})
+
+test('loadVariants does not re-request a project tag when all tagged variants are loaded, except for untagged variants', async () => {
+  const allLoadedState = { ...STATE_WITH_2_FAMILIES, savedVariantTags: { 'R0237_1000_genomes_demo/ALL': true } }
+  mountProjectTag(allLoadedState, 'Review')
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  mountProjectTag(allLoadedState)
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+  expect(fetch).not.toHaveBeenCalled()
+
+  mountProjectTag(allLoadedState, 'MME%20Submission')
+  mockLatestProps.loadVariants(mockLatestProps.match.params)
+  await flushAll()
+  expect(getLastFetchUrl()).toContain(`tag=${encodeURIComponent('MME Submission')}`)
+})
+
+test('project tag counts use the project totals until all tagged variants are loaded', () => {
+  mountProjectTag(STATE_WITH_2_FAMILIES, 'Review')
+  expect(mockLatestProps.tagTypeCounts).toEqual({ Review: 2, Excluded: 0, 'Tier 1 - Phenotype not delineated': 1 })
+
+  mountProjectTag({ ...STATE_WITH_2_FAMILIES, savedVariantTags: { 'R0237_1000_genomes_demo/ALL': true } }, 'Review')
+  expect(mockLatestProps.tagTypeCounts).toEqual(expect.objectContaining({ [MME_TAG_NAME]: 0 }))
 })
 
 test('receiving a single-variant response marks its families as loaded', async () => {

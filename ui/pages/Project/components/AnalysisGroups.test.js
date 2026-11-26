@@ -82,3 +82,40 @@ test('renders a sync icon and criteria fields for a dynamic analysis group', () 
   const popupContent = wrapper.find('Popup').prop('content')
   expect(shallow(popupContent[0]).prop('field')).toEqual('analysisStatus')
 })
+
+test('links a dynamic analysis group that is shared across projects to the current project', () => {
+  const store = configureStore([thunk])({
+    ...STATE_WITH_2_FAMILIES,
+    analysisGroupsByGuid: {
+      ...STATE_WITH_2_FAMILIES.analysisGroupsByGuid,
+      DAG0000001_unsolved: {
+        analysisGroupGuid: 'DAG0000001_unsolved',
+        name: 'Unsolved',
+        projectGuid: null,
+        criteria: { analysisStatus: ['I'] },
+      },
+    },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <BrowserRouter>
+        <AnalysisGroups />
+      </BrowserRouter>
+    </Provider>
+  )
+
+  const links = wrapper.find('a').filterWhere(a => a.text() === 'Unsolved')
+  expect(links.length).toEqual(1)
+  expect(links.prop('href')).toEqual('/project/R0237_1000_genomes_demo/analysis_group/DAG0000001_unsolved')
+
+  const singleGroupWrapper = mount(
+    <Provider store={store}>
+      <BrowserRouter>
+        <AnalysisGroups analysisGroupGuid="DAG0000001_unsolved" />
+      </BrowserRouter>
+    </Provider>
+  )
+  expect(singleGroupWrapper.find('a').prop('href')).toEqual(
+    '/project/R0237_1000_genomes_demo/analysis_group/DAG0000001_unsolved',
+  )
+})

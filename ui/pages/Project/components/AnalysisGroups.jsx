@@ -11,13 +11,13 @@ import { HelpIcon, SectionHeader } from 'shared/components/StyledComponents'
 import { ANVIL_URL, FAMILY_FIELD_NAME_LOOKUP, CATEGORY_FAMILY_FILTERS } from 'shared/utils/constants'
 import { compareObjects } from 'shared/utils/sortUtils'
 import { loadCurrentProjectAnalysisGroups } from '../reducers'
-import { getProjectAnalysisGroupsByGuid } from '../selectors'
+import { getProjectAnalysisGroupsByGuid, getProjectGuid } from '../selectors'
 import { UpdateAnalysisGroupButton, DeleteAnalysisGroupButton } from './AnalysisGroupButtons'
 
-const AnalysisGroup = ({ ag }) => (
+const AnalysisGroup = ({ ag, projectGuid }) => (
   <div>
     {ag.criteria && <Icon name="sync" size="small" />}
-    <Link to={`/project/${ag.projectGuid}/analysis_group/${ag.analysisGroupGuid}`}>{ag.name}</Link>
+    <Link to={`/project/${projectGuid}/analysis_group/${ag.analysisGroupGuid}`}>{ag.name}</Link>
     <Popup
       position="right center"
       trigger={<HelpIcon />}
@@ -54,42 +54,46 @@ const AnalysisGroup = ({ ag }) => (
 
 AnalysisGroup.propTypes = {
   ag: PropTypes.object.isRequired,
+  projectGuid: PropTypes.string,
 }
 
-const AnalysisGroupsList = ({ analysisGroupsByGuid }) => {
+const AnalysisGroupsList = ({ analysisGroupsByGuid, projectGuid }) => {
   const allGroups = Object.values(analysisGroupsByGuid).sort(compareObjects('name'))
   const accessGroups = allGroups.filter(({ workspaceName }) => workspaceName)
   const mainGroups = allGroups.filter(({ workspaceName }) => !workspaceName)
   return (
     <div>
-      {mainGroups.map(ag => <AnalysisGroup key={ag.name} ag={ag} />)}
+      {mainGroups.map(ag => <AnalysisGroup key={ag.name} ag={ag} projectGuid={projectGuid} />)}
       {accessGroups.length > 0 && <SectionHeader>Access Groups</SectionHeader>}
-      {accessGroups.map(ag => <AnalysisGroup key={ag.name} ag={ag} />)}
+      {accessGroups.map(ag => <AnalysisGroup key={ag.name} ag={ag} projectGuid={projectGuid} />)}
     </div>
   )
 }
 
 AnalysisGroupsList.propTypes = {
   analysisGroupsByGuid: PropTypes.object.isRequired,
+  projectGuid: PropTypes.string,
 }
 
-const AnalysisGroups = React.memo(({ load, loading, analysisGroupsByGuid, analysisGroupGuid }) => (
+const AnalysisGroups = React.memo(({ load, loading, analysisGroupsByGuid, analysisGroupGuid, projectGuid }) => (
   <DataLoader load={load} loading={loading} content={analysisGroupsByGuid}>
     {analysisGroupsByGuid[analysisGroupGuid] ?
-      <AnalysisGroup ag={analysisGroupsByGuid[analysisGroupGuid]} /> :
-      <AnalysisGroupsList analysisGroupsByGuid={analysisGroupsByGuid} />}
+      <AnalysisGroup ag={analysisGroupsByGuid[analysisGroupGuid]} projectGuid={projectGuid} /> :
+      <AnalysisGroupsList analysisGroupsByGuid={analysisGroupsByGuid} projectGuid={projectGuid} />}
   </DataLoader>
 ))
 
 AnalysisGroups.propTypes = {
   analysisGroupGuid: PropTypes.string,
   analysisGroupsByGuid: PropTypes.object.isRequired,
+  projectGuid: PropTypes.string,
   loading: PropTypes.bool,
   load: PropTypes.func,
 }
 
 const mapStateToProps = state => ({
   analysisGroupsByGuid: getProjectAnalysisGroupsByGuid(state),
+  projectGuid: getProjectGuid(state),
   loading: getAnalysisGroupIsLoading(state),
 })
 

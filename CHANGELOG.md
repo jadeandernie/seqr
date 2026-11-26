@@ -2,6 +2,9 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds import of individual clinical data (HPO terms, diagnoses, onset, candidate genes, pedigree details) from
+GA4GH Phenopackets v2 JSON (Phenopacket, Family and Cohort messages) with a review step. Other sources such as REDCap,
+PhenoTips or FHIR must be exported or converted to Phenopackets first. Identifying fields are ignored and not stored
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

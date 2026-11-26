@@ -1,0 +1,35 @@
+{
+  "id": "SYNTHETIC-family-1",
+  "proband": {
+    "id": "SYNTHETIC-proband-1",
+    "subject": {"id": "NA19675_1", "dateOfBirth": "2001-09-30T00:00:00Z", "sex": "MALE", "karyotypicSex": "XXY"},
+    "phenotypicFeatures": [
+      {"type": {"id": "HP:0001631", "label": "Atrial septal defect"}},
+      {"type": {"id": "HP:0012469", "label": "Infantile spasms"}, "onset": {"ontologyClass": {"id": "HP:0003593", "label": "Infantile onset"}}},
+      {"type": {"id": "HP:0002011", "label": "Morphological central nervous system abnormality"}, "excluded": true}
+    ],
+    "diseases": [
+      {"term": {"id": "OMIM:615593", "label": "SYNTHETIC label"}},
+      {"term": {"id": "OMIM:236250", "label": "SYNTHETIC label"}, "onset": {"age": {"iso8601duration": "P3Y"}}}
+    ],
+    "interpretations": [{
+      "id": "SYNTHETIC-interpretation-2",
+      "diagnosis": {"genomicInterpretations": [
+        {"subjectOrBiosampleId": "NA19675_1", "interpretationStatus": "CANDIDATE", "variantInterpretation": {"variationDescriptor": {"id": "SYNTHETIC-variant", "geneContext": {"valueId": "HGNC:1745", "symbol": "CDC7"}}}},
+        {"subjectOrBiosampleId": "NA19675_1", "interpretationStatus": "CONTRIBUTORY", "gene": {"valueId": "HGNC:17012", "symbol": "ACY3"}},
+        {"subjectOrBiosampleId": "NA19675_1", "interpretationStatus": "REJECTED", "gene": {"valueId": "HGNC:14825", "symbol": "OR4F5"}}
+      ]}
+    }]
+  },
+  "relatives": [
+    {"id": "SYNTHETIC-relative-1", "subject": {"id": "NA19678", "sex": "MALE"}},
+    {"id": "SYNTHETIC-relative-2", "subject": {"id": "NA19679", "sex": "FEMALE"}, "phenotypicFeatures": [{"type": {"id": "HP:0011675", "label": "Arrhythmia"}}]}
+  ],
+  "consanguinousParents": false,
+  "pedigree": {"persons": [
+    {"familyId": "SYNTHETIC-FAMILY", "individualId": "NA19675_1", "paternalId": "NA19678", "maternalId": "NA19679", "sex": "MALE", "affectedStatus": "AFFECTED"},
+    {"familyId": "SYNTHETIC-FAMILY", "individualId": "NA19678", "paternalId": "0", "maternalId": "0", "sex": "MALE", "affectedStatus": "UNAFFECTED"},
+    {"familyId": "SYNTHETIC-FAMILY", "individualId": "NA19679", "paternalId": "0", "maternalId": "0", "sex": "FEMALE", "affectedStatus": "AFFECTED"}
+  ]},
+  "metaData": {"created": "2024-03-01T10:00:00Z", "createdBy": "Dr Synthetic Example", "phenopacketSchemaVersion": "2.0"}
+}

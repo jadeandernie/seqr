@@ -36,7 +36,9 @@ from seqr.views.apis.individual_api import \
     receive_individuals_table_handler, \
     save_individuals_table_handler, \
     receive_individuals_metadata_handler, \
-    save_individuals_metadata_table_handler
+    save_individuals_metadata_table_handler, \
+    receive_phenopackets_handler, \
+    save_phenopackets_handler
 
 from seqr.views.apis.case_review_api import \
     update_case_review_discussion, \
@@ -241,6 +243,8 @@ api_endpoints = {
     'igv/(?P<sample_guid>[^/]+)/igv_track/(?P<igv_track_path>.+)': fetch_igv_track,
     'project/(?P<project_guid>[^/]+)/upload_individuals_metadata_table': receive_individuals_metadata_handler,
     'project/(?P<project_guid>[^/]+)/save_individuals_metadata_table/(?P<upload_file_id>[^/]+)': save_individuals_metadata_table_handler,
+    'project/(?P<project_guid>[^/]+)/upload_phenopackets': receive_phenopackets_handler,
+    'project/(?P<project_guid>[^/]+)/save_phenopackets/(?P<upload_file_id>[^/]+)': save_phenopackets_handler,
 
     'project/(?P<project_guid>[^/]+)/analysis_groups/create': update_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/update': update_analysis_group_handler,

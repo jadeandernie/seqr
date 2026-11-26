@@ -10,6 +10,7 @@ import { EditFamiliesBulkForm, EditIndividualsBulkForm, EditIndividualMetadataBu
 import EditIndividualsForm from './EditIndividualsForm'
 import EditFamiliesForm from './EditFamiliesForm'
 import ImportGregorMetadata from './ImportGregorMetadata'
+import ImportPhenopackets from './ImportPhenopackets'
 import { getCurrentProject } from '../../selectors'
 
 const TabPane = styled(Tab.Pane)`
@@ -37,6 +38,10 @@ const PANE_DETAILS = [
   {
     menuItem: 'Bulk Edit Individual Metadata',
     formClass: EditIndividualMetadataBulkForm,
+  },
+  {
+    menuItem: 'Import Clinical Data (Phenopackets)',
+    formClass: ImportPhenopackets,
   },
 ]
 const formatPane = ({ formClass, menuItem }) => ({

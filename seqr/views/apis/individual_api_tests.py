@@ -3,6 +3,7 @@ import datetime
 import gzip
 import json
 import mock
+import os
 import re
 import responses
 
@@ -16,7 +17,10 @@ from seqr.models import Individual, Dataset, SavedVariant, VariantTag
 from seqr.views.apis.individual_api import edit_individuals_handler, update_individual_handler, \
     delete_individuals_handler, receive_individuals_table_handler, save_individuals_table_handler, \
     receive_individuals_metadata_handler, save_individuals_metadata_table_handler, update_individual_hpo_terms, \
-    get_hpo_terms, get_individual_rna_seq_data, import_gregor_metadata
+    get_hpo_terms, get_individual_rna_seq_data, import_gregor_metadata, receive_phenopackets_handler, \
+    save_phenopackets_handler
+from seqr.utils.constants import HPO_QUALIFIERS
+from seqr.utils.phenopacket_utils import ONSET_AGE_BY_HPO_ID, ONSET_AGE_LABELS
 from seqr.views.apis.report_api_tests import PARTICIPANT_TABLE, PHENOTYPE_TABLE, EXPERIMENT_TABLE, EXPERIMENT_LOOKUP_TABLE, GENETIC_FINDINGS_TABLE
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, INDIVIDUAL_FIELDS, \
     INDIVIDUAL_CORE_FIELDS, CORE_INTERNAL_INDIVIDUAL_FIELDS, GENE_FIELDS
@@ -98,6 +102,214 @@ LOAD_PARTICIPANT_TABLE[6][15] += '|Asian'
 LOAD_PARTICIPANT_TABLE[6][17] = ''
 
 TRIGGER_RELOAD_URL = 'http://pipeline-runner:6000/rebuild_gt_stats_enqueue'
+
+PHENOPACKET_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'test_resources', 'phenopackets')
+PHENOPACKET_IDENTIFYING_VALUES = [
+    'SYNTHETIC', 'Synthetic', '2012-05-17', '2001-09-30', '1988-01-02', 'floppy since', 'Dr ', '.vcf',
+    'Jane Citizen', 'MRN-555',
+]
+NO_PHENOPACKET_FIELD = 'is present but is not imported: seqr has no field for it'
+EXPECTED_PHENOPACKET_STASH = {
+    'I000007_na20870': {
+        'features': {
+            'features': [{'id': 'HP:0001252', 'qualifiers': [
+                {'type': 'severity', 'label': 'Mild'},
+                {'type': 'pace_of_progression', 'label': 'Nonprogressive'},
+                {'type': 'age_of_onset', 'label': 'Infantile onset'},
+            ]}],
+            'absentFeatures': [{'id': 'HP:0001263'}],
+        },
+        'disorders': ['236250'],
+        'candidateGenes': [{'gene': 'MTHFR'}],
+        'birthYear': 2012,
+        'onsetAge': 'I',
+        'mondoId': 'MONDO:0009353',
+    },
+    'I000001_na19675': {
+        'features': {
+            'features': [
+                {'id': 'HP:0001631'},
+                {'id': 'HP:0012469', 'qualifiers': [{'type': 'age_of_onset', 'label': 'Infantile onset'}]},
+            ],
+            'absentFeatures': [{'id': 'HP:0002011'}],
+        },
+        'disorders': ['615593', '236250'],
+        'candidateGenes': [{'gene': 'CDC7'}],
+        'birthYear': 2001,
+        'onsetAge': 'C',
+        'consanguinity': False,
+    },
+    'I000003_na19679': {
+        'features': {'features': [{'id': 'HP:0011675'}], 'absentFeatures': []},
+        'affected': 'A',
+    },
+    'I000004_hg00731': {
+        'features': {'features': [{'id': 'HP:0002017'}, {'id': 'HP:0001508'}], 'absentFeatures': []},
+        'birthYear': 1988,
+        'onsetAge': 'Y',
+        'sex': 'F',
+        'mondoId': 'MONDO:0008788',
+    },
+}
+NA19675_CURRENT_HPO_DISPLAY = [
+    'Defect in the atrial septum (HP:0001631)',
+    'Morphological abnormality of the central nervous system (HP:0002011) [Infantile onset, Mild, Nonprogressive]',
+    'Tetralogy of Fallot (HP:0001636)',
+    'Absent: Arrhythmia (HP:0011675)',
+    'Absent: Complete atrioventricular canal defect (HP:0001674)',
+    'Absent: Failure to thrive (HP:0001508)',
+]
+EXPECTED_PHENOPACKET_PREVIEW = {
+    'uploadedFileId': mock.ANY,
+    'info': ['6 subject(s) read from 3 file(s)', '4 existing individual(s) have proposed changes'],
+    'individuals': [{
+        'individualGuid': 'I000007_na20870',
+        'individualId': 'NA20870',
+        'familyId': '3',
+        'unknownHpoTerms': ['HP:0004322'],
+        'warnings': [
+            f'measurements {NO_PHENOPACKET_FIELD}',
+            f'subject.timeAtLastEncounter {NO_PHENOPACKET_FIELD}',
+            f'subject.vitalStatus {NO_PHENOPACKET_FIELD}',
+            'interpretations[0].progressStatus is present but is not imported: solve status is set by analysts in seqr',
+            'interpretations[0].diagnosis.disease is present but is not imported: diagnoses are read from the diseases field',
+        ],
+        'changes': [{
+            'field': 'features', 'label': 'HPO terms', 'isList': True, 'current': [],
+            'proposed': [
+                'Muscular hypotonia (HP:0001252) [Mild, Nonprogressive, Infantile onset]',
+                'Absent: Global developmental delay (HP:0001263)',
+            ],
+            'added': [
+                'Muscular hypotonia (HP:0001252) [Mild, Nonprogressive, Infantile onset]',
+                'Absent: Global developmental delay (HP:0001263)',
+            ],
+            'removed': [], 'conflicts': [], 'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'disorders', 'label': 'Disorders (OMIM)', 'isList': True, 'current': [], 'proposed': ['OMIM:236250'],
+            'added': ['OMIM:236250'], 'removed': [], 'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'candidateGenes', 'label': 'Candidate genes', 'isList': True, 'current': [], 'proposed': ['MTHFR'],
+            'added': ['MTHFR'], 'removed': [], 'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'birthYear', 'label': 'Birth year', 'isList': False, 'current': None, 'proposed': '2012',
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'onsetAge', 'label': 'Age of onset', 'isList': False, 'current': None, 'proposed': 'Infantile onset',
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'mondoId', 'label': 'Family MONDO ID', 'isList': False, 'current': None, 'proposed': 'MONDO:0009353',
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }],
+    }, {
+        'individualGuid': 'I000001_na19675',
+        'individualId': 'NA19675_1',
+        'familyId': '1',
+        'unknownHpoTerms': [],
+        'warnings': [
+            'proband.interpretations[0].diagnosis.genomicInterpretations[0].variantInterpretation: variant details '
+            'are not imported, only the gene',
+            'proband.interpretations[0].diagnosis.genomicInterpretations[2]: an interpretation with status REJECTED '
+            'is not imported (only CANDIDATE, CONTRIBUTORY and CAUSATIVE genes are)',
+            "Gene(s) not found in seqr's gene reference data and not proposed: ACY3",
+        ],
+        'changes': [{
+            'field': 'features', 'label': 'HPO terms', 'isList': True,
+            'current': NA19675_CURRENT_HPO_DISPLAY,
+            'proposed': [
+                'Defect in the atrial septum (HP:0001631)',
+                'Infantile spasms (HP:0012469) [Infantile onset]',
+                'Absent: Morphological abnormality of the central nervous system (HP:0002011)',
+            ],
+            'added': ['Infantile spasms (HP:0012469) [Infantile onset]'],
+            'removed': NA19675_CURRENT_HPO_DISPLAY[1:],
+            'conflicts': ['Morphological abnormality of the central nervous system (HP:0002011)'],
+            'canMerge': True, 'canReplace': True, 'conflict': True,
+        }, {
+            'field': 'disorders', 'label': 'Disorders (OMIM)', 'isList': True, 'current': ['OMIM:615593'],
+            'proposed': ['OMIM:615593', 'OMIM:236250'], 'added': ['OMIM:236250'], 'removed': [],
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'candidateGenes', 'label': 'Candidate genes', 'isList': True, 'current': ['EHBP1L1', 'ACY3'],
+            'proposed': ['CDC7'], 'added': ['CDC7'], 'removed': ['EHBP1L1', 'ACY3'],
+            'canMerge': True, 'canReplace': True, 'conflict': False,
+        }, {
+            'field': 'birthYear', 'label': 'Birth year', 'isList': False, 'current': '1999', 'proposed': '2001',
+            'canMerge': False, 'canReplace': True, 'conflict': True,
+        }, {
+            'field': 'onsetAge', 'label': 'Age of onset', 'isList': False, 'current': 'Adult onset',
+            'proposed': 'Childhood onset', 'canMerge': False, 'canReplace': True, 'conflict': True,
+        }, {
+            'field': 'consanguinity', 'label': 'Consanguinity', 'isList': False, 'current': 'Yes', 'proposed': 'No',
+            'canMerge': False, 'canReplace': True, 'conflict': True,
+        }],
+    }, {
+        'individualGuid': 'I000003_na19679',
+        'individualId': 'NA19679',
+        'familyId': '1',
+        'unknownHpoTerms': [],
+        'warnings': [],
+        'changes': [{
+            'field': 'features', 'label': 'HPO terms', 'isList': True, 'current': [], 'proposed': ['Arrhythmia (HP:0011675)'],
+            'added': ['Arrhythmia (HP:0011675)'], 'removed': [], 'conflicts': [],
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'affected', 'label': 'Affected status', 'isList': False, 'current': 'Unaffected', 'proposed': 'Affected',
+            'canMerge': False, 'canReplace': True, 'conflict': True,
+        }],
+    }, {
+        'individualGuid': 'I000004_hg00731',
+        'individualId': 'HG00731',
+        'familyId': '2',
+        'unknownHpoTerms': [],
+        'warnings': [],
+        'changes': [{
+            'field': 'features', 'label': 'HPO terms', 'isList': True,
+            'current': [
+                'Morphological abnormality of the central nervous system (HP:0002011)', 'Arrhythmia (HP:0011675)',
+                'Absent: Nausea and vomiting (HP:0002017)',
+            ],
+            'proposed': ['Nausea and vomiting (HP:0002017)', 'Failure to thrive (HP:0001508)'],
+            'added': ['Failure to thrive (HP:0001508)'],
+            'removed': [
+                'Morphological abnormality of the central nervous system (HP:0002011)', 'Arrhythmia (HP:0011675)',
+                'Absent: Nausea and vomiting (HP:0002017)',
+            ],
+            'conflicts': ['Nausea and vomiting (HP:0002017)'],
+            'canMerge': True, 'canReplace': True, 'conflict': True,
+        }, {
+            'field': 'birthYear', 'label': 'Birth year', 'isList': False, 'current': None, 'proposed': '1988',
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'onsetAge', 'label': 'Age of onset', 'isList': False, 'current': None, 'proposed': 'Young adult onset',
+            'canMerge': True, 'canReplace': False, 'conflict': False,
+        }, {
+            'field': 'sex', 'label': 'Sex', 'isList': False, 'current': 'X0', 'proposed': 'Female',
+            'canMerge': False, 'canReplace': True, 'conflict': True,
+        }, {
+            'field': 'mondoId', 'label': 'Family MONDO ID', 'isList': False, 'current': 'MONDO:0044976',
+            'proposed': 'MONDO:0008788', 'canMerge': False, 'canReplace': True, 'conflict': True,
+        }],
+    }],
+    'unmatchedSubjects': ['SYNTHETIC-UNMATCHED-0001'],
+    'unchangedIndividuals': ['NA19678'],
+    'warnings': [],
+    'ignoredFields': [
+        'description', 'files', 'id',
+        'interpretations[].diagnosis.genomicInterpretations[].gene.description',
+        'interpretations[].diagnosis.genomicInterpretations[].subjectOrBiosampleId',
+        'interpretations[].id', 'interpretations[].summary',
+        'members[].id', 'members[].subject.dateOfBirth (only the year is kept)',
+        'metaData.createdBy', 'metaData.externalReferences', 'metaData.submittedBy',
+        'pedigree.persons[].familyId',
+        'phenotypicFeatures[].description', 'phenotypicFeatures[].evidence',
+        'proband.id',
+        'proband.interpretations[].diagnosis.genomicInterpretations[].subjectOrBiosampleId',
+        'proband.interpretations[].id', 'proband.subject.dateOfBirth (only the year is kept)',
+        'relatives[].id',
+        'subject.alternateIds', 'subject.dateOfBirth (only the year is kept)',
+    ],
+}
 
 
 @mock.patch('seqr.utils.middleware.DEBUG', False)
@@ -1153,6 +1365,402 @@ class IndividualAPITest(object):
                 ('genetic_findings', genetic_findings_table),
             ]
         })
+
+    @staticmethod
+    def _phenopacket_file(name):
+        with open(os.path.join(PHENOPACKET_DIR, name), 'rb') as f:
+            return SimpleUploadedFile(name, f.read())
+
+    def _upload_phenopackets(self, url, *messages):
+        return self.client.post(url, data={
+            f'file_{i}': SimpleUploadedFile(f'Jane Citizen {i}.json', (m if isinstance(m, str) else json.dumps(m)).encode('utf-8'))
+            for i, m in enumerate(messages)
+        })
+
+    def _assert_no_identifying_logs(self):
+        logs = self._log_stream.getvalue()
+        self.assertNotEqual(logs, '')
+        for value in PHENOPACKET_IDENTIFYING_VALUES:
+            self.assertNotIn(value, logs)
+
+    def test_phenopacket_constants(self):
+        self.assertSetEqual(set(ONSET_AGE_BY_HPO_ID.values()), set(Individual.ONSET_AGE_LOOKUP.keys()))
+        self.assertDictEqual(ONSET_AGE_LABELS, Individual.ONSET_AGE_LOOKUP)
+        self.assertDictEqual(
+            {hpo_id: Individual.ONSET_AGE_LOOKUP[code] for hpo_id, code in ONSET_AGE_BY_HPO_ID.items()
+             if hpo_id in HPO_QUALIFIERS['age_of_onset'].values()},
+            {hpo_id: label for label, hpo_id in HPO_QUALIFIERS['age_of_onset'].items()},
+        )
+
+    @mock.patch('seqr.views.apis.individual_api.MAX_PHENOPACKET_ERRORS', 3)
+    def test_receive_phenopackets_handler(self):
+        url = reverse(receive_phenopackets_handler, args=[PROJECT_GUID])
+        self.check_manager_login(url)
+
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'errors': ['No files were uploaded'], 'warnings': []})
+
+        # Malformed files are rejected with the path of each problem, and no content of the file
+        self.reset_logs()
+        response = self._upload_phenopackets(
+            url,
+            {'subject': {'id': 'NA19675_1'}},
+            {'subject': {'id': 'NA19678', 'dateOfBirth': 'Jane Citizen, MRN-555', 'sex': 'Jane Citizen'},
+             'phenotypicFeatures': [{'type': 'Jane Citizen'}]},
+            '{"subject": {"id": "Jane Citizen"',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'warnings': [], 'errors': [
+            'File 2: subject.dateOfBirth: expected an ISO 8601 timestamp such as 2010-01-01T00:00:00Z',
+            'File 2: subject.sex: not a value of the Sex enum (FEMALE, MALE, OTHER_SEX, UNKNOWN_SEX)',
+            'File 2: phenotypicFeatures[0].type: expected object, found string',
+            '1 more errors not shown',
+        ]})
+        self._assert_no_identifying_logs()
+
+        # The multipart upload is not available to request logging
+        self.reset_logs()
+        files = {name: self._phenopacket_file(f'synthetic_{name}.json') for name in ['phenopacket', 'family', 'cohort']}
+        with mock.patch('seqr.utils.middleware.logger') as mock_logger, \
+                mock.patch('seqr.views.apis.individual_api.save_temp_json_records') as mock_save_records:
+            mock_save_records.return_value = 'abc123'
+            response = self.client.post(url, data=files)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {**EXPECTED_PHENOPACKET_PREVIEW, 'uploadedFileId': 'abc123'})
+        mock_logger.info.assert_called_once_with(
+            '', self.manager_user, http_request_json=mock.ANY, request_body=None, traceback=None, detail=None)
+        self.assertNotIn('SYNTHETIC', json.dumps(mock_logger.info.call_args.kwargs['http_request_json']))
+        mock_logger.warning.assert_not_called()
+        mock_logger.error.assert_not_called()
+
+        # Only seqr-shaped values for matched individuals are stashed for the save step
+        mock_save_records.assert_called_once_with(EXPECTED_PHENOPACKET_STASH, self.manager_user)
+        self.assert_no_logs()
+
+        # Subjects are never created, and files with nothing to apply still return a preview
+        self.reset_logs()
+        response = self._upload_phenopackets(
+            url, '\n'.join([json.dumps({'subject': {'id': f'Jane Citizen {i}', 'sex': 'FEMALE'}}) for i in range(2)]),
+            {'subject': {'id': 'NA19678', 'sex': 'MALE'}, 'metaData': {'phenopacketSchemaVersion': '1.0'}},
+            {'subject': {'id': 'NA19678', 'sex': 'FEMALE'}},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {
+            'uploadedFileId': mock.ANY,
+            'info': ['3 subject(s) read from 3 file(s)', '0 existing individual(s) have proposed changes'],
+            'individuals': [],
+            'unmatchedSubjects': ['Jane Citizen 0', 'Jane Citizen 1'],
+            'unchangedIndividuals': ['NA19678'],
+            'warnings': [
+                'metaData.phenopacketSchemaVersion is not a 2.x version: this importer reads Phenopackets v2, fields '
+                'from other versions may be missed',
+                '1 record(s) repeat a subject that was already read; only the first record for each subject is used',
+            ],
+            'ignoredFields': [],
+        })
+        self._assert_no_identifying_logs()
+        self.assertEqual(Individual.objects.filter(individual_id__startswith='Jane').count(), 0)
+
+    def test_receive_phenopackets_pedigree_and_family_fields(self):
+        url = reverse(receive_phenopackets_handler, args=[PROJECT_GUID])
+        self.check_manager_login(url)
+
+        family = {
+            'proband': {
+                'subject': {'id': 'HG00731', 'sex': 'FEMALE', 'karyotypicSex': 'XO'},
+                'diseases': [{'term': {'id': 'MONDO:0044976'}}],
+                'interpretations': [{'diagnosis': {'genomicInterpretations': [
+                    {'interpretationStatus': 'CAUSATIVE', 'gene': {'valueId': 'HGNC:1', 'alternateIds': ['ensembl:ENSG00000177000']}},
+                    {'interpretationStatus': 'CAUSATIVE', 'gene': {'valueId': 'HGNC:2', 'symbol': 'mthfr'}},
+                    {'interpretationStatus': 'CANDIDATE', 'gene': {'valueId': 'ensembl:ENSG00000000001'}},
+                ]}}],
+            },
+            'relatives': [
+                {'subject': {'id': 'HG00732'}, 'diseases': [{'term': {'id': 'MONDO:0008788'}}]},
+                {'subject': {'id': 'NA19678'}, 'diseases': [{'term': {'id': 'MONDO:0008788'}}]},
+                {'subject': {'id': 'NA19679'}, 'diseases': [{'term': {'id': 'MONDO:0008788'}}]},
+            ],
+            'pedigree': {'persons': [
+                {'individualId': 'HG00731', 'maternalId': 'HG00732', 'paternalId': 'HG00733', 'affectedStatus': 'AFFECTED'},
+                {'individualId': 'HG00732', 'maternalId': 'NA19679', 'paternalId': 'HG00732', 'sex': 'MALE'},
+                {'individualId': 'HG00733', 'maternalId': 'NOT_IN_SEQR', 'affectedStatus': 'UNAFFECTED'},
+            ]},
+        }
+        Individual.objects.filter(individual_id='HG00731').update(mother=None, father=None)
+        response = self._upload_phenopackets(url, family)
+        self.assertEqual(response.status_code, 200)
+        not_in_family = 'is not another individual in the same seqr family and is not proposed'
+        self.assertDictEqual(response.json(), {
+            'uploadedFileId': mock.ANY,
+            'info': ['5 subject(s) read from 1 file(s)', '2 existing individual(s) have proposed changes'],
+            'individuals': [{
+                'individualGuid': 'I000004_hg00731', 'individualId': 'HG00731', 'familyId': '2', 'unknownHpoTerms': [],
+                'warnings': [
+                    "Gene(s) not found in seqr's gene reference data and not proposed: mthfr, ensembl:ENSG00000000001",
+                    'The pedigree mother has an incompatible sex in seqr and is not proposed',
+                    'The pedigree father has an incompatible sex in seqr and is not proposed',
+                ],
+                'changes': [{
+                    'field': 'candidateGenes', 'label': 'Candidate genes', 'isList': True, 'current': [], 'proposed': ['MTHFR'],
+                    'added': ['MTHFR'], 'removed': [], 'canMerge': True, 'canReplace': False, 'conflict': False,
+                }],
+            }, {
+                'individualGuid': 'I000005_hg00732', 'individualId': 'HG00732', 'familyId': '2', 'unknownHpoTerms': [],
+                'warnings': [f'The pedigree mother {not_in_family}', f'The pedigree father {not_in_family}'],
+                'changes': [],
+            }, {
+                'individualGuid': 'I000002_na19678', 'individualId': 'NA19678', 'familyId': '1', 'unknownHpoTerms': [],
+                'warnings': [],
+                'changes': [{
+                    'field': 'mondoId', 'label': 'Family MONDO ID', 'isList': False, 'current': None,
+                    'proposed': 'MONDO:0008788', 'canMerge': True, 'canReplace': False, 'conflict': False,
+                }],
+            }, {
+                'individualGuid': 'I000006_hg00733', 'individualId': 'HG00733', 'familyId': '2', 'unknownHpoTerms': [],
+                'warnings': [f'The pedigree mother {not_in_family}'],
+                'changes': [],
+            }],
+            'unmatchedSubjects': [],
+            'unchangedIndividuals': ['NA19679'],
+            'warnings': [
+                'Family 2: the uploaded subjects have different MONDO diagnoses; the family MONDO ID is not proposed',
+            ],
+            'ignoredFields': [],
+        })
+
+    @responses.activate
+    def test_save_phenopackets_handler(self):
+        responses.add(responses.POST, TRIGGER_RELOAD_URL)
+        upload_url = reverse(receive_phenopackets_handler, args=[PROJECT_GUID])
+        self.check_manager_login(upload_url)
+        response = self.client.post(upload_url, data={
+            name: self._phenopacket_file(f'synthetic_{name}.json') for name in ['phenopacket', 'family', 'cohort']})
+        self.assertEqual(response.status_code, 200)
+        upload_id = response.json()['uploadedFileId']
+        url = reverse(save_phenopackets_handler, args=[PROJECT_GUID, upload_id])
+
+        def _save(selections, save_url=url):
+            return self.client.post(save_url, content_type='application/json', data=json.dumps(selections))
+
+        self.login_collaborator()
+        response = _save({'individuals': {'I000007_na20870': {'birthYear': 'merge'}}})
+        self.assertEqual(response.status_code, 403)
+        self.login_manager()
+
+        for body in [{}, {'individuals': {}}, {'individuals': ['I000007_na20870']}]:
+            response = _save(body)
+            self.assertEqual(response.status_code, 400)
+            self.assertDictEqual(response.json(), {'errors': ['No changes were selected'], 'warnings': None})
+
+        response = _save({'individuals': {
+            'I000002_na19678': {'sex': 'merge'},
+            'I000017_na20889': {'features': 'merge'},
+            'I000007_na20870': {},
+            'I000001_na19675': {'notes': 'merge', 'birthYear': 'overwrite', 'onsetAge': 'replace'},
+            'I000004_hg00731': 'replace',
+        }})
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'warnings': None, 'errors': [
+            'I000002_na19678 is not an individual in this upload',
+            'I000017_na20889 is not an individual in this upload',
+            'I000007_na20870: no fields were selected',
+            'I000001_na19675: notes is not a proposed change',
+            'I000001_na19675: birthYear must be "merge" or "replace"',
+            'I000004_hg00731: no fields were selected',
+        ]})
+
+        # An upload can not be applied to another project
+        response = _save(
+            {'individuals': {'I000007_na20870': {'birthYear': 'merge'}}},
+            save_url=reverse(save_phenopackets_handler, args=[PM_REQUIRED_PROJECT_GUID, upload_id]),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], ['I000007_na20870 is not an individual in this upload'])
+        self.assertIsNone(Individual.objects.get(guid='I000007_na20870').birth_year)
+
+        # Only the confirmed fields are applied: lists merge, conflicting values are kept unless replaced
+        self.reset_logs()
+        response = _save({'individuals': {
+            'I000007_na20870': {'features': 'merge', 'birthYear': 'merge', 'mondoId': 'merge'},
+            'I000001_na19675': {
+                'features': 'merge', 'birthYear': 'merge', 'consanguinity': 'merge', 'onsetAge': 'replace',
+                'disorders': 'merge', 'candidateGenes': 'merge',
+            },
+            'I000004_hg00731': {'features': 'replace', 'sex': 'replace', 'mondoId': 'replace'},
+            'I000003_na19679': {'affected': 'replace'},
+        }})
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {'individualsByGuid', 'familiesByGuid'})
+        self.assertSetEqual(
+            set(response_json['individualsByGuid'].keys()),
+            {'I000007_na20870', 'I000001_na19675', 'I000004_hg00731', 'I000003_na19679'},
+        )
+        self.assertSetEqual(set(response_json['individualsByGuid']['I000007_na20870'].keys()), INDIVIDUAL_FIELDS)
+        self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {'F000001_1', 'F000002_2', 'F000003_3'})
+        self.assertEqual(response_json['familiesByGuid']['F000003_3']['mondoId'], 'MONDO:0009353')
+        self.assertEqual(response_json['familiesByGuid']['F000002_2']['mondoId'], 'MONDO:0008788')
+        self.assertIsNone(response_json['familiesByGuid']['F000001_1']['mondoId'])
+
+        hypotonia = {'id': 'HP:0001252', 'qualifiers': [
+            {'type': 'severity', 'label': 'Mild'},
+            {'type': 'pace_of_progression', 'label': 'Nonprogressive'},
+            {'type': 'age_of_onset', 'label': 'Infantile onset'},
+        ]}
+        self.assertListEqual(
+            response_json['individualsByGuid']['I000007_na20870']['features'],
+            [{**hypotonia, 'category': 'HP:0025031', 'label': 'Muscular hypotonia'}],
+        )
+        individual = Individual.objects.get(guid='I000007_na20870')
+        self.assertListEqual(individual.features, [hypotonia])
+        self.assertListEqual(individual.absent_features, [{'id': 'HP:0001263'}])
+        self.assertEqual(individual.birth_year, 2012)
+        self.assertIsNone(individual.disorders)
+        self.assertIsNone(individual.candidate_genes)
+        self.assertIsNone(individual.onset_age)
+        self.assertEqual(individual.sex, 'M')
+        self.assertEqual(individual.display_name, '')
+
+        individual = Individual.objects.get(guid='I000001_na19675')
+        self.assertListEqual(individual.features, [
+            {'id': 'HP:0001631'},
+            {'id': 'HP:0002011', 'qualifiers': [
+                {'label': 'Infantile onset', 'type': 'age_of_onset'}, {'label': 'Mild', 'type': 'severity'},
+                {'label': 'Nonprogressive', 'type': 'pace_of_progression'},
+            ]},
+            {'id': 'HP:0001636'},
+            {'id': 'HP:0012469', 'qualifiers': [{'type': 'age_of_onset', 'label': 'Infantile onset'}]},
+        ])
+        self.assertListEqual(individual.absent_features, [
+            {'id': 'HP:0011675'}, {'id': 'HP:0001674', 'notes': 'originally indicated'}, {'id': 'HP:0001508'},
+        ])
+        self.assertEqual(individual.birth_year, 1999)
+        self.assertTrue(individual.consanguinity)
+        self.assertEqual(individual.onset_age, 'C')
+        self.assertListEqual(individual.disorders, ['615593', '236250'])
+        self.assertListEqual(individual.candidate_genes, [
+            {'gene': 'EHBP1L1', 'comments': 'comments EHBP1L1'}, {'gene': 'ACY3', 'comments': 'comments ACY3'},
+            {'gene': 'CDC7'},
+        ])
+        self.assertEqual(individual.sex, 'XXY')
+
+        individual = Individual.objects.get(guid='I000004_hg00731')
+        self.assertListEqual(individual.features, [{'id': 'HP:0002017'}, {'id': 'HP:0001508'}])
+        self.assertIsNone(individual.absent_features)
+        self.assertEqual(individual.sex, 'F')
+        self.assertIsNone(individual.birth_year)
+        self.assertEqual(Individual.objects.get(guid='I000003_na19679').affected, 'A')
+        self.assertIsNone(Individual.objects.get(guid='I000003_na19679').features)
+
+        self._assert_no_identifying_logs()
+        logs = self._log_stream.getvalue()
+        for guid in ['I000007_na20870', 'I000001_na19675', 'I000004_hg00731', 'I000003_na19679']:
+            self.assertIn(f'update Individual {guid}', logs)
+        self.assertEqual(Individual.objects.filter(individual_id__startswith='SYNTHETIC').count(), 0)
+
+        # Selections are evaluated against current data, so re-applying a merge changes nothing
+        response = _save({'individuals': {
+            'I000007_na20870': {'features': 'merge', 'birthYear': 'merge', 'mondoId': 'merge'},
+            'I000001_na19675': {'birthYear': 'merge', 'consanguinity': 'merge', 'candidateGenes': 'merge'},
+        }})
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'individualsByGuid': {}, 'familiesByGuid': {}})
+
+        response = _save({'individuals': {
+            'I000001_na19675': {'birthYear': 'replace', 'consanguinity': 'replace', 'candidateGenes': 'replace'},
+        }})
+        self.assertEqual(response.status_code, 200)
+        individual = Individual.objects.get(guid='I000001_na19675')
+        self.assertEqual(individual.birth_year, 2001)
+        self.assertFalse(individual.consanguinity)
+        self.assertListEqual(individual.candidate_genes, [{'gene': 'CDC7'}])
+
+    @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP')
+    @responses.activate
+    def test_phenopackets_pedigree_permission(self, mock_pm_group):
+        responses.add(responses.POST, TRIGGER_RELOAD_URL)
+        url = reverse(receive_phenopackets_handler, args=[PM_REQUIRED_PROJECT_GUID])
+        self.check_manager_login(url)
+
+        family = {
+            'proband': {'subject': {'id': 'NA20889', 'sex': 'MALE'}, 'phenotypicFeatures': [{'type': {'id': 'HP:0001252'}}]},
+            'pedigree': {'persons': [
+                {'individualId': 'NA20889', 'paternalId': 'NA20888', 'sex': 'MALE', 'affectedStatus': 'UNAFFECTED'},
+                {'individualId': 'NA20888', 'sex': 'MALE', 'affectedStatus': 'AFFECTED'},
+            ]},
+        }
+        features_change = {
+            'field': 'features', 'label': 'HPO terms', 'isList': True,
+            'current': ['Arrhythmia (HP:0011675)', 'Unknown term (HP:0001509)'],
+            'proposed': ['Muscular hypotonia (HP:0001252)'], 'added': ['Muscular hypotonia (HP:0001252)'],
+            'removed': ['Arrhythmia (HP:0011675)', 'Unknown term (HP:0001509)'], 'conflicts': [],
+            'canMerge': True, 'canReplace': True, 'conflict': False,
+        }
+
+        # Users without project manager permission are not offered sex, affected status or parents
+        response = self._upload_phenopackets(url, family)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertListEqual(response_json['individuals'], [{
+            'individualGuid': PM_REQUIRED_INDIVIDUAL_GUID, 'individualId': 'NA20889', 'familyId': '12',
+            'unknownHpoTerms': [],
+            'warnings': [
+                'Sex, Affected status, Father differ from seqr but changing them requires project manager permission; '
+                'not proposed',
+            ],
+            'changes': [features_change],
+        }])
+        self.assertListEqual(response_json['unchangedIndividuals'], ['NA20888'])
+        save_url = reverse(save_phenopackets_handler, args=[PM_REQUIRED_PROJECT_GUID, response_json['uploadedFileId']])
+        response = self.client.post(save_url, content_type='application/json', data=json.dumps(
+            {'individuals': {PM_REQUIRED_INDIVIDUAL_GUID: {'sex': 'replace'}}}))
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], [f'{PM_REQUIRED_INDIVIDUAL_GUID}: sex is not a proposed change'])
+
+        mock_pm_group.__bool__.return_value = True
+        mock_pm_group.resolve_expression.return_value = 'project-managers'
+        mock_pm_group.__eq__.side_effect = lambda s: s == 'project-managers'
+        self.login_pm_user()
+        response = self._upload_phenopackets(url, family)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertListEqual(response_json['individuals'], [{
+            'individualGuid': PM_REQUIRED_INDIVIDUAL_GUID, 'individualId': 'NA20889', 'familyId': '12',
+            'unknownHpoTerms': [], 'warnings': [],
+            'changes': [features_change, {
+                'field': 'sex', 'label': 'Sex', 'isList': False, 'current': 'Female', 'proposed': 'Male',
+                'canMerge': False, 'canReplace': True, 'conflict': True,
+            }, {
+                'field': 'affected', 'label': 'Affected status', 'isList': False, 'current': 'Affected',
+                'proposed': 'Unaffected', 'canMerge': False, 'canReplace': True, 'conflict': True,
+            }, {
+                'field': 'paternalId', 'label': 'Father', 'isList': False, 'current': None, 'proposed': 'NA20888',
+                'canMerge': True, 'canReplace': False, 'conflict': False,
+            }],
+        }])
+
+        # The permission is checked again when a stashed pedigree change is applied
+        save_url = reverse(save_phenopackets_handler, args=[PM_REQUIRED_PROJECT_GUID, response_json['uploadedFileId']])
+        selections = {'individuals': {PM_REQUIRED_INDIVIDUAL_GUID: {
+            'sex': 'replace', 'affected': 'merge', 'paternalId': 'merge'}}}
+        self.login_manager()
+        response = self.client.post(save_url, content_type='application/json', data=json.dumps(selections))
+        self.assertEqual(response.status_code, 403)
+        individual = Individual.objects.get(guid=PM_REQUIRED_INDIVIDUAL_GUID)
+        self.assertEqual(individual.sex, 'F')
+        self.assertIsNone(individual.father)
+
+        self.login_pm_user()
+        response = self.client.post(save_url, content_type='application/json', data=json.dumps(selections))
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(set(response.json()['individualsByGuid'].keys()), {PM_REQUIRED_INDIVIDUAL_GUID})
+        self.assertEqual(response.json()['individualsByGuid'][PM_REQUIRED_INDIVIDUAL_GUID]['paternalId'], 'NA20888')
+        individual = Individual.objects.get(guid=PM_REQUIRED_INDIVIDUAL_GUID)
+        self.assertEqual(individual.sex, 'M')
+        self.assertEqual(individual.affected, 'A')
+        self.assertEqual(individual.father.individual_id, 'NA20888')
+        self.assertListEqual(individual.features, [{'id': 'HP:0011675'}, {'id': 'HP:0001509'}])
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     def test_import_gregor_metadata(self):

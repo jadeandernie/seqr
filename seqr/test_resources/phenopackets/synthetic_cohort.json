@@ -1,0 +1,21 @@
+{
+  "id": "SYNTHETIC-cohort-1",
+  "description": "SYNTHETIC cohort description naming a clinic",
+  "members": [
+    {
+      "id": "SYNTHETIC-member-1",
+      "subject": {"id": "HG00731", "sex": "FEMALE", "dateOfBirth": "1988-01-02T00:00:00Z"},
+      "phenotypicFeatures": [
+        {"type": {"id": "HP:0002017", "label": "Nausea and vomiting"}},
+        {"type": {"id": "HP:0001508", "label": "Failure to thrive"}}
+      ],
+      "diseases": [{"term": {"id": "MONDO:0008788", "label": "SYNTHETIC label"}, "onset": {"age": {"iso8601duration": "P19Y"}}}]
+    },
+    {
+      "id": "SYNTHETIC-member-2",
+      "subject": {"id": "SYNTHETIC-UNMATCHED-0001", "sex": "OTHER_SEX"},
+      "phenotypicFeatures": [{"type": {"id": "HP:0001252", "label": "Hypotonia"}}]
+    }
+  ],
+  "metaData": {"created": "2024-03-01T10:00:00Z", "createdBy": "Dr Synthetic Example", "phenopacketSchemaVersion": "2.0"}
+}

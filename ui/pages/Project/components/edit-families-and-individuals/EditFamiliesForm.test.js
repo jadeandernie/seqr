@@ -13,9 +13,12 @@ configure({ adapter: new Adapter() })
 
 const configureStore = configureMockStore([thunk])
 
+// The form has its own confirm for closing with unsaved changes, so look up the delete button's confirm
+const getDeleteConfirm = wrapper => wrapper.find('DispatchRequestButton').find('Confirm')
+
 const openDeleteConfirm = (wrapper) => {
   wrapper.find('DispatchRequestButton').find('button').simulate('click')
-  return wrapper.find('Confirm')
+  return getDeleteConfirm(wrapper)
 }
 
 test('renders an editable row for each family in the project', () => {
@@ -31,7 +34,8 @@ test('renders an editable row for each family in the project', () => {
 })
 
 test('deletes selected families', async () => {
-  const store = configureStore(STATE_WITH_2_FAMILIES)
+  // The modal state is needed as the modal is closed once the delete succeeds
+  const store = configureStore({ ...STATE_WITH_2_FAMILIES, modal: { editFamilies: {} } })
   const wrapper = mount(
     <Provider store={store}>
       <EditFamiliesForm modalName="editFamilies" />
@@ -50,12 +54,12 @@ test('deletes selected families', async () => {
   wrapper.update()
   expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(false)
   expect(openDeleteConfirm(wrapper).prop('open')).toBe(true)
-  expect(wrapper.find('Confirm').find('ModalContent').text()).toEqual(
+  expect(getDeleteConfirm(wrapper).find('ModalContent').text()).toEqual(
     'Are you sure you want to delete the following families: 1?',
   )
-  wrapper.find('Confirm').prop('onCancel')()
+  getDeleteConfirm(wrapper).prop('onCancel')()
   wrapper.update()
-  expect(wrapper.find('Confirm').prop('open')).toBe(false)
+  expect(getDeleteConfirm(wrapper).prop('open')).toBe(false)
 
   wrapper.find('DataTable').prop('selectRows')({ F011652_1: true, F011652_2: true })
   wrapper.update()
@@ -63,11 +67,12 @@ test('deletes selected families', async () => {
     'Are you sure you want to delete the following 2 families: 1, 2?',
   )
 
-  expect(wrapper.find('DataTable').instance()).toBe(dataTable)
-  expect(wrapper.find('DispatchRequestButton').instance()).toBe(deleteButton)
+  // Compared with === as jest runs out of memory printing the difference between two component instances
+  expect(wrapper.find('DataTable').instance() === dataTable).toBe(true)
+  expect(wrapper.find('DispatchRequestButton').instance() === deleteButton).toBe(true)
   expect(wrapper.find('DispatchRequestButton').prop('getConfirmDialog')).toBe(getConfirmDialog)
 
-  wrapper.find('Confirm').prop('onConfirm')()
+  getDeleteConfirm(wrapper).prop('onConfirm')()
   await flushAll()
 
   expect(getLastFetchUrl()).toEqual(`/api/project/${STATE_WITH_2_FAMILIES.currentProjectGuid}/delete_families`)

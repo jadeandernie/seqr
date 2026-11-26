@@ -77,12 +77,15 @@ test('confirms which individuals will be deleted', () => {
   expect(wrapper.find('DispatchRequestButton').prop('disabled')).toEqual(false)
 
   wrapper.find('DispatchRequestButton').find('button').simulate('click')
-  expect(wrapper.find('Confirm').prop('open')).toBe(true)
-  expect(wrapper.find('Confirm').find('ModalContent').text()).toEqual([
+  // The form has its own confirm for closing with unsaved changes, so look up the delete button's confirm
+  const deleteConfirm = wrapper.find('DispatchRequestButton').find('Confirm')
+  expect(deleteConfirm.prop('open')).toBe(true)
+  expect(deleteConfirm.find('ModalContent').text()).toEqual([
     'Are you sure you want to delete the following 3 individuals:',
     'NA19675 (family 1), NA19678 (family 1), NA19678 (family 2)?',
   ].join(' '))
 
-  expect(wrapper.find('DataTable').instance()).toBe(dataTable)
-  expect(wrapper.find('DispatchRequestButton').instance()).toBe(deleteButton)
+  // Compared with === as jest runs out of memory printing the difference between two component instances
+  expect(wrapper.find('DataTable').instance() === dataTable).toBe(true)
+  expect(wrapper.find('DispatchRequestButton').instance() === deleteButton).toBe(true)
 })

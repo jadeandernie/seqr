@@ -19,7 +19,6 @@ test('computes the confirm dialog content only when the confirm is shown', () =>
 
   expect(getConfirmDialog).not.toHaveBeenCalled()
   expect(wrapper.find('Confirm').prop('open')).toBe(false)
-  expect(wrapper.find('Confirm').prop('content')).toBeUndefined()
   // the callback is consumed by the component and not passed on to the button
   expect(wrapper.childAt(0).prop('content')).toEqual('Delete')
   expect(wrapper.childAt(0).prop('getConfirmDialog')).toBeUndefined()

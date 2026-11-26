@@ -97,3 +97,8 @@ class MatchmakerContactNotes(ModelWithGUID):
     class Meta:
         json_fields = []
         internal_json_fields = ['institution', 'comments']
+
+
+class VlmContactEmail(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_date = models.DateTimeField(auto_now_add=True, db_index=True)

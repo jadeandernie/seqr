@@ -158,6 +158,7 @@ else:
 
 LOADING_DATASETS_DIR = os.environ.get('LOADING_DATASETS_DIR')
 PIPELINE_DATA_DIR = os.environ.get('PIPELINE_DATA_DIR')
+S3_ARN_ASSUME_ROLE = os.environ.get('S3_ARN_ASSUME_ROLE')
 
 LOGGING = {
     'version': 1,

@@ -12,15 +12,19 @@ import RnaSeqJunctionOutliersTable from 'shared/components/table/RnaSeqJunctionO
 import { loadRnaSeqData } from '../reducers'
 import { getRnaSeqDataLoading, getRnaSeqOutliersByIndividual, getTissueOptionsByIndividualGuid } from '../selectors'
 
+import RnaSeqPathways from './RnaSeqPathways'
+
 const RnaSeqOutliers = React.lazy(() => import('./RnaSeqOutliers'))
 
 const TissueContainer = styled.div`
   margin-bottom: 1rem;
 `
 
+const EXPRESSION_OUTLIERS_KEY = 'outliers'
+
 const OUTLIER_VOLCANO_PLOT_CONFIGS = [
   {
-    key: 'outliers',
+    key: EXPRESSION_OUTLIERS_KEY,
     getLocation: (({ geneId }) => geneId),
     searchType: 'genes',
     title: 'Expression Outliers',
@@ -39,6 +43,7 @@ class BaseRnaSeqResultPage extends React.PureComponent {
 
   static propTypes = {
     familyGuid: PropTypes.string,
+    individualGuid: PropTypes.string,
     rnaSeqData: PropTypes.object,
     significantJunctionOutliers: PropTypes.arrayOf(PropTypes.object),
     genesById: PropTypes.object,
@@ -47,15 +52,23 @@ class BaseRnaSeqResultPage extends React.PureComponent {
 
   state = {
     selectedDataType: null,
+    selectedPathway: null,
   }
 
   onTissueChange = (e, data) => {
-    this.setState({ selectedDataType: data.value })
+    this.setState({ selectedDataType: data.value, selectedPathway: null })
+  }
+
+  onPathwaySelect = (selectedPathway) => {
+    this.setState({ selectedPathway })
   }
 
   render() {
-    const { familyGuid, rnaSeqData, significantJunctionOutliers, genesById, tissueOptions } = this.props
-    const { selectedDataType } = this.state
+    const {
+      familyGuid, individualGuid, rnaSeqData, significantJunctionOutliers, genesById, tissueOptions,
+    } = this.props
+    const { selectedDataType, selectedPathway } = this.state
+    const highlightGeneIds = selectedPathway ? selectedPathway.measuredGeneIds : null
     const showDataType = selectedDataType || tissueOptions[0].value
     const [showTissueType, showSequencingType] = showDataType.split('-')
 
@@ -94,6 +107,7 @@ class BaseRnaSeqResultPage extends React.PureComponent {
                       familyGuid={familyGuid}
                       rnaSeqData={data}
                       genesById={genesById}
+                      highlightGeneIds={key === EXPRESSION_OUTLIERS_KEY ? highlightGeneIds : null}
                       {...config}
                     />
                   </Grid.Column>
@@ -102,6 +116,13 @@ class BaseRnaSeqResultPage extends React.PureComponent {
             </Grid>
           </React.Suspense>
         )}
+        <RnaSeqPathways
+          individualGuid={individualGuid}
+          sampleType={showDataType}
+          genesById={genesById}
+          selectedPathway={selectedPathway}
+          onSelect={this.onPathwaySelect}
+        />
         {(tableData.length > 0) && (
           <FamilyReads
             layout={RnaSeqJunctionOutliersTable}
@@ -119,7 +140,12 @@ class BaseRnaSeqResultPage extends React.PureComponent {
 
 const RnaSeqResultPage = React.memo(({ individual, rnaSeqData, load, loading, ...props }) => (
   <DataLoader content={rnaSeqData} contentId={individual.individualGuid} load={load} loading={loading}>
-    <BaseRnaSeqResultPage familyGuid={individual.familyGuid} rnaSeqData={rnaSeqData} {...props} />
+    <BaseRnaSeqResultPage
+      familyGuid={individual.familyGuid}
+      individualGuid={individual.individualGuid}
+      rnaSeqData={rnaSeqData}
+      {...props}
+    />
   </DataLoader>
 ))
 

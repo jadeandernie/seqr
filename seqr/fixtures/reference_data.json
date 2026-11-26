@@ -1530,6 +1530,112 @@
     }
 },
 {
+    "model": "reference_data.reactomepathway",
+    "pk": 1,
+    "fields": {
+        "gene": 48,
+        "pathway_id": "R-HSA-162699",
+        "name": "Synthesis of dolichyl-phosphate mannose"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 2,
+    "fields": {
+        "gene": 12,
+        "pathway_id": "R-HSA-162699",
+        "name": "Synthesis of dolichyl-phosphate mannose"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 3,
+    "fields": {
+        "gene": 6,
+        "pathway_id": "R-HSA-162699",
+        "name": "Synthesis of dolichyl-phosphate mannose"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 4,
+    "fields": {
+        "gene": 1,
+        "pathway_id": "R-HSA-162699",
+        "name": "Synthesis of dolichyl-phosphate mannose"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 5,
+    "fields": {
+        "gene": 48,
+        "pathway_id": "R-HSA-6798695",
+        "name": "Neutrophil degranulation"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 6,
+    "fields": {
+        "gene": 2,
+        "pathway_id": "R-HSA-6798695",
+        "name": "Neutrophil degranulation"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 7,
+    "fields": {
+        "gene": 12,
+        "pathway_id": "R-HSA-8980692",
+        "name": "RHOA GTPase cycle"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 8,
+    "fields": {
+        "gene": 6,
+        "pathway_id": "R-HSA-8980692",
+        "name": "RHOA GTPase cycle"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 9,
+    "fields": {
+        "gene": 6,
+        "pathway_id": "R-HSA-9013148",
+        "name": "CDC42 GTPase cycle"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 10,
+    "fields": {
+        "gene": 3,
+        "pathway_id": "R-HSA-9013148",
+        "name": "CDC42 GTPase cycle"
+    }
+},
+{
+    "model": "reference_data.reactomepathway",
+    "pk": 11,
+    "fields": {
+        "gene": 1,
+        "pathway_id": "R-HSA-9013148",
+        "name": "CDC42 GTPase cycle"
+    }
+},
+{
+    "model": "reference_data.dataversions",
+    "pk": "ReactomePathway",
+    "fields": {
+        "version": "Wed, 19 Mar 2025 08:00:00 GMT"
+    }
+},
+{
     "model": "reference_data.dataversions",
     "pk": "PanelAppAU",
     "fields": {

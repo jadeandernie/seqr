@@ -152,6 +152,57 @@ describe('RnaSeqOutliersGraph', () => {
     expect(circles[1].attrs.cx).toEqual([5])
   })
 
+  test('highlights the given genes and draws them last', () => {
+    shallow(
+      <RnaSeqOutliersGraph
+        data={GRAPH_DATA}
+        genesById={STATE_WITH_2_FAMILIES.genesById}
+        xField="zScore"
+        highlightGeneIds={['ENSG00000228198']}
+      />,
+    )
+
+    // GRAPH_DATA is ENSG00000228198 (z=-5), then ENSG00000164458 twice (z=20 and z=550)
+    const [circles] = FakeD3Selection.getAppended('circle')
+    expect(circles.attrs.cx).toEqual([20, 550, -5])
+    expect(circles.attrs.r).toEqual([3, 3, 5])
+    expect(circles.styles.fill).toEqual(['None', 'None', '#2185d0'])
+    expect(circles.styles.stroke).toEqual(['red', 'lightgrey', 'red'])
+    const [text] = FakeD3Selection.getAppended('text')
+    expect(text.texts).toEqual(['TBXT', null, 'OR2M3'])
+  })
+
+  test('draws every point at the default size when no genes are highlighted', () => {
+    shallow(
+      <RnaSeqOutliersGraph data={GRAPH_DATA} genesById={STATE_WITH_2_FAMILIES.genesById} xField="zScore" highlightGeneIds={[]} />,
+    )
+
+    const [circles] = FakeD3Selection.getAppended('circle')
+    expect(circles.attrs.cx).toEqual([-5, 20, 550])
+    expect(circles.attrs.r).toEqual([3, 3, 3])
+    expect(circles.styles.fill).toEqual(['None', 'None', 'None'])
+  })
+
+  test('re-draws the graph when the highlighted genes change', () => {
+    const wrapper = shallow(
+      <RnaSeqOutliersGraph data={GRAPH_DATA} genesById={STATE_WITH_2_FAMILIES.genesById} xField="zScore" />,
+    )
+    expect(FakeD3Selection.removeCallCount).toEqual(0)
+
+    wrapper.setProps({ highlightGeneIds: ['ENSG00000164458'] })
+
+    expect(FakeD3Selection.removeCallCount).toEqual(1)
+    const circles = FakeD3Selection.getAppended('circle')
+    expect(circles).toHaveLength(2)
+    expect(circles[1].attrs.cx).toEqual([-5, 20, 550])
+    expect(circles[1].styles.fill).toEqual(['None', '#2185d0', '#2185d0'])
+
+    wrapper.setProps({ highlightGeneIds: null })
+
+    expect(FakeD3Selection.removeCallCount).toEqual(2)
+    expect(FakeD3Selection.getAppended('circle')[2].styles.fill).toEqual(['None', 'None', 'None'])
+  })
+
   test('does not re-draw when unrelated props change', () => {
     const wrapper = shallow(
       <RnaSeqOutliersGraph data={GRAPH_DATA} genesById={STATE_WITH_2_FAMILIES.genesById} xField="zScore" />,

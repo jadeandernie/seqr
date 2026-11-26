@@ -13,6 +13,7 @@ import { SectionHeader, ColoredLabel } from '../../StyledComponents'
 import DataLoader from '../../DataLoader'
 import NoteListFieldView from '../view-fields/NoteListFieldView'
 import { HorizontalSpacer } from '../../Spacers'
+import ReactomePathwayLinks from './ReactomePathwayLinks'
 
 const Gtex = React.lazy(() => import('../../graph/Gtex'))
 
@@ -287,6 +288,8 @@ const GeneDetailContent = React.memo(({ gene, user, updateGeneNote: dispatchUpda
     { title: 'Description', content: textWithLinks(gene.functionDesc) },
     { title: 'Coordinates', content: grch38Coords ? `${grch38Coords} (hg19: ${grch37Coords || 'liftover failed'})` : grch37Coords },
     { title: 'Gene Type', content: gene.gencodeGeneType },
+    (gene.reactomePathways || []).length > 0 ?
+      { title: 'Pathways', content: <ReactomePathwayLinks pathways={gene.reactomePathways} /> } : null,
   ]
   const otherGeneNames = getOtherGeneNames(gene)
   if (otherGeneNames.length > 0) {

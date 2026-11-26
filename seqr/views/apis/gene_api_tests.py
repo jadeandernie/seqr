@@ -58,10 +58,15 @@ class GeneAPITest(AuthenticationTestCase):
             'notes': [],
             'omimPhenotypes': [],
             'primateAi': {'percentile25': 0.587214291096, 'percentile75': 0.821286439896},
+            'reactomePathways': [
+                {'pathwayId': 'R-HSA-9013148', 'name': 'CDC42 GTPase cycle'},
+                {'pathwayId': 'R-HSA-162699', 'name': 'Synthesis of dolichyl-phosphate mannose'},
+            ],
             'sHet': {'postMean': 0.90576},
             'startGrch37': None,
             'startGrch38': 11869,
         })
+        self.assertListEqual(genes['ENSG00000269981']['reactomePathways'], [])
         self.assertEqual(genes['ENSG00000240361']['mimNumber'], 147571)
         self.assertListEqual(
             genes['ENSG00000240361']['omimPhenotypes'],
@@ -89,6 +94,7 @@ class GeneAPITest(AuthenticationTestCase):
             'notes': [],
             'omimPhenotypes': [],
             'primateAi': None,
+            'reactomePathways': [{'pathwayId': 'R-HSA-6798695', 'name': 'Neutrophil degranulation'}],
             'sHet': {},
             'startGrch37': 14404,
             'startGrch38': 14404,

@@ -8,15 +8,18 @@ import responses
 
 from copy import deepcopy
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connections
+from django.test.utils import CaptureQueriesContext
 from django.urls.base import reverse
 from io import BytesIO
 from openpyxl import load_workbook
 
-from seqr.models import Individual, Dataset, SavedVariant, VariantTag
+from reference_data.models import ReactomePathway
+from seqr.models import Individual, Dataset, SavedVariant, VariantTag, RnaSample, RnaSeqOutlier
 from seqr.views.apis.individual_api import edit_individuals_handler, update_individual_handler, \
     delete_individuals_handler, receive_individuals_table_handler, save_individuals_table_handler, \
     receive_individuals_metadata_handler, save_individuals_metadata_table_handler, update_individual_hpo_terms, \
-    get_hpo_terms, get_individual_rna_seq_data, import_gregor_metadata
+    get_hpo_terms, get_individual_rna_seq_data, get_individual_rna_seq_pathways_handler, import_gregor_metadata
 from seqr.views.apis.report_api_tests import PARTICIPANT_TABLE, PHENOTYPE_TABLE, EXPERIMENT_TABLE, EXPERIMENT_LOOKUP_TABLE, GENETIC_FINDINGS_TABLE
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, INDIVIDUAL_FIELDS, \
     INDIVIDUAL_CORE_FIELDS, CORE_INTERNAL_INDIVIDUAL_FIELDS, GENE_FIELDS
@@ -1484,6 +1487,104 @@ class IndividualAPITest(object):
              {'start': 9000, 'end': 9100, 'pAdjust': 0.1, 'deltaIntronJaccardIndex': -0.01, 'tissueType': 'M', 'isSignificant': False},
              {'start': 132885746, 'end': 132886973, 'pAdjust': 3.08e-56, 'deltaIntronJaccardIndex': 12.34, 'tissueType': 'F', 'isSignificant': True}],
         )
+
+    def test_get_individual_rna_seq_pathways(self):
+        url = reverse(get_individual_rna_seq_pathways_handler, args=[INDIVIDUAL_GUID])
+        self.check_partial_access_login(url)
+
+        # The muscle sample has 2 significant outliers (ENSG00000135953 z=7.31, ENSG00000268903 z=7.08)
+        # and 1 non-significant measured gene (ENSG00000240361 z=-4.08)
+        muscle_pathways = [{
+            'pathwayId': 'R-HSA-162699', 'name': 'Synthesis of dolichyl-phosphate mannose',
+            'numGenes': 4, 'numMeasured': 3, 'numOutliers': 2, 'medianZScore': 7.08,
+            'outlierGeneIds': ['ENSG00000135953', 'ENSG00000268903'],
+            'measuredGeneIds': ['ENSG00000135953', 'ENSG00000240361', 'ENSG00000268903'],
+        }, {
+            'pathwayId': 'R-HSA-6798695', 'name': 'Neutrophil degranulation',
+            'numGenes': 2, 'numMeasured': 1, 'numOutliers': 1, 'medianZScore': 7.31,
+            'outlierGeneIds': ['ENSG00000135953'], 'measuredGeneIds': ['ENSG00000135953'],
+        }, {
+            'pathwayId': 'R-HSA-8980692', 'name': 'RHOA GTPase cycle',
+            'numGenes': 2, 'numMeasured': 2, 'numOutliers': 1, 'medianZScore': (7.08 + -4.08) / 2,
+            'outlierGeneIds': ['ENSG00000268903'], 'measuredGeneIds': ['ENSG00000240361', 'ENSG00000268903'],
+        }]
+        with CaptureQueriesContext(connections['reference_data']) as reference_data_queries:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'rnaSeqPathways': {INDIVIDUAL_GUID: {
+            'hasReferenceData': True,
+            'pathwaysBySampleType': {'M-T': muscle_pathways},
+        }}})
+        self.assertEqual(len(reference_data_queries), 1)
+
+        # Pathways are summarized separately per tissue and sequencing type, and inactive samples are ignored
+        individual = Individual.objects.get(guid=INDIVIDUAL_GUID)
+        sample_kwargs = {'individual': individual, 'data_type': 'E', 'sequencing_type': 'W', 'data_source': 'new.tsv.gz'}
+        fibroblast_sample = RnaSample.objects.create(guid='RS000180_E_na19675', tissue_type='F', is_active=True, **sample_kwargs)
+        inactive_sample = RnaSample.objects.create(guid='RS000181_E_na19675', tissue_type='WB', is_active=False, **sample_kwargs)
+        RnaSeqOutlier.objects.bulk_create([
+            RnaSeqOutlier(sample=fibroblast_sample, gene_id='ENSG00000240361', z_score=-6.2, p_value=0.0001, p_adjust=0.01),
+            RnaSeqOutlier(sample=fibroblast_sample, gene_id='ENSG00000223972', z_score=0.4, p_value=0.5, p_adjust=0.9),
+            RnaSeqOutlier(sample=fibroblast_sample, gene_id='ENSG00000243485', z_score=-1.0, p_value=0.01, p_adjust=0.05),
+            RnaSeqOutlier(sample=inactive_sample, gene_id='ENSG00000227232', z_score=9.0, p_value=0.0001, p_adjust=0.001),
+        ])
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'rnaSeqPathways': {INDIVIDUAL_GUID: {
+            'hasReferenceData': True,
+            'pathwaysBySampleType': {
+                'M-T': muscle_pathways,
+                'F-W': [{
+                    'pathwayId': 'R-HSA-8980692', 'name': 'RHOA GTPase cycle',
+                    'numGenes': 2, 'numMeasured': 1, 'numOutliers': 1, 'medianZScore': -6.2,
+                    'outlierGeneIds': ['ENSG00000240361'], 'measuredGeneIds': ['ENSG00000240361'],
+                }, {
+                    'pathwayId': 'R-HSA-162699', 'name': 'Synthesis of dolichyl-phosphate mannose',
+                    'numGenes': 4, 'numMeasured': 2, 'numOutliers': 1, 'medianZScore': (-6.2 + 0.4) / 2,
+                    'outlierGeneIds': ['ENSG00000240361'], 'measuredGeneIds': ['ENSG00000223972', 'ENSG00000240361'],
+                }, {
+                    'pathwayId': 'R-HSA-9013148', 'name': 'CDC42 GTPase cycle',
+                    'numGenes': 3, 'numMeasured': 3, 'numOutliers': 1, 'medianZScore': -1.0,
+                    'outlierGeneIds': ['ENSG00000240361'],
+                    'measuredGeneIds': ['ENSG00000223972', 'ENSG00000240361', 'ENSG00000243485'],
+                }],
+            },
+        }}})
+
+        # A sample with expression data but no pathway reference data is distinguishable from one without data
+        ReactomePathway.objects.all().delete()
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'rnaSeqPathways': {INDIVIDUAL_GUID: {
+            'hasReferenceData': False,
+            'pathwaysBySampleType': {'M-T': [], 'F-W': []},
+        }}})
+
+    def test_get_individual_rna_seq_pathways_no_expression_data(self):
+        url = reverse(get_individual_rna_seq_pathways_handler, args=[ID_UPDATE_GUID])
+        self.check_partial_access_login(url)
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'rnaSeqPathways': {ID_UPDATE_GUID: {
+            'hasReferenceData': True,
+            'pathwaysBySampleType': {},
+        }}})
+
+        # Significance uses the same threshold as the expression outlier plot
+        individual = Individual.objects.get(guid=ID_UPDATE_GUID)
+        sample = RnaSample.objects.create(
+            guid='RS000182_E_na19678', individual=individual, data_type='E', tissue_type='M', sequencing_type='T',
+            data_source='new.tsv.gz', is_active=True,
+        )
+        RnaSeqOutlier.objects.create(sample=sample, gene_id='ENSG00000135953', z_score=3.1, p_value=0.01, p_adjust=0.05)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'rnaSeqPathways': {ID_UPDATE_GUID: {
+            'hasReferenceData': True,
+            'pathwaysBySampleType': {'M-T': []},
+        }}})
 
 
 class LocalIndividualAPITest(AuthenticationTestCase, IndividualAPITest):

@@ -6,7 +6,7 @@ from django.core.management.base import CommandError
 from panelapp.models import PanelAppAU, PanelAppUK
 from reference_data.management.tests.test_utils import ReferenceDataCommandTestCase
 from reference_data.models import Omim, dbNSFPGene, GeneConstraint, GeneCopyNumberSensitivity, GenCC, ClinGen, \
-    RefseqTranscript, HumanPhenotypeOntology, MGI, PrimateAI, GeneShet, LoadableModel, DataVersions
+    RefseqTranscript, HumanPhenotypeOntology, MGI, PrimateAI, GeneShet, ReactomePathway, LoadableModel, DataVersions
 
 
 def primate_ai_exception():
@@ -72,6 +72,7 @@ class NewDbUpdateAllReferenceDataTest(BaseUpdateAllReferenceDataTest):
             (GenCC, gene_kwargs),
             (ClinGen, gene_kwargs),
             (GeneShet, gene_kwargs),
+            (ReactomePathway, gene_kwargs),
             (HumanPhenotypeOntology, kwargs),
             (PanelAppAU, kwargs),
             (PanelAppUK, kwargs),
@@ -90,7 +91,7 @@ class NewDbUpdateAllReferenceDataTest(BaseUpdateAllReferenceDataTest):
                 '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
             }),
             ('Done', None),
-            ('Updated: GeneInfo, Omim, dbNSFPGene, GeneConstraint, GeneCopyNumberSensitivity, GenCC, ClinGen, GeneShet, HumanPhenotypeOntology, PanelAppAU, PanelAppUK', None),
+            ('Updated: GeneInfo, Omim, dbNSFPGene, GeneConstraint, GeneCopyNumberSensitivity, GenCC, ClinGen, GeneShet, ReactomePathway, HumanPhenotypeOntology, PanelAppAU, PanelAppUK', None),
         ])
 
         self.assertEqual(str(e.exception),'Failed to Update: PrimateAI, MGI')
@@ -106,6 +107,7 @@ class NewDbUpdateAllReferenceDataTest(BaseUpdateAllReferenceDataTest):
             ('Omim', 'Thu, 20 Mar 2025 20:52:24 GMT'),
             ('PanelAppAU', '2025-03-12'),
             ('PanelAppUK', '2025-03-12'),
+            ('ReactomePathway', 'Wed, 19 Mar 2025 08:00:00 GMT'),
             ('dbNSFPGene', 'dbNSFP4.0_gene'),
         ])
 

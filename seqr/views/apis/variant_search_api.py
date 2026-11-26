@@ -15,7 +15,7 @@ import re
 
 from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY
 from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
-    get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
+    get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException, SORT_KEYS
 from reference_data.models import HumanPhenotypeOntology, GENOME_VERSION_GRCh38, GENOME_VERSION_LOOKUP
 from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset
 from seqr.views.utils.export_utils import export_table
@@ -36,14 +36,18 @@ from seqr.views.utils.vlm_utils import vlm_lookup
 
 logger = SeqrLogger(__name__)
 
+SORT_DELIMITER = ','
+REQUEST_SORT_KEYS = SORT_KEYS - {PATHOGENICTY_HGMD_SORT_KEY}
+
 
 @login_and_policies_required
 def query_variants_handler(request, search_hash):
     page = int(request.GET.get('page') or 1)
     per_page = int(request.GET.get('per_page') or 100)
-    sort = request.GET.get('sort') or XPOS_SORT_KEY
-    if sort == PATHOGENICTY_SORT_KEY and user_is_analyst(request.user):
-        sort = PATHOGENICTY_HGMD_SORT_KEY
+    try:
+        sort = _parse_sort(request)
+    except InvalidSearchException as e:
+        return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
     search_context = json.loads(request.body or '{}')
     try:
@@ -75,6 +79,22 @@ def _get_variants_with_cache(get_cache_key, get_variants, *args, **kwargs):
     return variants
 
 
+def _parse_sort(request):
+    raw_sorts = (request.GET.get('sort') or '').split(SORT_DELIMITER)
+    sorts = list(dict.fromkeys(sort.strip() for sort in raw_sorts if sort.strip()))
+    invalid_sorts = [sort for sort in sorts if sort not in REQUEST_SORT_KEYS]
+    if invalid_sorts:
+        raise InvalidSearchException(f'Invalid sort: {", ".join(invalid_sorts)}')
+
+    # Position is always the final tie-breaker, so a trailing position sort does not change the results
+    if len(sorts) > 1 and sorts[-1] == XPOS_SORT_KEY:
+        sorts.pop()
+
+    if PATHOGENICTY_SORT_KEY in sorts and user_is_analyst(request.user):
+        sorts[sorts.index(PATHOGENICTY_SORT_KEY)] = PATHOGENICTY_HGMD_SORT_KEY
+    return SORT_DELIMITER.join(sorts) or XPOS_SORT_KEY
+
+
 def _get_search_cache_key(results_model, user, sort=XPOS_SORT_KEY):
     return 'search_results__{}__{}'.format(results_model.guid, sort)
 
@@ -84,9 +104,9 @@ def _query_variants(results_model, user, sort=XPOS_SORT_KEY):
     wildcard_cache_key = _get_search_cache_key(results_model, user, sort='*')
     unsorted_variants = safe_redis_get_wildcard_json(wildcard_cache_key)
     if unsorted_variants:
-        return get_sorted_search_results(unsorted_variants, sort, families)
+        return get_sorted_search_results(unsorted_variants, sort.split(SORT_DELIMITER), families)
 
-    return get_clickhouse_variants(families, user, sort=sort, **results_model.variant_search.search)
+    return get_clickhouse_variants(families, user, sorts=sort.split(SORT_DELIMITER), **results_model.variant_search.search)
 
 
 def _all_project_family_search_genome(search_context):

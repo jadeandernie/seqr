@@ -940,6 +940,17 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
             sort='prioritized_gene', annotations={'frameshift': ['frameshift_variant']},
         )
 
+        self._assert_expected_search_error(
+            'Phenotype sort is only supported for single-family search.',
+            sort='cadd,prioritized_gene', annotations={'frameshift': ['frameshift_variant']},
+        )
+
+        self._assert_expected_search_error('Invalid sort: foo', sort='foo')
+        self._assert_expected_search_error('Invalid sort: foo, CADD', sort='cadd,foo,gnomad,CADD')
+        self._assert_expected_search_error('Invalid sort: pathogenicity_hgmd', sort='pathogenicity_hgmd')
+        self._assert_expected_search_error('Invalid sort: *', sort='*')
+        self.assertFalse(any('foo' in call.args[0] for call in self.mock_redis.set.call_args_list))
+
         self._assert_expected_search_error('seqr AC frequency of at least 5000 must be specified to search across multiple families', freqs={})
 
         annotations = {'frameshift': ['frameshift_variant']}
@@ -2291,6 +2302,67 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
             sort='seqr_ac', inheritance_mode='recessive', **ALL_SNV_INDEL_PASS_FILTERS, cached_variant_fields=[
                 {}, [{'selectedGeneId': 'ENSG00000097046'}, {'selectedGeneId': 'ENSG00000097046'}], {},
             ], project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+
+    def test_multi_sort(self):
+        self.login_collaborator()
+        gnomad_exomes_sorted = [VARIANT1, MULTI_FAMILY_VARIANT, VARIANT4, VARIANT2]
+        size_sorted = [GCNV_VARIANT1, GCNV_VARIANT4, GCNV_VARIANT2, GCNV_VARIANT3]
+        mito_variants = [MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3]
+
+        # later sorts only break ties in earlier sorts
+        self._assert_expected_search(gnomad_exomes_sorted + size_sorted + mito_variants, sort='gnomad_exomes,size')
+        self._assert_expected_search(size_sorted + gnomad_exomes_sorted + mito_variants, sort='size,gnomad_exomes')
+
+        # sorts which require gene metadata can be combined with each other and with other sorts
+        self._assert_expected_search(
+            size_sorted + [MULTI_FAMILY_VARIANT, VARIANT2, VARIANT4, VARIANT1] + mito_variants, sort='size,in_omim',
+        )
+        self._assert_expected_search(
+            [MULTI_FAMILY_VARIANT, GCNV_VARIANT4, GCNV_VARIANT3, VARIANT2, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, VARIANT1] + mito_variants,
+            sort='in_omim,size',
+        )
+        self._assert_expected_search(
+            [MULTI_FAMILY_VARIANT, VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, VARIANT4, VARIANT1, GCNV_VARIANT1, GCNV_VARIANT2] + mito_variants,
+            sort='in_omim,constraint',
+        )
+
+        # equivalent sorts share a cache entry
+        cadd_sorted = [VARIANT4, MULTI_FAMILY_VARIANT, VARIANT2, VARIANT1, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4] + mito_variants
+        self._assert_expected_search(cadd_sorted, sort='cadd,xpos', cache_sort='cadd')
+        self._assert_expected_search(cadd_sorted, sort=',cadd,,cadd,', cache_sort='cadd')
+        self._assert_expected_search(
+            [VARIANT1, VARIANT2, MULTI_FAMILY_VARIANT, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4] + mito_variants,
+            sort='xpos,xpos', cache_sort='xpos',
+        )
+        self._assert_expected_search(
+            size_sorted + gnomad_exomes_sorted + mito_variants, sort='size,gnomad_exomes,size,xpos', cache_sort='size,gnomad_exomes',
+        )
+
+        # previously cached results are re-sorted
+        search_hash = 876
+        self.set_cache('search_results__VRS0000876__size', self._format_cached_variants(
+            size_sorted + [VARIANT1, VARIANT2, MULTI_FAMILY_VARIANT, VARIANT4] + mito_variants,
+        ))
+        with mock.patch('seqr.views.apis.variant_search_api.get_clickhouse_variants') as mock_get_variants:
+            self._assert_expected_search(
+                gnomad_exomes_sorted + size_sorted + mito_variants, sort='gnomad_exomes,size', search_hash=search_hash,
+            )
+            mock_get_variants.assert_not_called()
+
+        pathogenicity_size_sorted = [VARIANT1, MITO_VARIANT3, VARIANT2, MITO_VARIANT1] + size_sorted + [VARIANT3, VARIANT4, MITO_VARIANT2]
+        self._assert_expected_search(
+            pathogenicity_size_sorted, sort='pathogenicity,size', project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+
+        self.login_analyst_user()
+        self._assert_expected_search(
+            pathogenicity_size_sorted, sort='pathogenicity,size', cache_sort='pathogenicity_hgmd,size',
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+        self._assert_expected_search(
+            size_sorted + [VARIANT1, MITO_VARIANT3, VARIANT2, MITO_VARIANT1, VARIANT3, VARIANT4, MITO_VARIANT2],
+            sort='size,pathogenicity', cache_sort='size,pathogenicity_hgmd', project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
         )
 
     def test_multi_data_type_comp_het_sort(self):

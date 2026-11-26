@@ -41,7 +41,7 @@ SELECTED_GENE_FIELD = 'selectedGeneId'
 SELECTED_TRANSCRIPT_FIELD = 'selectedTranscript'
 
 
-def get_clickhouse_variants(families, user, genome_version=None, sort=None, sample_data_by_dataset_type=None, inheritance=None, locus=None, exclude_keys=None, exclude_key_pairs=None, no_access_project_genome_version=None, **search):
+def get_clickhouse_variants(families, user, genome_version=None, sorts=None, sample_data_by_dataset_type=None, inheritance=None, locus=None, exclude_keys=None, exclude_key_pairs=None, no_access_project_genome_version=None, **search):
     genome_version = genome_version or no_access_project_genome_version or _get_search_genome_version(families)
 
     search['inheritance_filter'] = (inheritance or {}).get('filter') or {}
@@ -113,7 +113,7 @@ def get_clickhouse_variants(families, user, genome_version=None, sort=None, samp
         _raise_dataset_type_errors(sample_data_errors, sample_data_by_dataset_type)
 
     logger.info(f'Total results: {len(results)}', user)
-    return get_sorted_search_results(results, sort, families)
+    return get_sorted_search_results(results, sorts, families)
 
 
 def  _get_search_genome_version(families):
@@ -477,9 +477,8 @@ def _set_individual_guids(result, sample_map):
     result['genotypes'] = {k: v[0] if len(v) == 1 else sorted(v, key=lambda g: g.get('sampleType')) for k, v in individual_genotypes.items()}
 
 
-def get_sorted_search_results(results, sort, families):
-    sort_metadata = _get_sort_gene_metadata(sort, results, families)
-    sort_key = _get_sort_key(sort, sort_metadata)
+def get_sorted_search_results(results, sorts, families):
+    sort_key = _get_sort_key(sorts or [], results, families)
     sorted_results = sorted([
         sorted(result, key=sort_key) if isinstance(result, list) else result for result in results
     ], key=sort_key)
@@ -761,11 +760,7 @@ GENE_SORTS = {
     PRIORITIZED_GENE_SORT: _prioritized_gene_sort,
 }
 
-def _get_sort_gene_metadata(sort, results, families):
-    get_metadata = GENE_SORTS.get(sort)
-    if not get_metadata:
-        return None
-
+def _get_result_gene_ids(results):
     gene_ids = set()
     for result in results:
         if not isinstance(result, list):
@@ -775,7 +770,7 @@ def _get_sort_gene_metadata(sort, results, families):
                 gene_ids.update([t['geneId'] for t in variant[TRANSCRIPT_CONSEQUENCES_FIELD]])
             else:
                 gene_ids.update(variant.get('transcripts', {}).keys())
-    return get_metadata(gene_ids, families)
+    return gene_ids
 
 
 MAX_SORT_RANK = 1e10
@@ -855,7 +850,10 @@ SORT_EXPRESSIONS = {
     'size': [_sv_size],
 }
 
-def _get_sort_key(sort, gene_metadata):
+SORT_KEYS = {XPOS_SORT_KEY, *SORT_EXPRESSIONS.keys(), *GENE_SORTS.keys()}
+
+
+def _get_sort_expressions(sort, gene_metadata):
     sort_expressions = SORT_EXPRESSIONS.get(sort, [])
 
     if sort == OMIM_SORT:
@@ -875,6 +873,16 @@ def _get_sort_key(sort, gene_metadata):
                 or [MAX_SORT_RANK]
             ),
         ]
+
+    return sort_expressions
+
+
+def _get_sort_key(sorts, results, families):
+    gene_ids = _get_result_gene_ids(results) if any(sort in GENE_SORTS for sort in sorts) else None
+    sort_expressions = []
+    for sort in sorts:
+        gene_metadata = GENE_SORTS[sort](gene_ids, families) if sort in GENE_SORTS else None
+        sort_expressions += _get_sort_expressions(sort, gene_metadata)
 
     return lambda x: tuple(expr(x[0] if isinstance(x, list) else x) for expr in [*sort_expressions, lambda x: x[XPOS_SORT_KEY]])
 

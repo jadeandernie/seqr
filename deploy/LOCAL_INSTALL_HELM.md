@@ -167,3 +167,16 @@ seqr accepts normalized expression TPMs from STAR or RNAseqQC. There are 2 diffe
 Splice junctions (.junctions.bed.gz) and coverage (.bigWig) can be visualized in seqr using IGV.
 See [ReadViz Setup](READVIZ_SETUP.md) for 
 instructions on adding this data, as the process is identical for all IGV tracks. 
+
+## Known variant checks
+
+Researchers can record a saved SNV/indel or mitochondrial variant as a "known variant" with a verdict. Families are
+checked for the active known variants whenever new data is loaded, as the last step of the
+`check_for_new_samples_from_pipeline` command, so no additional scheduling is needed for newly loaded data.
+
+Families which were loaded before a known variant was recorded, shared with all projects or reactivated are checked with
+```bash
+./manage.py check_known_variants [--project <project guid>] [--notify]
+```
+It only needs a scheduler (cron) entry if periodic rechecks of existing families are wanted. `--notify` emails the
+subscribers of each project with new matches, as the data loading step does.

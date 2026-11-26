@@ -121,7 +121,7 @@ test('lists the known variants a researcher can see, and only lets them change t
   expect(getPosts(fetch)).toEqual([[`/api/known_variant_checks/${OWN_CHECK.checkGuid}/update`, {
     verdict: 'R', pubmedId: '', clinvarAccession: 'RCV000012345',
   }]])
-  expect(wrapper.find('Modal').length).toEqual(0)
+  expect(wrapper.find('KnownVariantCheckForm').length).toEqual(0)
   expect(rowText(wrapper)[0].slice(2, 4)).toEqual(['Suspected, refuted on follow-up', 'ClinVar RCV000012345'])
 
   // Deactivate and reactivate
@@ -175,7 +175,7 @@ test('lets analysts add a known variant and share known variants with all projec
   expect(getPosts(fetch)).toEqual([['/api/known_variant_checks/create', {
     genomeVersion: '38', datasetType: 'MITO', variantId: 'M-11597-A-G', verdict: 'S', isGlobal: true,
   }]])
-  expect(wrapper.find('Modal').length).toEqual(0)
+  expect(wrapper.find('KnownVariantCheckForm').length).toEqual(0)
   expect(rowText(wrapper).map(row => row[0])).toEqual([
     '1-248367227-TC-TGRCh38 SNV / indel', 'M-4429-G-AGRCh38 Mitochondrial', 'M-11597-A-GGRCh38 Mitochondrial',
   ])
@@ -183,7 +183,7 @@ test('lets analysts add a known variant and share known variants with all projec
 
   await clickButton(wrapper, 'Add Known Variant')
   await clickButton(wrapper, 'Cancel')
-  expect(wrapper.find('Modal').length).toEqual(0)
+  expect(wrapper.find('KnownVariantCheckForm').length).toEqual(0)
 
   await clickButton(wrapper, 'Edit')
   expect(wrapper.find('Modal').find('FormField').map(field => field.prop('name'))).toEqual(

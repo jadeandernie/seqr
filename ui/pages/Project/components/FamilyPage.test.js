@@ -11,6 +11,11 @@ import { STATE_WITH_2_FAMILIES } from '../fixtures'
 
 configure({ adapter: new Adapter() })
 
+// requests stay pending, so that no component updates after a test has finished
+beforeEach(() => {
+  global.fetch = jest.fn(() => new Promise(() => {}))
+})
+
 const configureStore = configureMockStore([thunk])
 
 const INITIAL_ENTRIES = ['/project/R0237_1000_genomes_demo/family_page/F011652_1']

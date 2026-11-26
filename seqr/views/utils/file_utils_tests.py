@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-from io import StringIO
+from io import BytesIO, StringIO
 import gzip
+import json
 import mock
+import os
 
 import openpyxl as xl
 from tempfile import NamedTemporaryFile
@@ -10,7 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls.base import reverse
 
 from seqr.views.utils.file_utils import save_temp_file, parse_file, load_uploaded_file, get_temp_file_path
-from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase
+from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, MockGoogleStorage
 
 TSV_DATA = b'Family ID	Individual ID	Notes\n\
 "1"	"NA19675"	"An affected individual, additional metadata"\n\
@@ -143,28 +145,18 @@ class LocalFileUtilsTest(AuthenticationTestCase, FileUtilsTest):
 class AnvilFileUtilsTest(AnvilAuthenticationTestCase, FileUtilsTest):
     fixtures = ['users']
 
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
     def test_temp_file_upload(self, *args, **kwargs):
-        mock_subprocess = args[0]
-        mock_subprocess.return_value.wait.return_value = 0
-        mock_subprocess.return_value.stdout.__iter__.side_effect = self._iter_gs_data
+        mock_gcs = MockGoogleStorage().start(self)
         super().test_temp_file_upload()
         gs_file = f'gs://seqr-scratch-temp/{HASH_FILE_NAME}'
-        mock_subprocess.assert_has_calls([
-            mock.call(f'gsutil mv {self._temp_file_path()} {gs_file}', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call(f'gsutil ls {gs_file}', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call(f'gsutil cat {gs_file} | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().stdout.__iter__(),
+        local_file = get_temp_file_path(HASH_FILE_NAME, is_local=True)
+        self.assertListEqual(mock_gcs.calls.mock_calls[:5], [
+            mock.call.upload_from_filename(gs_file, local_file),
+            mock.call.exists(gs_file),
+            mock.call.open(gs_file, 'rb'),
+            mock.call.exists(gs_file),
+            mock.call.open(gs_file, 'rb'),
         ])
-
-    @staticmethod
-    def _temp_file_path():
-        return get_temp_file_path(HASH_FILE_NAME, is_local=True)
-
-    @classmethod
-    def _iter_gs_data(cls):
-        with gzip.open(cls._temp_file_path()) as f:
-            for line in f:
-                yield line
+        self.assertFalse(os.path.exists(local_file))
+        with gzip.open(BytesIO(mock_gcs.files[gs_file]), 'rt') as f:
+            self.assertListEqual(json.load(f), PARSED_DATA)

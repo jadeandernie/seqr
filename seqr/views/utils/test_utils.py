@@ -5,11 +5,14 @@ from django.contrib.auth.models import User, Group
 from django.core.management import call_command
 from django.db import connections, transaction
 from django.test import TestCase
+from google.api_core.exceptions import NotFound
 from guardian.shortcuts import assign_perm
-from io import StringIO
+import gzip
+from io import BytesIO, StringIO
 import json
 import logging
 import mock
+import os
 import re
 import responses
 from urllib.parse import quote_plus, urlparse
@@ -17,6 +20,125 @@ from urllib.parse import quote_plus, urlparse
 from seqr.models import Project, CAN_VIEW, CAN_EDIT
 
 WINDOW_REGEX_TEMPLATE = 'window\.{key}=(?P<value>[^)<]+)'
+
+
+class _FakeBlob(object):
+
+    def __init__(self, bucket, name):
+        self._bucket = bucket
+        self.name = name
+        self.path = f'gs://{bucket.name}/{name}'
+
+    def _content(self):
+        if self.path not in self._bucket.gcs.files:
+            raise NotFound(f'No such object: {self.path}')
+        return self._bucket.gcs.files[self.path]
+
+    def exists(self):
+        self._bucket.record('exists', self.path)
+        return self.path in self._bucket.gcs.files
+
+    def open(self, mode):
+        self._bucket.record('open', self.path, mode)
+        content = self._content()
+        return BytesIO(content) if 'b' in mode else StringIO(content.decode('utf-8'))
+
+    def download_as_bytes(self, start=None, end=None):
+        self._bucket.record('download_as_bytes', self.path, start=start, end=end)
+        return self._content()[start:end + 1]
+
+    def upload_from_filename(self, local_path):
+        self._bucket.record('upload_from_filename', self.path, local_path)
+        try:
+            with open(local_path, 'rb') as f:
+                content = f.read()
+        except FileNotFoundError:
+            content = self._bucket.gcs.local_files.get(local_path, b'')
+        self._bucket.gcs.add_file(self.path, content)
+
+    def download_to_filename(self, local_path):
+        self._bucket.record('download_to_filename', self.path, local_path)
+        content = self._content()
+        self._bucket.gcs.local_files[local_path] = content
+        if os.path.isdir(os.path.dirname(local_path)):
+            with open(local_path, 'wb') as f:
+                f.write(content)
+
+
+class _FakeBucket(object):
+
+    def __init__(self, gcs, name, user_project):
+        self.gcs = gcs
+        self.name = name
+        self.user_project = user_project
+
+    def record(self, method, *args, **kwargs):
+        if self.name in self.gcs.bucket_errors:
+            raise self.gcs.bucket_errors[self.name]
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        if self.user_project:
+            kwargs['user_project'] = self.user_project
+        getattr(self.gcs.calls, method)(*args, **kwargs)
+
+    def blob(self, name):
+        return _FakeBlob(self, name)
+
+    def list_blobs(self, prefix=None, max_results=None, match_glob=None):
+        self.record('list_blobs', f'gs://{self.name}', prefix=prefix, max_results=max_results, match_glob=match_glob)
+        bucket_prefix = f'gs://{self.name}/'
+        names = sorted(path[len(bucket_prefix):] for path in self.gcs.files if path.startswith(bucket_prefix))
+        if match_glob:
+            glob_regex = re.escape(match_glob).replace(r'\*\*', '.*').replace(r'\*', '[^/]*')
+            names = [name for name in names if re.fullmatch(glob_regex, name)]
+        return [self.blob(name) for name in names if name.startswith(prefix or '')][:max_results]
+
+
+class MockGoogleStorage(object):
+    """
+    In-memory fake for the google-cloud-storage client used by seqr.utils.google_storage_utils.
+    "files" maps gs:// paths to their byte content, "calls" records every bucket/blob request for assertions,
+    "bucket_errors" maps bucket names to an exception raised by any request to that bucket, and "local_files" holds
+    the content of downloaded files and of uploaded files which are not actually on disk
+    """
+
+    def __init__(self):
+        self.files = {}
+        self.local_files = {}
+        self.bucket_errors = {}
+        self.calls = mock.Mock()
+        self._patchers = [
+            mock.patch('seqr.utils.google_storage_utils.storage.Client'),
+            mock.patch('seqr.utils.google_storage_utils._CLIENT', None),
+            mock.patch('seqr.utils.google_storage_utils.os.remove', self._remove_local_file),
+        ]
+        self._os_remove = os.remove
+
+    def start(self, test_case):
+        mock_client = self._patchers[0].start()
+        mock_client.return_value.bucket.side_effect = lambda name, user_project=None: _FakeBucket(self, name, user_project)
+        for patcher in self._patchers[1:]:
+            patcher.start()
+        for patcher in self._patchers:
+            test_case.addCleanup(patcher.stop)
+        return self
+
+    def _remove_local_file(self, path):
+        try:
+            self._os_remove(path)
+        except FileNotFoundError:
+            self.local_files.pop(path, None)
+
+    def add_file(self, path, content):
+        """Add a file from its text or byte content. Text content for a "gz" path is stored gzipped"""
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+            if path.endswith('gz'):
+                content = gzip.compress(content)
+        self.files[path] = content
+
+    def assert_calls(self, test_case, expected_calls):
+        test_case.assertListEqual(self.calls.mock_calls, expected_calls)
+        self.calls.reset_mock()
 
 
 class DifferentDbTransactionSupportMixin(object):

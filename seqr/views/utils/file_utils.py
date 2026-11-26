@@ -9,7 +9,8 @@ import os
 import tempfile
 import openpyxl as xl
 
-from seqr.utils.file_utils import mv_file_to_gs, file_iter
+from seqr.utils.file_utils import file_iter
+from seqr.utils.google_storage_utils import mv_file_to_gs
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.permissions_utils import login_and_policies_required
 from seqr.views.utils.terra_api_utils import anvil_enabled
@@ -122,18 +123,18 @@ def save_uploaded_file(request, process_records=None, allow_json=False):
     with gzip.open(serialized_file_path, 'wt') as f:
         json.dump(json_records, f)
 
-    persist_temp_file(file_name, request.user)
+    persist_temp_file(file_name)
 
     return uploaded_file_id, filename, json_records
 
 
-def persist_temp_file(file_name, user, src_suffix=''):
+def persist_temp_file(file_name, dir_file_names=None):
     if not anvil_enabled():
         return
 
-    src_path = get_temp_file_path(f'{file_name}{src_suffix}', is_local=True)
-    dest_path = get_temp_file_path(file_name, is_local=False)
-    mv_file_to_gs(src_path, dest_path, user)
+    file_names = [f'{file_name}/{dir_file_name}' for dir_file_name in dir_file_names] if dir_file_names else [file_name]
+    for name in file_names:
+        mv_file_to_gs(get_temp_file_path(name, is_local=True), get_temp_file_path(name, is_local=False))
 
 
 def load_uploaded_file(upload_file_id):

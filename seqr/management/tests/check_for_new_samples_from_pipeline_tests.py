@@ -4,10 +4,12 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 import json
 import mock
+import os
 import responses
 
-from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase
+from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase, MockGoogleStorage
 from seqr.models import Project, Family, Individual, Dataset, SavedVariant
+from seqr.utils.google_storage_utils import get_gs_wildcard_match_files
 
 SEQR_URL = 'https://seqr.broadinstitute.org/'
 PROJECT_GUID = 'R0003_test'
@@ -164,33 +166,34 @@ LOCAL_RUN_PATHS = [
     '/seqr/seqr-hail-search-data/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/_CLICKHOUSE_LOAD_SUCCESS',
 ]
 RUN_PATHS = [
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/_ERRORS_REPORTED',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/validation_errors.json',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/_CLICKHOUSE_LOAD_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/_CLICKHOUSE_LOAD_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/_CLICKHOUSE_LOAD_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/_CLICKHOUSE_LOAD_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/_CLICKHOUSE_LOAD_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/README.txt',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2025-03-14/',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2025-03-14/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/_SUCCESS',
-    b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/_ERRORS_REPORTED',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-13/validation_errors.json',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/',
+    'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/_CLICKHOUSE_LOAD_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/README.txt',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2025-03-14/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2025-03-14/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/_SUCCESS',
+    'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/hail_search_to_clickhouse_migration_WGS_R0877_neptune/_CLICKHOUSE_LOAD_SUCCESS',
 ]
 OPENED_RUN_JSON_FILES = [{
     'callsets': ['1kg.vcf.gz', 'new_samples.vcf.gz'],
@@ -341,14 +344,17 @@ OPENED_RUN_JSON_FILES = [{
     'error': 'An unhandled error occurred during VCF ingestion',
 }]
 
-def mock_opened_file(index):
-    m = mock.MagicMock()
-    m.wait.return_value = 0
-    m.stdout = [json.dumps(OPENED_RUN_JSON_FILES[index]).encode()]
-    return m
+RUNS = [
+    ('GRCh38/SNV_INDEL', 'auto__2023-08-09'), ('GRCh37/SNV_INDEL', 'manual__2023-11-02'),
+    ('GRCh38/MITO', 'auto__2024-08-12'), ('GRCh38/MITO', 'auto__2025-12-02'), ('GRCh38/SV', 'auto__2024-09-14'),
+]
+OPENED_RUN_JSON_FILE_PATHS = [
+    *[f'{data_type.replace("SV", "GCNV")}/runs/{version}/metadata.json' for data_type, version in RUNS],
+    'GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json',
+    'GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json',
+]
 
 
-@mock.patch('seqr.utils.file_utils.os.path.isfile', lambda *args: True)
 class CheckNewSamplesTest(object):
 
     UPDATE_SAMPLE_LOGS = [
@@ -428,10 +434,7 @@ class CheckNewSamplesTest(object):
         self._assert_expected_loading_file_calls(single_call=single_call)
 
         logs = self.LIST_FILE_LOGS[:1] + [(f'Loading new samples from {num_runs} run(s)', None)]
-        runs = [
-            ('GRCh38/SNV_INDEL', 'auto__2023-08-09'), ('GRCh37/SNV_INDEL', 'manual__2023-11-02'),
-            ('GRCh38/MITO', 'auto__2024-08-12'), ('GRCh38/MITO', 'auto__2025-12-02'), ('GRCh38/SV', 'auto__2024-09-14'),
-        ]
+        runs = RUNS
         if single_call:
             runs = runs[:1]
         else:
@@ -440,7 +443,6 @@ class CheckNewSamplesTest(object):
             ]}))
         for data_type, version in runs:
             logs.append((f'Loading new samples from {data_type}: {version}', None))
-            logs += self._additional_loading_logs(data_type, version)
             if (run_loading_logs or {}).get(data_type):
                 logs += run_loading_logs[data_type]
             if (error_logs or {}).get(version):
@@ -574,9 +576,6 @@ The following 1 families failed sex check:
         self.assertEqual(collaborator_notification.actor.name, 'Non-Analyst Project')
         self.assertEqual(collaborator_notification.verb, 'Loaded 1 new WES samples')
         self.assertEqual(collaborator_notification.timestamp.isoformat(), '2025-09-23T00:00:00+00:00')
-
-    def _additional_loading_logs(self, data_type, version):
-        return []
 
     @staticmethod
     def _anvil_email_calls(*args, **kwargs):
@@ -779,6 +778,9 @@ class LocalCheckNewSamplesTest(AuthenticationTestCase, CheckNewSamplesTest):
         patcher = mock.patch('seqr.views.utils.export_utils.os.makedirs')
         self.mock_mkdir = patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = mock.patch('seqr.utils.file_utils.os.path.isfile', lambda *args: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.utils.file_utils.glob.glob')
         self.mock_glob = patcher.start()
         self.addCleanup(patcher.stop)
@@ -792,7 +794,7 @@ class LocalCheckNewSamplesTest(AuthenticationTestCase, CheckNewSamplesTest):
         self.mock_glob.return_value = []
 
     def _assert_has_expected_empty_list_file_calls(self):
-        self.mock_glob.assert_called_with('/seqr/seqr-hail-search-data/GRCh37/MITO/runs/*/*', recursive=False)
+        self.mock_glob.assert_called_with('/seqr/seqr-hail-search-data/GRCh37/MITO/runs/*/*')
 
     def _set_reloading_loading_files(self):
         self.mock_glob.return_value = [LOCAL_RUN_PATHS[3], LOCAL_RUN_PATHS[7]]
@@ -806,7 +808,7 @@ class LocalCheckNewSamplesTest(AuthenticationTestCase, CheckNewSamplesTest):
         self.mock_mkdir.reset_mock()
 
     def _assert_expected_loading_file_calls(self, single_call):
-        self.mock_glob.assert_called_with('/seqr/seqr-hail-search-data/*/*/runs/*/*', recursive=False)
+        self.mock_glob.assert_called_with('/seqr/seqr-hail-search-data/*/*/runs/*/*')
         self.mock_open.assert_has_calls([
             mock.call(LOCAL_RUN_PATHS[2], 'r'),
             *[mock.call(path.replace('_CLICKHOUSE_LOAD_SUCCESS', 'metadata.json'), 'r') for path in LOCAL_RUN_PATHS[3:-1]]
@@ -833,10 +835,7 @@ class AirtableCheckNewSamplesTest(AnvilAuthenticationTestCase, CheckNewSamplesTe
     PROJECT_EMAIL_TEXT = ANVIL_TEXT_EMAIL
     PROJECT_EMAIL_HTML = ANVIL_HTML_EMAIL
 
-    LIST_FILE_LOGS = [
-        ('==> gsutil ls gs://seqr-hail-search-data/v3.1/*/*/runs/*/*', None),
-        ('One or more URLs matched no objects', None),
-    ]
+    LIST_FILE_LOGS = []
     AIRTABLE_LOGS = [
         ('Fetching Samples records 0-2 from airtable', None),
         ('Fetched 7 Samples records from airtable', None),
@@ -850,14 +849,8 @@ class AirtableCheckNewSamplesTest(AnvilAuthenticationTestCase, CheckNewSamplesTe
         ('Fetching AnVIL Seqr Loading Requests Tracking records 0-2 from airtable', None),
     ]
     VALIDATION_LOGS = [
-        '==> gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json',
-        '==> gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json',
         'Fetching AnVIL Seqr Loading Requests Tracking records 0-2 from airtable',
         'Fetched 1 AnVIL Seqr Loading Requests Tracking records from airtable',
-        '==> gsutil mv /mock/tmp/* gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/',
-        '==> gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json',
-        '==> gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json',
-        '==> gsutil mv /mock/tmp/* gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/',
     ]
     ADDITIONAL_SLACK_CALLS = [
         mock.call(
@@ -887,13 +880,17 @@ The following users have been notified: test_user_manager@test.com""")
     SKIPPED_PDO_MESSAGE = '\n\nSkipped samples in this project have been moved to PDO-1234_sr'
 
     def setUp(self):
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
+        self.mock_gcs = MockGoogleStorage().start(self)
+        self.run_paths = RUN_PATHS
+        # Google storage lists files alphabetically, the expected loading order follows the order of the listed runs
+        patcher = mock.patch(
+            'seqr.utils.file_utils.get_gs_wildcard_match_files',
+            lambda path: sorted(
+                get_gs_wildcard_match_files(path), key=lambda file: RUN_PATHS.index(f'{os.path.dirname(file)}/'),
+            ),
+        )
+        patcher.start()
         self.addCleanup(patcher.stop)
-        self.mock_ls_process = mock.MagicMock()
-        self.mock_ls_process.communicate.return_value = b'\n'.join(RUN_PATHS), b''
-        self.mock_mv_process = mock.MagicMock()
-        self.mock_mv_process.wait.return_value = 0
         self.set_up()
         super().setUp()
 
@@ -934,56 +931,50 @@ The following users have been notified: test_user_manager@test.com""")
         super().test_command(*args, **kwargs)
 
     def _set_empty_loading_files(self):
-        self.mock_subprocess.return_value.communicate.return_value = b'', b'One or more URLs matched no objects'
+        self.mock_gcs.files.clear()
 
     def _assert_has_expected_empty_list_file_calls(self):
-        self.mock_subprocess.assert_called_with(
-            'gsutil ls gs://seqr-hail-search-data/v3.1/GRCh37/MITO/runs/*/*', stdout=-1, stderr=-1, shell=True # nosec
-        )
+        self.mock_gcs.assert_calls(self, [mock.call.list_blobs(
+            'gs://seqr-hail-search-data', prefix='v3.1/GRCh37/MITO/runs/', match_glob='v3.1/GRCh37/MITO/runs/*/*',
+        )])
 
     def _set_reloading_loading_files(self):
-        self.mock_ls_process.communicate.return_value = b'\n'.join(RUN_PATHS[6:8] + RUN_PATHS[18:20]), b''
-        self.mock_subprocess.side_effect = [self.mock_ls_process]
+        self.run_paths = RUN_PATHS[6:8] + RUN_PATHS[18:20]
+        self._set_loading_files()
 
     def _set_loading_files(self):
         responses.calls.reset()
-        self.mock_subprocess.reset_mock()
-        subprocesses = [self.mock_ls_process]
-        for i in range(len(OPENED_RUN_JSON_FILES) - 1):
-            subprocesses += [self.mock_mv_process, mock_opened_file(i)]
-        subprocesses += [self.mock_mv_process, self.mock_mv_process,  mock_opened_file(-1), self.mock_mv_process]
-        self.mock_subprocess.side_effect = subprocesses
+        self.mock_gcs.files.clear()
+        for path in self.run_paths:
+            self.mock_gcs.add_file(path, '')
+        for path, content in zip(OPENED_RUN_JSON_FILE_PATHS, OPENED_RUN_JSON_FILES):
+            path = f'{self.MOCK_DATA_DIR}/{path}'
+            if os.path.dirname(path) in {os.path.dirname(run_path) for run_path in self.run_paths}:
+                self.mock_gcs.add_file(path, json.dumps(content))
+        self.mock_gcs.calls.reset_mock()
 
     def _assert_expected_loading_file_calls(self, single_call):
-        calls = [
-            ('gsutil ls gs://seqr-hail-search-data/v3.1/*/*/runs/*/*', -1),
-            ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/metadata.json', -2),
-            ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/auto__2023-08-09/metadata.json', -2),
-        ]
+        opened_files = OPENED_RUN_JSON_FILE_PATHS[:1]
+        errors_reported_files = []
         if not single_call:
-            calls += [
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/metadata.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh37/SNV_INDEL/runs/manual__2023-11-02/metadata.json', -2),
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/metadata.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2024-08-12/metadata.json', -2),
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/metadata.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/MITO/runs/auto__2025-12-02/metadata.json', -2),
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/metadata.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/GCNV/runs/auto__2024-09-14/metadata.json', -2),
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/validation_errors.json', -2),
-                ('gsutil mv /mock/tmp/* gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-14/', -2),
-                ('gsutil ls gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json', -2),
-                ('gsutil cat gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/validation_errors.json', -2),
-                ('gsutil mv /mock/tmp/* gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-01-24/', -2),
+            opened_files = OPENED_RUN_JSON_FILE_PATHS
+            errors_reported_files = [
+                path.replace('validation_errors.json', '_ERRORS_REPORTED') for path in OPENED_RUN_JSON_FILE_PATHS[5:]
             ]
-        self.mock_subprocess.assert_has_calls(
-            [mock.call(command, stdout=-1, stderr=stderr, shell=True) for (command, stderr) in calls] # nosec
-        )
-
-    def _additional_loading_logs(self, data_type, version):
-        return [(f'==> gsutil ls gs://seqr-hail-search-data/v3.1/{data_type.replace("SV", "GCNV")}/runs/{version}/metadata.json', None),
-                (f'==> gsutil cat gs://seqr-hail-search-data/v3.1/{data_type.replace("SV", "GCNV")}/runs/{version}/metadata.json', None)]
+        calls = [mock.call.list_blobs('gs://seqr-hail-search-data', prefix='v3.1/', match_glob='v3.1/*/*/runs/*/*')]
+        for path in opened_files:
+            calls += [
+                mock.call.exists(f'{self.MOCK_DATA_DIR}/{path}'),
+                mock.call.open(f'{self.MOCK_DATA_DIR}/{path}', 'r'),
+            ]
+            errors_reported_path = path.replace('validation_errors.json', '_ERRORS_REPORTED')
+            if errors_reported_path in errors_reported_files:
+                calls.append(mock.call.upload_from_filename(
+                    f'{self.MOCK_DATA_DIR}/{errors_reported_path}', '/mock/tmp/_ERRORS_REPORTED',
+                ))
+        self.mock_gcs.assert_calls(self, calls)
+        for path in errors_reported_files:
+            self.assertEqual(self.mock_gcs.files[f'{self.MOCK_DATA_DIR}/{path}'], b'')
 
     def _assert_expected_airtable_calls(self, has_success_run, single_call):
         # Test request tracking updates for validation errors

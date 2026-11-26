@@ -6,6 +6,7 @@ from django.core.management import call_command
 
 from reference_data.management.tests.test_utils import ReferenceDataCommandTestCase
 from reference_data.models import GeneInfo, TranscriptInfo, RefseqTranscript, DataVersions
+from seqr.views.utils.test_utils import MockGoogleStorage
 
 BAD_FIELDS_GTF_DATA = [
     'gene	11869	14412	.	+	.	gene_id "ENSG00000223972.4";\n',
@@ -66,10 +67,7 @@ class UpdateGencodeTest(ReferenceDataCommandTestCase):
         self.mock_temp_dir = patcher.start()
         self.mock_temp_dir.return_value.__enter__.return_value = self.tmp_dir
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
-        self.mock_subprocess.return_value.wait.return_value = 0
-        self.addCleanup(patcher.stop)
+        self.mock_gcs = MockGoogleStorage().start(self)
 
         self.gzipped_gtf_data = gzip.compress(''.join(GTF_DATA).encode())
         self._add_latest_responses()
@@ -155,7 +153,7 @@ class UpdateGencodeTest(ReferenceDataCommandTestCase):
             ('Loaded 2 RefseqTranscript records', None),
             ('Skipped 2 records with unrecognized or duplicated transcripts', None),
         ])
-        self.mock_subprocess.assert_not_called()
+        self.mock_gcs.assert_calls(self, [])
 
         self._has_expected_new_genes()
         gene_info = GeneInfo.objects.get(gene_id='ENSG00000235249')
@@ -192,7 +190,6 @@ class UpdateGencodeTest(ReferenceDataCommandTestCase):
         self.assert_json_logs(user=None, expected=self._gencode_download_logs(39) + [
             ('Updated 1 previously loaded GeneInfo records', None),
             ('Created 1 GeneInfo records', None),
-            (f'==> gsutil mv {self.tmp_dir}/* gs://seqr-reference-data/gencode/', None),
             ('Dropped 1 existing TranscriptInfo records', None),
             ('Created 2 TranscriptInfo records', None),
             ('Updating RefseqTranscript', None),
@@ -219,9 +216,9 @@ class UpdateGencodeTest(ReferenceDataCommandTestCase):
             RefseqTranscript.objects.get(transcript__transcript_id='ENST00000258436').refseq_id, 'NR_026874.2',
         )
 
-        self.mock_subprocess.assert_called_with(
-            f'gsutil mv {self.tmp_dir}/* gs://seqr-reference-data/gencode/', stdout=-1, stderr=-2, shell=True,  # nosec
-        )
+        self.mock_gcs.assert_calls(self, [mock.call.upload_from_filename(
+            'gs://seqr-reference-data/gencode/gene_symbol_changes__39.csv', f'{self.tmp_dir}/gene_symbol_changes__39.csv',
+        )])
         self.mock_open.assert_called_with(f'{self.tmp_dir}/gene_symbol_changes__39.csv', 'w')
         self.assertEqual(
             self.mock_open.return_value.__enter__.return_value.write.call_args.args[0],

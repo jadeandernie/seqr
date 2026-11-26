@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 import datetime
-import gzip
 import json
 import mock
-import re
 import responses
 
 from copy import deepcopy
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls.base import reverse
+from google.api_core.exceptions import BadRequest
 from io import BytesIO
 from openpyxl import load_workbook
 
@@ -19,7 +18,7 @@ from seqr.views.apis.individual_api import edit_individuals_handler, update_indi
     get_hpo_terms, get_individual_rna_seq_data, import_gregor_metadata
 from seqr.views.apis.report_api_tests import PARTICIPANT_TABLE, PHENOTYPE_TABLE, EXPERIMENT_TABLE, EXPERIMENT_LOOKUP_TABLE, GENETIC_FINDINGS_TABLE
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, INDIVIDUAL_FIELDS, \
-    INDIVIDUAL_CORE_FIELDS, CORE_INTERNAL_INDIVIDUAL_FIELDS, GENE_FIELDS
+    INDIVIDUAL_CORE_FIELDS, CORE_INTERNAL_INDIVIDUAL_FIELDS, GENE_FIELDS, MockGoogleStorage
 
 PROJECT_GUID = 'R0001_1kg'
 PM_REQUIRED_PROJECT_GUID = 'R0003_test'
@@ -634,8 +633,6 @@ class IndividualAPITest(object):
         self.assertEqual(response_json['individualsByGuid']['I000008_na20872']['individualId'], 'NA20872_update')
 
         self._assert_expected_reload_calls(PROJECT_GUID)
-        read_tmp_table_logs = self._read_tmp_table_logs('ffa788c23360f0908f3de16dca799fe1')
-        self.assert_json_logs(None, read_tmp_table_logs)
         self.assert_json_logs(self.manager_user, [
             (mock.ANY, {'dbUpdate': {
                 'dbEntity': 'Family', 'entityId': mock.ANY, 'updateFields': ['family_id', 'project'], 'updateType': 'create',
@@ -662,7 +659,7 @@ class IndividualAPITest(object):
             ('Triggered Rebuild Gt Stats', {'detail': {'project_guids': ['R0001_1kg']}}),
             ('Reloading dictionary seqrdb_sex_dict', None),
             ('Reloading dictionary seqrdb_individual_metadata_dict', None),
-        ], offset=len(read_tmp_table_logs))
+        ])
 
         # Test PM permission
         receive_url = reverse(receive_individuals_table_handler, args=[PM_REQUIRED_PROJECT_GUID])
@@ -684,10 +681,6 @@ class IndividualAPITest(object):
     def _assert_expected_reload_calls(self, project_guid):
         self.assertEqual(len(responses.calls), 1)
         self.assertDictEqual(json.loads(responses.calls[0].request.body), {'project_guids': [project_guid]})
-
-    @staticmethod
-    def _read_tmp_table_logs(file_name):
-        return []
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     @mock.patch('seqr.views.utils.pedigree_info_utils.NO_VALIDATE_MANIFEST_PROJECT_CATEGORIES')
@@ -1110,14 +1103,11 @@ class IndividualAPITest(object):
         response = self.client.post(url, data={'f': f})
         self._is_expected_individuals_metadata_upload(response, expected_families=True, has_non_hpo_update=True)
 
-        read_tmp_table_logs = self._read_tmp_table_logs('6aea3d1f1bfc295340aa504370102fd5')
-        offset = 2 if read_tmp_table_logs else 1
-        self.assert_json_logs(None, read_tmp_table_logs, offset=offset)
         self.assert_json_logs(self.manager_user, [
             ('update Individual I000002_na19678', {'dbUpdate': mock.ANY}),
             ('update Individual I000001_na19675', {'dbUpdate': mock.ANY}),
             ('Reloading dictionary seqrdb_individual_metadata_dict', None),
-        ], offset=offset+len(read_tmp_table_logs))
+        ], offset=1)
 
     def test_individuals_metadata_hpo_term_number_table_handler(self):
         url = reverse(receive_individuals_metadata_handler, args=['R0001_1kg'])
@@ -1140,19 +1130,21 @@ class IndividualAPITest(object):
         self._is_expected_individuals_metadata_upload(response)
 
     def _set_metadata_file_iter(self, genetic_findings_table):
-        self.gs_files.update({
-            f'{file_name}.tsv': iter(['\t'.join(row).encode() for row in file]) for file_name, file in [
-                ('experiment_dna_short_read', EXPERIMENT_TABLE + [[
-                    'Broad_exome_HG00732', 'Broad_SM-JDBTM', 'Broad_HG00732_1', 'Kapa HyperPrep', '151', 'exome', '', '', '2022-08-15', '385', 'NovaSeq', '',
-                ]]),
-                ('experiment', EXPERIMENT_LOOKUP_TABLE + [[
-                    'experiment_dna_short_read.Broad_exome_HG00732', 'experiment_dna_short_read', 'Broad_exome_HG00732', 'Broad_HG00732',
-                ]]),
-                ('participant', LOAD_PARTICIPANT_TABLE),
-                ('phenotype', PHENOTYPE_TABLE),
-                ('genetic_findings', genetic_findings_table),
-            ]
-        })
+        for file_name, file in [
+            ('experiment_dna_short_read', EXPERIMENT_TABLE + [[
+                'Broad_exome_HG00732', 'Broad_SM-JDBTM', 'Broad_HG00732_1', 'Kapa HyperPrep', '151', 'exome', '', '', '2022-08-15', '385', 'NovaSeq', '',
+            ]]),
+            ('experiment', EXPERIMENT_LOOKUP_TABLE + [[
+                'experiment_dna_short_read.Broad_exome_HG00732', 'experiment_dna_short_read', 'Broad_exome_HG00732', 'Broad_HG00732',
+            ]]),
+            ('participant', LOAD_PARTICIPANT_TABLE),
+            ('phenotype', PHENOTYPE_TABLE),
+            ('genetic_findings', genetic_findings_table),
+        ]:
+            self.mock_gcs.add_file(
+                f'gs://test_bucket/data_tables/{file_name}.tsv', '\n'.join(['\t'.join(row) for row in file]),
+            )
+        self.mock_gcs.calls.reset_mock()
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     def test_import_gregor_metadata(self):
@@ -1165,8 +1157,8 @@ class IndividualAPITest(object):
             'OR4G11P', '', '', '', 'Heterozygous', '', 'unknown', 'Broad_NA20889_1_248367227', '', 'Candidate',
             'IRIDA syndrome', 'MONDO:0008788', 'Autosomal dominant', 'Full', '', '', 'SR-ES', '', '', '', '', '', '', '',
         ])
-        self.mock_subprocess.wait.return_value = 1
-        self.gs_files['experiment_dna_short_read.tsv'] = [b'Bucket is a requester pays bucket but no user project provided']
+        self.mock_gcs.bucket_errors['test_bucket'] = BadRequest(
+            'Bucket is a requester pays bucket but no user project provided.')
 
         url = reverse(import_gregor_metadata, args=[PM_REQUIRED_PROJECT_GUID])
         self.check_pm_login(url)
@@ -1179,16 +1171,22 @@ class IndividualAPITest(object):
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 500)
         self.assertDictEqual(response.json(), {'error': 'Could not access file gs://test_bucket/data_tables/experiment_dna_short_read.tsv'})
-        self.assert_json_logs(self.pm_user, [
-            ('==> gsutil ls gs://test_bucket/data_tables/experiment_dna_short_read.tsv', None),
-            ('Bucket is a requester pays bucket but no user project provided', {'severity': 'WARNING'}),
-        ])
+        self.assert_json_logs(None, [(
+            'Unable to access gs://test_bucket/data_tables/experiment_dna_short_read.tsv: 400 Bucket is a requester pays bucket but no user project provided.',
+            {'severity': 'WARNING'},
+        )])
 
-        self.mock_subprocess.reset_mock()
+        self.mock_gcs.bucket_errors.clear()
         self._set_metadata_file_iter(genetic_findings_table)
-        self.mock_subprocess.wait.return_value = 0
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
+        # Metadata files are read without billing a user project
+        self.mock_gcs.assert_calls(self, [call for table in [
+            'experiment_dna_short_read', 'experiment', 'participant', 'phenotype', 'genetic_findings',
+        ] for call in [
+            mock.call.exists(f'gs://test_bucket/data_tables/{table}.tsv'),
+            mock.call.open(f'gs://test_bucket/data_tables/{table}.tsv', 'r'),
+        ]])
         response_json = response.json()
         self.assertSetEqual(set(response_json.keys()), {
             'importStats', 'projectsByGuid', 'familiesByGuid', 'individualsByGuid', 'familyTagTypeCounts',
@@ -1491,9 +1489,8 @@ class LocalIndividualAPITest(AuthenticationTestCase, IndividualAPITest):
     HAS_EXTERNAL_PROJECT_ACCESS = False
 
     def setUp(self):
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        _mock_subprocess = patcher.start()
-        _mock_subprocess.side_effect = Exception('Calling gs from local')
+        patcher = mock.patch('seqr.utils.google_storage_utils.storage.Client')
+        patcher.start().side_effect = Exception('Calling gs from local')
         self.addCleanup(patcher.stop)
 
         super().setUp()
@@ -1508,36 +1505,5 @@ class AnvilIndividualAPITest(AnvilAuthenticationTestCase, IndividualAPITest):
     HAS_EXTERNAL_PROJECT_ACCESS = True
 
     def setUp(self):
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        _mock_subprocess = patcher.start()
-        self.addCleanup(patcher.stop)
-
-        self.mock_subprocess = mock.MagicMock()
-        self.mock_subprocess.wait.return_value = 0
-        self.mock_subprocess.stdout.__iter__.return_value = []
-        self.gs_files = {}
-        _mock_subprocess.side_effect = self._mock_subprocess
-
+        self.mock_gcs = MockGoogleStorage().start(self)
         super().setUp()
-
-    def _mock_subprocess(self, command, **kwargs):
-        command_args = re.match(
-            r'gsutil (?P<cmd>cat|mv|ls)(?P<local_path> \S+)? gs://(?P<gs_bucket>\S+)/(?P<gs_path>\S+)', command,
-        ).groupdict()
-        file_name = command_args['gs_path']
-        if command_args['cmd'] == 'mv':
-            src_path = command_args['local_path'].strip()
-            self.assertEqual(src_path.split('/')[-1], file_name)
-            self.assertEqual(command_args['gs_bucket'], 'seqr-scratch-temp')
-            with gzip.open(src_path) as f:
-                self.gs_files[file_name] = f.readlines()
-        else:
-            self.mock_subprocess.stdout.__iter__.return_value = self.gs_files[file_name]
-        return self.mock_subprocess
-
-    @staticmethod
-    def _read_tmp_table_logs(file_name):
-        return [
-            (f'==> gsutil ls gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz', None),
-            (f'==> gsutil cat gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz | gunzip -c -q - ', None),
-        ]

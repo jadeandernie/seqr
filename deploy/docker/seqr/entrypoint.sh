@@ -14,14 +14,6 @@ echo "SHELL: ${SHELL:-}"
 echo "PATH: ${PATH:-}"
 echo "PYTHONPATH: ${PYTHONPATH:-}"
 
-if [ -n "${GCLOUD_PROJECT:-}" ]; then
-    gcloud config set project "$GCLOUD_PROJECT"
-fi
-
-if [ -n "${GCLOUD_ZONE:-}" ]; then
-    gcloud config set compute/zone "$GCLOUD_ZONE"
-fi
-
 cd /seqr
 
 # allow pg_dump and other postgres command-line tools to run without having to enter a password

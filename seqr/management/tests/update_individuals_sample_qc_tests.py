@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.core.management.base import CommandError
 
 from seqr.models import Individual
+from seqr.views.utils.test_utils import MockGoogleStorage
 
 METADATA_JSON = {
     'callsets': ['1kg.vcf.gz', 'new_samples.vcf.gz'],
@@ -81,13 +82,7 @@ class UpdateIndividualsSampleQC(TestCase):
         mock_data_dir = patcher.start()
         mock_data_dir.__str__.return_value = 'gs://seqr-hail-search-data/v3.1'
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
-        self.addCleanup(patcher.stop)
-        self.mock_ls_process = mock.MagicMock()
-        self.mock_does_exist_process = mock.MagicMock()
-        self.mock_does_exist_process.wait.return_value = 0
-        self.mock_metadata_file = mock.MagicMock()
+        self.mock_gcs = MockGoogleStorage().start(self)
         super().setUp()
 
     def test_command(self):
@@ -96,24 +91,28 @@ class UpdateIndividualsSampleQC(TestCase):
             call_command('update_individuals_sample_qc', 'MITO', 'GRCh38', 'manual__2025-02-24')
 
         # Test no runs
-        self.mock_ls_process.communicate.return_value = b'\n', b''
-        self.mock_subprocess.side_effect = [self.mock_ls_process]
         with self.assertRaises(CommandError):
             call_command('update_individuals_sample_qc', 'SNV_INDEL', 'GRCh38', 'manual__2025-02-24')
 
         # Test 'sample_qc' not in metadata
-        self.mock_ls_process.communicate.return_value = b'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-02-24/metadata.json\n', b''
-        self.mock_metadata_file.stdout = [json.dumps({}).encode()]
-        self.mock_metadata_file.wait.return_value = 0
-        self.mock_subprocess.side_effect = [self.mock_ls_process, self.mock_does_exist_process, self.mock_metadata_file]
+        metadata_path = 'gs://seqr-hail-search-data/v3.1/GRCh38/SNV_INDEL/runs/manual__2025-02-24/metadata.json'
+        self.mock_gcs.add_file(metadata_path, json.dumps({}))
 
         with self.assertRaises(CommandError):
             call_command('update_individuals_sample_qc', 'SNV_INDEL', 'GRCh38', 'manual__2025-02-24')
 
         # Test valid case
-        self.mock_metadata_file.stdout = [json.dumps(METADATA_JSON).encode()]
-        self.mock_subprocess.side_effect = [self.mock_ls_process, self.mock_does_exist_process, self.mock_metadata_file]
+        self.mock_gcs.add_file(metadata_path, json.dumps(METADATA_JSON))
+        self.mock_gcs.calls.reset_mock()
         call_command('update_individuals_sample_qc', 'SNV_INDEL', 'GRCh38', 'manual__2025-02-24')
+        self.mock_gcs.assert_calls(self, [
+            mock.call.list_blobs(
+                'gs://seqr-hail-search-data', prefix='v3.1/GRCh38/SNV_INDEL/runs/manual__2025-02-24/metadata.json',
+                match_glob='v3.1/GRCh38/SNV_INDEL/runs/manual__2025-02-24/metadata.json',
+            ),
+            mock.call.exists(metadata_path),
+            mock.call.open(metadata_path, 'r'),
+        ])
 
         # Individual model properly updated with sample qc results
         self.assertListEqual(

@@ -1,10 +1,11 @@
+import gzip
 import os
 import re
 
 from collections import defaultdict
 
 from seqr.utils.middleware import ErrorsWarningsException
-from seqr.utils.file_utils import file_iter, does_file_exist, list_files
+from seqr.utils.file_utils import file_iter, file_bytes_iter, does_file_exist, list_files, list_wildcard_match_files
 from seqr.models import Dataset
 
 BLOCK_SIZE = 65536
@@ -89,8 +90,8 @@ def _get_vcf_meta_info(line):
     return None
 
 
-def validate_vcf_and_get_samples(data_path, user, genome_version, path_name=None, dataset_type=None):
-    vcf_filenames = _validate_valid_vcf_name(data_path, user, dataset_type, path_name)
+def validate_vcf_and_get_samples(data_path, genome_version, path_name=None, dataset_type=None):
+    vcf_filenames = _validate_valid_vcf_name(data_path, dataset_type, path_name)
 
     if vcf_filenames is None:
         return None
@@ -98,21 +99,21 @@ def validate_vcf_and_get_samples(data_path, user, genome_version, path_name=None
     samples = set()
     for vcf_filename in vcf_filenames:
         samples.update(
-            _validate_vcf_and_get_samples(vcf_filename, user, genome_version, dataset_type, data_path, path_name)
+            _validate_vcf_and_get_samples(vcf_filename, genome_version, dataset_type, data_path, path_name)
         )
     return samples
 
 
-def _validate_vcf_and_get_samples(vcf_filename, user, genome_version, dataset_type, data_path, path_name):
-    byte_range = None if vcf_filename.endswith('.vcf') else (0, BLOCK_SIZE)
+def _validate_vcf_and_get_samples(vcf_filename, genome_version, dataset_type, data_path, path_name):
     meta = defaultdict(dict)
     try:
-        header_line = next(_get_vcf_header_line(file_iter(vcf_filename, byte_range=byte_range, user=user), meta))
+        file_content = file_iter(vcf_filename) if vcf_filename.endswith('.vcf') else file_bytes_iter(vcf_filename, 0, BLOCK_SIZE)
+        header_line = next(_get_vcf_header_line(file_content, meta))
     except FileNotFoundError:
         raise ErrorsWarningsException([f'Data file or path {path_name or data_path} is not found.'], [])
     except StopIteration:
         raise ErrorsWarningsException(['No header found in the VCF file.'], [])
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, gzip.BadGzipFile):
         raise ErrorsWarningsException([
             'Unable to read the VCF file. This often occurs when a file is improperly gzipped, or when the file extension does not align with the file type (i.e. a .gz file that is not actually gzipped)'
         ], [])
@@ -149,7 +150,7 @@ def _get_vcf_header_line(vcf_file, meta):
                     meta[meta_info['field']].update({meta_info['id']: meta_info['type']})
 
 
-def _validate_valid_vcf_name(data_path, user, dataset_type, path_name):
+def _validate_valid_vcf_name(data_path, dataset_type, path_name):
     allowed_exts = DATA_TYPE_FILE_EXTS.get(dataset_type)
     file_extensions = (allowed_exts or ()) + VCF_FILE_EXTENSIONS
     if dataset_type == Dataset.DATASET_TYPE_SV_CALLS:
@@ -161,21 +162,21 @@ def _validate_valid_vcf_name(data_path, user, dataset_type, path_name):
 
     files_to_check = [data_path]
     if '*' in data_path:
-        files_to_check = list_files(data_path, user)
+        files_to_check = list_wildcard_match_files(data_path)
         if not files_to_check:
             raise ErrorsWarningsException([f'Data file or path {path_name or data_path} is not found.'])
         if dataset_type != Dataset.DATASET_TYPE_SV_CALLS:
             files_to_check = files_to_check[:1]
     elif allowed_exts and data_path.endswith(allowed_exts):
-        if not does_file_exist(data_path, user=user):
+        if not does_file_exist(data_path):
             raise ErrorsWarningsException([f'Data file or path {data_path} is not found.'])
         files_to_check = None
 
     return files_to_check
 
 
-def get_vcf_list(data_path, user):
-    file_list = list_files(data_path, user, check_subfolders=True, allow_missing=False)
+def get_vcf_list(data_path):
+    file_list = list_files(data_path)
     data_path_list = [path.replace(data_path, '') for path in file_list if path.endswith(VCF_FILE_EXTENSIONS)]
     return _merge_sharded_vcf(data_path_list)
 

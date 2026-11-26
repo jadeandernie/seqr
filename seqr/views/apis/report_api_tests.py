@@ -2,11 +2,12 @@ from django.urls.base import reverse
 import json
 import mock
 import responses
+from google.api_core.exceptions import NotFound
 from settings import AIRTABLE_URL
 
 from seqr.models import Project, RnaSample
 from seqr.views.apis.report_api import seqr_stats, sample_stats_download, anvil_export, gregor_export, family_metadata, variant_metadata
-from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, AirtableTest
+from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, AirtableTest, MockGoogleStorage
 
 
 PROJECT_GUID = 'R0001_1kg'
@@ -813,7 +814,6 @@ class ReportAPITest(AirtableTest):
     @mock.patch('seqr.views.apis.report_api.datetime')
     @mock.patch('seqr.views.utils.export_utils.open')
     @mock.patch('seqr.views.utils.export_utils.TemporaryDirectory')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
     @responses.activate
     def test_gregor_export(self, *args):
         url = reverse(gregor_export)
@@ -821,11 +821,12 @@ class ReportAPITest(AirtableTest):
 
         self._test_gregor_export(url, *args)
 
-    def _test_gregor_export(self, url, mock_subprocess, mock_temp_dir, mock_open, mock_datetime):
+    def _test_gregor_export(self, url, mock_temp_dir, mock_open, mock_datetime):
         RnaSample.objects.filter(id=153).update(individual_id=3)
         mock_datetime.now.return_value.year = 2020
         mock_temp_dir.return_value.__enter__.return_value = '/mock/tmp'
-        mock_subprocess.return_value.wait.return_value = 1
+        mock_gcs = MockGoogleStorage().start(self)
+        mock_gcs.bucket_errors['anvil-upload'] = NotFound('The specified bucket does not exist.')
 
         airtable_sample_url = f'{AIRTABLE_URL}/app3Y97xtbbaOopVR/Samples'
         responses.add(
@@ -862,7 +863,7 @@ class ReportAPITest(AirtableTest):
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['Invalid Delivery Path: folder not found'])
 
-        mock_subprocess.return_value.wait.return_value = 0
+        mock_gcs.bucket_errors.clear()
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], [
@@ -928,7 +929,7 @@ class ReportAPITest(AirtableTest):
         }
         self.assertDictEqual(response.json(), expected_response)
         participant_file, read_file, read_set_file, rna_file, genetic_findings_file = self._get_expected_gregor_files(
-            mock_open, mock_subprocess, INVALID_MODEL_TABLES.keys()
+            mock_open, mock_gcs, INVALID_MODEL_TABLES.keys()
         )
         self._assert_expected_file(participant_file, [
             [c for c in PARTICIPANT_TABLE[0] if c not in {'pmid_id', 'ancestry_detail', 'age_at_last_observation', 'missing_variant_case'}],
@@ -973,7 +974,7 @@ class ReportAPITest(AirtableTest):
         ]], additional_calls=1)
 
         responses.calls.reset()
-        mock_subprocess.reset_mock()
+        mock_gcs.calls.reset_mock()
         mock_open.reset_mock()
         responses.add(responses.GET, MOCK_DATA_MODEL_URL, body=MOCK_DATA_MODEL_RESPONSE, status=200)
         body['overrideValidation'] = True
@@ -981,7 +982,7 @@ class ReportAPITest(AirtableTest):
         self.assertEqual(response.status_code, 200)
         expected_response['warnings'] = [missing_participant_error] + recommended_warnings
         self.assertDictEqual(response.json(), expected_response)
-        self._assert_expected_gregor_files(mock_open, mock_subprocess)
+        self._assert_expected_gregor_files(mock_open, mock_gcs)
         self._test_expected_gregor_airtable_calls()
 
         # Test multiple project with shared sample IDs
@@ -1001,7 +1002,7 @@ class ReportAPITest(AirtableTest):
             },
         })
         mock_open.reset_mock()
-        mock_subprocess.reset_mock()
+        mock_gcs.calls.reset_mock()
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
         expected_response['info'][0] = expected_response['info'][0].replace('9', '10')
@@ -1012,19 +1013,17 @@ class ReportAPITest(AirtableTest):
         expected_response['warnings'][6] = expected_response['warnings'][6].replace('Broad_NA20888', 'Broad_NA20885, Broad_NA20888, Broad_NA20889')
         expected_response['warnings'][7] = expected_response['warnings'][7].replace('Broad_NA20888', 'Broad_NA20885, Broad_NA20888, Broad_NA20889')
         self.assertDictEqual(response.json(), expected_response)
-        self._assert_expected_gregor_files(mock_open, mock_subprocess, has_second_project=True)
+        self._assert_expected_gregor_files(mock_open, mock_gcs, has_second_project=True)
         self._test_expected_gregor_airtable_calls(additional_samples=['NA20885', 'NA20889'], additional_mondo_ids=['0008788'])
 
         self.check_no_analyst_no_access(url)
 
-    def _get_expected_gregor_files(self, mock_open, mock_subprocess, expected_files):
-        # test gsutil commands
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://anvil-upload', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call('gsutil mv /mock/tmp/* gs://anvil-upload/', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
+    def _get_expected_gregor_files(self, mock_open, mock_gcs, expected_files):
+        mock_gcs.calls.assert_has_calls([
+            mock.call.list_blobs('gs://anvil-upload', max_results=1),
+            *[mock.call.upload_from_filename(f'gs://anvil-upload/{file}.tsv', f'/mock/tmp/{file}.tsv') for file in expected_files],
         ])
+        self.assertEqual(mock_gcs.calls.upload_from_filename.call_count, len(expected_files))
 
         self.assertListEqual(
             mock_open.call_args_list, [mock.call(f'/mock/tmp/{file}.tsv', 'w') for file in expected_files])
@@ -1033,8 +1032,8 @@ class ReportAPITest(AirtableTest):
             for write_call in mock_open.return_value.__enter__.return_value.write.call_args_list
         ]
 
-    def _assert_expected_gregor_files(self, mock_open, mock_subprocess, has_second_project=False):
-        files = self._get_expected_gregor_files(mock_open, mock_subprocess, EXPECTED_GREGOR_FILES)
+    def _assert_expected_gregor_files(self, mock_open, mock_gcs, has_second_project=False):
+        files = self._get_expected_gregor_files(mock_open, mock_gcs, EXPECTED_GREGOR_FILES)
         participant_file, family_file, phenotype_file, analyte_file, experiment_file, read_file, read_set_file, \
         called_file, experiment_rna_file, aligned_rna_file, experiment_lookup_file, genetic_findings_file = files
 

@@ -2,6 +2,7 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds a per-user daily limit on VLM contact emails (REQUIRES DB MIGRATION)
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

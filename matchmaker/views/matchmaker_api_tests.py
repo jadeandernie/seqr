@@ -3,10 +3,11 @@ import responses
 import mock
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.urls.base import reverse
+from django.utils import timezone
 
-from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, MatchmakerSubmission
+from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, MatchmakerSubmission, VlmContactEmail
 from matchmaker.matchmaker_utils import MME_DISCLAIMER
 from matchmaker.views.matchmaker_api import get_individual_mme_matches, search_individual_mme_matches, \
     update_mme_submission, delete_mme_submission, update_mme_result_status, send_mme_contact_email, \
@@ -873,6 +874,7 @@ class MatchmakerAPITest(AuthenticationTestCase):
         ])
 
 
+    @mock.patch('matchmaker.views.matchmaker_api.VLM_EMAIL_DAILY_LIMIT', 2)
     @mock.patch('matchmaker.views.matchmaker_api.EmailMessage')
     def test_send_vlm_email(self, mock_email):
         url = reverse(send_vlm_email)
@@ -885,23 +887,44 @@ class MatchmakerAPITest(AuthenticationTestCase):
             'subject': 'some email subject'
         }
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
-        self._assert_expected_vlm_email(response, mock_email)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'success': True})
+        self._assert_expected_vlm_email(mock_email)
+        self.assertEqual(VlmContactEmail.objects.filter(user=self.no_access_user).count(), 1)
 
         self.reset_logs()
         mock_email.return_value.send.side_effect = Exception('Send failed')
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
-        self._assert_expected_vlm_email(response, mock_email, additional_logs=[
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'error': 'Unable to send email'})
+        self._assert_expected_vlm_email(mock_email, additional_logs=[
             ('VLM Email Error: Send failed', {
                 'severity': 'ERROR',
                 '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
                 'detail': body,
             }),
-        ])
+        ], request_log=('Unable to send email', {'severity': 'WARNING'}))
+        self.assertEqual(VlmContactEmail.objects.count(), 1)
 
-    def _assert_expected_vlm_email(self, response, mock_email, additional_logs=None):
+        # Emails sent by other users or more than a day ago do not count towards the limit
+        mock_email.return_value.send.side_effect = None
+        VlmContactEmail.objects.create(user=self.manager_user)
+        old_email = VlmContactEmail.objects.create(user=self.no_access_user)
+        VlmContactEmail.objects.filter(id=old_email.id).update(created_date=timezone.now() - timedelta(days=1, minutes=1))
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.json(), {'success': True})
+        self.assertEqual(VlmContactEmail.objects.filter(user=self.no_access_user).count(), 3)
 
+        mock_email.reset_mock()
+        response = self.client.post(url, content_type='application/json', data=json.dumps(body))
+        self.assertEqual(response.status_code, 429)
+        self.assertDictEqual(response.json(), {
+            'error': 'Unable to send email: the limit of 2 VLM emails in 24 hours has been reached',
+        })
+        mock_email.assert_not_called()
+        self.assertEqual(VlmContactEmail.objects.filter(user=self.no_access_user).count(), 3)
+
+    def _assert_expected_vlm_email(self, mock_email, additional_logs=None, request_log=(None, {})):
         mock_email.assert_called_with(
             subject='some email subject',
             body='some email content',
@@ -914,5 +937,5 @@ class MatchmakerAPITest(AuthenticationTestCase):
         mock_email.return_value.send.assert_called()
 
         self.assert_json_logs(self.no_access_user, (additional_logs or []) + [
-            (None, {'httpRequest': mock.ANY, 'requestBody': mock.ANY})
+            (request_log[0], {'httpRequest': mock.ANY, 'requestBody': mock.ANY, **request_log[1]})
         ])

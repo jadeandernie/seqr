@@ -1,12 +1,13 @@
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.core.mail.message import EmailMessage
 from django.db.models import prefetch_related_objects, F, Q, Value, CharField
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, MatchmakerSubmission, MatchmakerSubmissionGenes, \
-    MatchmakerIncomingQuery
+    MatchmakerIncomingQuery, VlmContactEmail
 from matchmaker.matchmaker_utils import get_mme_genes_phenotypes_for_results, parse_mme_patient, \
     get_submission_json_for_external_match, parse_mme_features, get_submission_gene_variants, get_mme_matches, \
     get_gene_ids_for_feature, validate_patient_data, get_hpo_terms_by_id, MME_DISCLAIMER
@@ -24,7 +25,8 @@ from seqr.views.utils.permissions_utils import check_mme_permissions, check_fami
     has_family_view_permission, login_and_policies_required, get_project_and_check_edit_permission
 
 from settings import BASE_URL, MME_ACCEPT_HEADER, MME_NODES, MME_DEFAULT_CONTACT_EMAIL, \
-    MME_SLACK_SEQR_MATCH_NOTIFICATION_CHANNEL, MME_SLACK_ALERT_NOTIFICATION_CHANNEL, VLM_SEND_EMAIL
+    MME_SLACK_SEQR_MATCH_NOTIFICATION_CHANNEL, MME_SLACK_ALERT_NOTIFICATION_CHANNEL, VLM_SEND_EMAIL, \
+    VLM_EMAIL_DAILY_LIMIT
 
 logger = SeqrLogger(__name__)
 
@@ -525,6 +527,13 @@ def _generate_notification_for_seqr_match(submission, results):
 
 @login_and_policies_required
 def send_vlm_email(request):
+    sent_emails = VlmContactEmail.objects.filter(
+        user=request.user, created_date__gt=timezone.now() - timedelta(days=1),
+    ).count()
+    if sent_emails >= VLM_EMAIL_DAILY_LIMIT:
+        error = f'Unable to send email: the limit of {VLM_EMAIL_DAILY_LIMIT} VLM emails in 24 hours has been reached'
+        return create_json_response({'error': error}, status=429)
+
     request_json = json.loads(request.body)
     email_message = EmailMessage(
         subject=request_json['subject'],
@@ -541,5 +550,8 @@ def send_vlm_email(request):
         email_message.send()
     except Exception as e:
         logger.error(f'VLM Email Error: {e}', request.user, detail=request_json)
+        return create_json_response({'error': 'Unable to send email'}, status=getattr(e, 'status_code', 400))
+
+    VlmContactEmail.objects.create(user=request.user)
 
     return create_json_response({'success': True})

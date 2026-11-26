@@ -109,6 +109,12 @@ class FileUtilsTest(object):
         with self.assertRaises(gzip.BadGzipFile):
             next(file_bytes_iter(self._path('data/invalid.vcf.gz'), 0, 65536))
 
+        # Ranges ending part way through a character are valid, invalid characters are not
+        offset = len(LINES[0].encode('utf-8')) - 3
+        self.assertListEqual(list(file_bytes_iter(self._path('data/callset.vcf'), offset - 1, offset)), [LINES[0][-3]])
+        with self.assertRaises(UnicodeDecodeError):
+            next(file_bytes_iter(self._path('data/callset.vcf'), offset + 1, offset + 5))
+
         with self.assertRaises(FileNotFoundError) as cm:
             next(file_bytes_iter(self._path('data/missing.vcf.gz'), 0, 65536))
         self.assertEqual(str(cm.exception), f'Could not access file {self._path("data/missing.vcf.gz")}')

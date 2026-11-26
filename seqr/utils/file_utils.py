@@ -1,7 +1,9 @@
+import codecs
 import glob
 import gzip
 import os
 import zlib
+from io import StringIO
 
 from seqr.utils.google_storage_utils import is_google_bucket_file_path, does_gs_file_exist, google_bucket_file_stream, \
     google_bucket_read_bytes, get_gs_files, get_gs_wildcard_match_files
@@ -63,10 +65,8 @@ def file_bytes_iter(file_path, first_byte, last_byte, raw_content=False):
 
     if file_path.endswith('gz'):
         data = _decompress_partial_gzip(data)
-    lines = data.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        is_truncated = i == len(lines) - 1 and not line.endswith(b'\n')
-        yield line.decode('utf-8', errors='ignore' if is_truncated else 'strict')
+    # The range may end part way through a multi-byte character, which an incremental decoder ignores
+    yield from StringIO(codecs.getincrementaldecoder('utf-8')().decode(data))
 
 
 def _decompress_partial_gzip(data):

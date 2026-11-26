@@ -86,6 +86,9 @@ CSP_SCRIPT_SRC = ("'self'", "'unsafe-eval'", 'https://www.googletagmanager.com',
 CSP_IMG_SRC = ("'self'", 'https://www.google-analytics.com', 'https://storage.googleapis.com',
    'https://user-images.githubusercontent.com', 'https://private-user-images.githubusercontent.com', # for images in GitHub discussions on Feature Updates page
    'data:')
+CSP_FRAME_SRC = ("'self'", 'https://gnomad.broadinstitute.org', 'https://www.gtexportal.org', 'https://www.uniprot.org',
+                 'https://www.proteinatlas.org', 'https://monarchinitiative.org', 'https://geno2mp.gs.washington.edu',
+                 'https://www.informatics.jax.org', 'https://ncbi.nlm.nih.gov')
 CSP_OBJECT_SRC = ("'none'")
 CSP_BASE_URI = ("'none'")
 # IGV js injects CSS into the page head so there is no way to set nonce. Therefore, support hashed value of the CSS

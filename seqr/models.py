@@ -688,8 +688,6 @@ def validate_data_request_fields(fields):
     invalid_fields = sorted(set(fields) - set(COMPLETENESS_FIELD_LABELS))
     if invalid_fields:
         raise ValidationError(f'Invalid clinical data fields: {", ".join(invalid_fields)}')
-    if not fields:
-        raise ValidationError('At least one clinical data field is required')
 
 
 class DataRequest(ModelWithGUID):

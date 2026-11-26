@@ -68,6 +68,24 @@ seqr:
           key: clingen_allele_registry_password
 ```
 
+## Scheduled jobs
+
+*seqr* has no scheduler of its own. Periodic work is done by management commands, which the deployment has to run on
+a schedule, for example with a kubernetes `CronJob` that runs the command in the *seqr* image, or with any other
+scheduler that can run a command in the *seqr* environment:
+
+| Command | What it does | Suggested schedule |
+|---|---|---|
+| `python manage.py check_for_new_samples_from_pipeline` | Makes newly loaded data available for search, and reruns the workbook queries of the loaded families | After each loading pipeline run |
+| `python manage.py rerun_workbook_queries` | Reruns the workbook queries that are due for an automatic rerun | Every hour |
+
+Automatic reruns of workbook queries are set per workbook, with an interval of at least a day, so they only happen if
+`rerun_workbook_queries` is scheduled. Each run of the command reruns at most 25 queries, the longest due first, and
+leaves the rest for the next run: one query is one search for one family or analysis group, so `--max-cells` bounds
+the search load of a run (`--max-cells 25` every hour is at most 600 searches a day). Use `--dry-run` to log what is due
+without searching, and `--project` or `--workbook` (guids) to limit a run. Notification emails need the same email
+configuration as the other *seqr* emails.
+
 ## Using the Load Data page to load VCF Callsets
 ### Option #1
 #### Annotate and load on-prem

@@ -21,7 +21,8 @@ from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSea
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.logging_utils import SeqrLogger
-from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_get_wildcard_json, safe_redis_set_json
+from seqr.utils.redis_utils import safe_redis_delete_wildcard, safe_redis_get_json, safe_redis_get_wildcard_json, \
+    safe_redis_set_json
 from seqr.utils.xpos_utils import parse_variant_id
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case
 from seqr.views.utils.json_to_orm_utils import update_model_from_json, get_or_create_model_from_json, \
@@ -33,6 +34,7 @@ from seqr.views.utils.permissions_utils import check_family_view_permission, get
 from seqr.views.utils.project_context_utils import get_project_analysis_groups, get_project_locus_lists
 from seqr.views.utils.variant_utils import get_variants_response, variant_dataset_type
 from seqr.views.utils.vlm_utils import vlm_lookup
+from seqr.views.utils.workbook_utils import get_results_and_record_worksheet_query_runs
 
 logger = SeqrLogger(__name__)
 
@@ -51,11 +53,7 @@ def query_variants_handler(request, search_hash):
     except Exception as e:
         return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
-    _check_results_permission(results_model, request.user)
-
-    all_variants = _get_variants_with_cache(
-        _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
-    )
+    all_variants = load_search_results(results_model, request.user, sort=sort)
     variants = all_variants[(page-1)*per_page:page*per_page]
 
     response = _process_variants(variants or [], results_model.families.all(), request,
@@ -64,6 +62,20 @@ def query_variants_handler(request, search_hash):
     response['search']['totalResults'] = len(all_variants)
 
     return create_json_response(response)
+
+
+def load_search_results(results_model, user, sort=XPOS_SORT_KEY, refresh=False, **record_kwargs):
+    """
+    Loads all results of a search for a user with access to its families, and records the run of workbook cells linked
+    to it. With refresh, the results cached for every sort are removed first, so that the search is run again and
+    no user is shown the replaced results.
+    """
+    _check_results_permission(results_model, user)
+    if refresh:
+        safe_redis_delete_wildcard(_get_search_cache_key(results_model, user, sort='*'))
+    return get_results_and_record_worksheet_query_runs(results_model, user, lambda: _get_variants_with_cache(
+        _get_search_cache_key, _query_variants, results_model, user, sort=sort,
+    ), **record_kwargs)
 
 
 def _get_variants_with_cache(get_cache_key, get_variants, *args, **kwargs):
@@ -272,22 +284,40 @@ MAX_EXPORT_VARIANTS = 1000
 MAX_FAMILIES_PER_ROW = 1000
 
 
+def get_cached_search_results(results_model, user):
+    # Never runs the search: None when the results are not cached for any sort
+    return safe_redis_get_wildcard_json(_get_search_cache_key(results_model, user, sort='*'))
+
+
+def flatten_search_results(results):
+    return [
+        v for variants in results for v in (variants if isinstance(variants, list) else [variants])
+    ]
+
+
+def get_variant_gene_ids(variant):
+    if 'transcripts' in variant:
+        return variant['transcripts'].keys()
+    return {t['geneId'] for t in variant['sortedTranscriptConsequences']}
+
+
+def get_gene_family_counts(flat_variants):
+    gene_counts = defaultdict(lambda: {'total': 0, 'families': defaultdict(int)})
+    for var in flat_variants:
+        for gene_id in get_variant_gene_ids(var):
+            gene_counts[gene_id]['total'] += 1
+            for family_guid in var.get('familyGuids', []):
+                gene_counts[gene_id]['families'][family_guid] += 1
+    return gene_counts
+
+
 @login_and_policies_required
 def get_variant_gene_breakdown(request, search_hash):
     results_model = VariantSearchResults.objects.get(search_hash=search_hash)
     genome_version = _check_results_permission(results_model, request.user)
 
     results = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
-    flat_variants = [
-        v for variants in results for v in (variants if isinstance(variants, list) else [variants])
-    ]
-    gene_counts = defaultdict(lambda: {'total': 0, 'families': defaultdict(int)})
-    for var in flat_variants:
-        gene_ids = var['transcripts'].keys() if 'transcripts' in var else {t['geneId'] for t in var['sortedTranscriptConsequences']}
-        for gene_id in gene_ids:
-            gene_counts[gene_id]['total'] += 1
-            for family_guid in var.get('familyGuids', []):
-                gene_counts[gene_id]['families'][family_guid] += 1
+    gene_counts = get_gene_family_counts(flatten_search_results(results))
 
     return create_json_response({
         'searchGeneBreakdown': {search_hash: gene_counts},
@@ -491,6 +521,12 @@ def get_saved_search_handler(request):
     return create_json_response(_get_saved_searches(request.user))
 
 
+def validate_saved_search_json(search):
+    if (search.get('inheritance') or {}).get('filter', {}).get('genotype'):
+        return 'Saved searches cannot include custom genotype filters'
+    return None
+
+
 @login_and_policies_required
 def create_saved_search_handler(request):
     request_json = json.loads(request.body)
@@ -499,8 +535,8 @@ def create_saved_search_handler(request):
         error = '"Name" is required'
         return create_json_response({'error': error}, status=400, reason=error)
 
-    if (request_json.get('inheritance') or {}).get('filter', {}).get('genotype'):
-        error = 'Saved searches cannot include custom genotype filters'
+    error = validate_saved_search_json(request_json)
+    if error:
         return create_json_response({'error': error}, status=400, reason=error)
 
     try:
@@ -577,12 +613,15 @@ def _get_search_context(results_model):
     }
 
 
-def _get_saved_searches(user):
-    saved_search_models = VariantSearch.objects.filter(
+def get_saved_search_models(user):
+    return VariantSearch.objects.filter(
         Q(name__isnull=False),
         Q(created_by=user) | Q(created_by__isnull=True)
     )
-    saved_searches = get_json_for_saved_searches(saved_search_models, user)
+
+
+def _get_saved_searches(user):
+    saved_searches = get_json_for_saved_searches(get_saved_search_models(user), user)
     return {'savedSearchesByGuid': {search['savedSearchGuid']: search for search in saved_searches}}
 
 

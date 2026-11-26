@@ -1,6 +1,11 @@
 # _seqr_ Changes
 
 ## dev
+* Adds workbooks, worksheets and worksheet queries for running search patterns across families and analysis groups (REQUIRES DB MIGRATION)
+* Adds a run history to workbook queries, with alerts for new results since the last review (REQUIRES DB MIGRATION)
+* Adds automatic reruns of workbook queries on an interval and after data is loaded, with notifications for new results.
+  Reruns on an interval only happen if the new `rerun_workbook_queries` command is scheduled, see
+  [Scheduled jobs](deploy/LOCAL_INSTALL_HELM.md#scheduled-jobs) (REQUIRES DB MIGRATION)
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
 
 ## 11/24/26

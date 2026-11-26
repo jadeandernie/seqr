@@ -90,6 +90,12 @@ const ProjectPageUI = React.memo(({ analysisGroupGuid, load, loading, familiesLo
           <ProjectSection label="Gene Lists" editButton={<AddGeneListsButton />} collaboratorEdit>
             <GeneLists />
           </ProjectSection>
+          {!analysisGroupGuid && <VerticalSpacer height={10} />}
+          {!analysisGroupGuid && (
+            <ProjectSection label="Workbooks" linkPath="workbooks" linkText="View All">
+              Sets of searches to run and review for families and analysis groups
+            </ProjectSection>
+          )}
         </Grid.Column>
         <Grid.Column width={8}>
           <ProjectSection label="Overview">

@@ -4,6 +4,7 @@ import orderBy from 'lodash/orderBy'
 import { getVisibleFamilies, getVisibleFamiliesInSortedOrder, getProjectExportUrls, getCurrentAnalysisGroup,
   getCaseReviewStatusCounts, getProjectAnalysisGroupFamiliesByGuid, getIndividualTaggedVariants,
   getDefaultMmeSubmission, getMmeResultsBySubmission, getMmeDefaultContactEmail, getIndividualPhenotypeGeneScores,
+  getProjectExclusionReasonOptions,
 } from './selectors'
 
 import { STATE_WITH_2_FAMILIES } from './fixtures'
@@ -217,4 +218,38 @@ test('getIndividualPhenotypeGeneScores', () => {
   })
 
   expect(getIndividualPhenotypeGeneScores({ ...STATE_WITH_2_FAMILIES, phenotypeGeneScoresByIndividual: null })).toEqual({})
+})
+
+test('getProjectExclusionReasonOptions', () => {
+  const STANDARD_OPTIONS = [
+    { value: 'Likely noise / artifact' },
+    { value: 'Poor quality data' },
+    { value: 'Inheritance does not fit' },
+    { value: 'Phenotype does not fit' },
+    { value: 'Too common in population' },
+    { value: 'Benign / likely benign evidence' },
+    { value: 'Other' },
+  ]
+  expect(getProjectExclusionReasonOptions(STATE_WITH_2_FAMILIES)).toEqual([
+    { value: null, text: 'View All' },
+    ...STANDARD_OPTIONS,
+    { value: 'NO_EXCLUSION_REASON', text: 'No reason given' },
+  ])
+
+  const { variantTagsByGuid } = STATE_WITH_2_FAMILIES
+  const withMetadata = (tagGuid, metadata) => ({ [tagGuid]: { ...variantTagsByGuid[tagGuid], metadata } })
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    variantTagsByGuid: {
+      ...variantTagsByGuid,
+      ...withMetadata('VT1726942_1248367227_r0390_102', 'seen in unaffected sib'),
+      ...withMetadata('VT1726942_1248367227_r0390_101', 'a review note that is not an exclusion reason'),
+    },
+  }
+  expect(getProjectExclusionReasonOptions(state)).toEqual([
+    { value: null, text: 'View All' },
+    ...STANDARD_OPTIONS,
+    { value: 'seen in unaffected sib' },
+    { value: 'NO_EXCLUSION_REASON', text: 'No reason given' },
+  ])
 })

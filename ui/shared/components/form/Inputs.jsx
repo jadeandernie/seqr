@@ -201,7 +201,7 @@ export class AddableSelect extends React.PureComponent {
     options: PropTypes.arrayOf(PropTypes.object),
     allowAdditions: PropTypes.bool,
     addValueOptions: PropTypes.bool,
-    value: PropTypes.arrayOf(PropTypes.string),
+    value: PropTypes.oneOfType([PropTypes.arrayOf(PropTypes.string), PropTypes.string]),
   }
 
   constructor(props) {

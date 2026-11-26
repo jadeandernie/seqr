@@ -36,6 +36,7 @@ jest.mock('shared/components/panel/variants/SavedVariants', () => function MockS
   mockLatestProps = props
   const { tagOptions, selectedTag, filters, additionalFilter } = props
   const savedByField = filters.find(f => f.name === 'savedBy')
+  const exclusionReasonField = filters.find(f => f.name === 'exclusionReason')
   return (
     <div className="mock-saved-variants">
       <div className="tag-options">{tagOptions.map(o => o.text || o.value).join(',')}</div>
@@ -43,6 +44,11 @@ jest.mock('shared/components/panel/variants/SavedVariants', () => function MockS
       <div className="filter-names">{filters.map(f => f.name).join(',')}</div>
       <div className="additional-filter">{additionalFilter}</div>
       {savedByField && <div className="saved-by-filter"><savedByField.component /></div>}
+      {exclusionReasonField && (
+        <div className="exclusion-reason-filter">
+          <exclusionReasonField.component label={exclusionReasonField.label} />
+        </div>
+      )}
     </div>
   )
 })
@@ -127,6 +133,28 @@ test('renders the savedBy filter dropdown with options built from the project st
   )
 
   expect(wrapper.find('.saved-by-filter').exists()).toBe(true)
+})
+
+test('renders the exclusion reason filter dropdown with standard and in-use reasons', () => {
+  const state = cloneDeep(STATE_WITH_2_FAMILIES)
+  state.variantTagsByGuid.VT1726942_1248367227_r0390_102.metadata = 'seen in unaffected sib'
+  const store = configureStore([thunk])(state)
+  const wrapper = mount(
+    <Provider store={store}>
+      <MemoryRouter initialEntries={['/project/R0237_1000_genomes_demo/saved_variants']}>
+        <RoutedSavedVariants match={{ url: '/project/R0237_1000_genomes_demo/saved_variants' }} />
+      </MemoryRouter>
+    </Provider>,
+  )
+
+  expect(wrapper.find('.filter-names').text().split(',')).toContain('exclusionReason')
+  const filter = wrapper.find('.exclusion-reason-filter')
+  expect(filter.text()).toContain('Exclusion Reason:')
+  expect(filter.find('DropdownItem').map(item => item.text())).toEqual([
+    'View All', 'Likely noise / artifact', 'Poor quality data', 'Inheritance does not fit', 'Phenotype does not fit',
+    'Too common in population', 'Benign / likely benign evidence', 'Other', 'seen in unaffected sib',
+    'No reason given',
+  ])
 })
 
 test('getUpdateTagUrl updates the category filter and omits the tag segment for a category', () => {

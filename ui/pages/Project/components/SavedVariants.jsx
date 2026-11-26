@@ -26,6 +26,7 @@ import { TAG_FORM_FIELD } from '../constants'
 import { loadSavedVariants, updateSavedVariantTable } from '../reducers'
 import {
   getCurrentProject, getProjectTagTypeOptions, getTaggedVariantsByFamily, getProjectVariantSavedByOptions,
+  getProjectExclusionReasonOptions,
   getSavedVariantTagTypeCounts, getSavedVariantTagTypeCountsByFamily, getSavedVariantTableState,
 } from '../selectors'
 import VariantTagTypeBar, { getSavedVariantsLinkPath } from './VariantTagTypeBar'
@@ -43,6 +44,10 @@ const mapSavedByInputStateToProps = state => ({
   options: getProjectVariantSavedByOptions(state),
 })
 
+const mapExclusionReasonInputStateToProps = state => ({
+  options: getProjectExclusionReasonOptions(state),
+})
+
 const FILTER_FIELDS = [
   VARIANT_SORT_FIELD,
   VARIANT_HIDE_KNOWN_GENE_FOR_PHENOTYPE_FIELD,
@@ -57,6 +62,16 @@ const FILTER_FIELDS = [
     fluid: false,
     label: 'Saved By:',
     placeholder: 'Select a user',
+  },
+  {
+    name: 'exclusionReason',
+    component: connect(mapExclusionReasonInputStateToProps)(Dropdown),
+    inline: true,
+    selection: false,
+    fluid: false,
+    label: 'Exclusion Reason:',
+    labelHelp: 'Show only variants tagged "Excluded" with the selected reason. Overrides "Hide Excluded"',
+    placeholder: 'Select a reason',
   },
 ]
 const NON_DISCOVERY_FILTER_FIELDS = FILTER_FIELDS.filter(({ name }) => name !== 'hideKnownGeneForPhenotype')

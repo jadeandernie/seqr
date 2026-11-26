@@ -82,6 +82,51 @@ test('getPairedFilteredSavedVariants', () => {
   expect(pairedSavedVariants[1].variantGuid).toEqual('SV0000002_1248367227_r0390_100')
 })
 
+test('getPairedFilteredSavedVariants filters excluded variants by exclusion reason', () => {
+  const EXCLUDED_TAG_GUID = 'VT1726942_1248367227_r0390_102'
+  const REVIEW_TAG_GUID = 'VT1726942_1248367227_r0390_101'
+  const stateWithReason = (tableState, metadata, reviewMetadata) => ({
+    ...STATE_WITH_2_FAMILIES,
+    savedVariantTableState: tableState,
+    variantTagsByGuid: {
+      ...STATE_WITH_2_FAMILIES.variantTagsByGuid,
+      [EXCLUDED_TAG_GUID]: { ...STATE_WITH_2_FAMILIES.variantTagsByGuid[EXCLUDED_TAG_GUID], metadata },
+      [REVIEW_TAG_GUID]: { ...STATE_WITH_2_FAMILIES.variantTagsByGuid[REVIEW_TAG_GUID], metadata: reviewMetadata },
+    },
+  })
+  const filteredGuids = (...args) => getPairedFilteredSavedVariants(
+    stateWithReason(...args), { match: { params: {} } },
+  ).map(variant => (Array.isArray(variant) ? variant.map(({ variantGuid }) => variantGuid) : variant.variantGuid))
+  const EXCLUDED_PAIR = ['SV0000003_2246859832_r0390_100', 'SV0000005_2246859833_r0390_100']
+
+  expect(filteredGuids({}, 'Poor quality data').length).toEqual(3)
+  expect(filteredGuids({ exclusionReason: null }, 'Poor quality data').length).toEqual(3)
+
+  expect(filteredGuids({ exclusionReason: 'Poor quality data' }, 'Poor quality data')).toEqual([EXCLUDED_PAIR])
+  expect(filteredGuids({ exclusionReason: 'Other' }, 'Poor quality data')).toEqual([])
+  expect(filteredGuids({ exclusionReason: 'seen in sib' }, 'seen in sib')).toEqual([EXCLUDED_PAIR])
+  expect(filteredGuids({ exclusionReason: 'Poor quality data' }, undefined)).toEqual([])
+
+  expect(filteredGuids({ exclusionReason: 'NO_EXCLUSION_REASON' }, undefined)).toEqual([EXCLUDED_PAIR])
+  expect(filteredGuids({ exclusionReason: 'NO_EXCLUSION_REASON' }, null)).toEqual([EXCLUDED_PAIR])
+  expect(filteredGuids({ exclusionReason: 'NO_EXCLUSION_REASON' }, 'Other')).toEqual([])
+
+  // metadata on tags other than "Excluded" is not an exclusion reason
+  expect(filteredGuids({ exclusionReason: 'Other' }, 'Poor quality data', 'Other')).toEqual([])
+
+  // selecting a reason takes precedence over "Hide Excluded"
+  expect(filteredGuids({ hideExcluded: true }, 'Poor quality data').length).toEqual(2)
+  expect(filteredGuids({ hideExcluded: true, exclusionReason: 'Poor quality data' }, 'Poor quality data')).toEqual(
+    [EXCLUDED_PAIR],
+  )
+
+  // a single-variant page is never filtered
+  expect(getPairedFilteredSavedVariants(
+    stateWithReason({ exclusionReason: 'Other' }, 'Poor quality data'),
+    { match: { params: { variantGuid: 'SV0000004_116042722_r0390_1000' } } },
+  ).length).toEqual(1)
+})
+
 test('getVisibleSortedSavedVariants', () => {
   const savedVariants = getVisibleSortedSavedVariants(
     STATE_WITH_2_FAMILIES, { match: { params:  {} } }

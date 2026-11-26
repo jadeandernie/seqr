@@ -459,7 +459,7 @@ class VariantSearchAPITest(object):
 
     def test_invalid_dynamic_filters(self):
         search_context_url = reverse(search_context_handler)
-        self.check_collaborator_login(search_context_url, request_data={'familyGuid': 'F000001_1'})
+        self.login_collaborator()
         num_searches = VariantSearch.objects.count()
 
         invalid_searches = {

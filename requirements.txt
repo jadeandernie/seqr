@@ -8,6 +8,12 @@ asgiref==3.12.1
     # via django
 beautifulsoup4==4.15.0
     # via markdownify
+boto3==1.44.12
+    # via -r requirements.in
+botocore==1.44.12
+    # via
+    #   boto3
+    #   s3transfer
 certifi==2026.6.17
     # via requests
 cffi==2.1.0
@@ -89,7 +95,10 @@ idna==3.18
     #   django-anymail
     #   requests
 jmespath==1.1.0
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   boto3
+    #   botocore
 jsonfield==3.2.0
     # via django-notifications-hq
 markdownify==1.2.3
@@ -125,6 +134,8 @@ pyjwt[crypto]==2.13.0
     #   social-auth-core
 pyliftover==0.4.1
     # via -r requirements.in
+python-dateutil==2.9.0.post0
+    # via botocore
 python3-openid==3.2.0
     # via social-auth-core
 pytz==2026.2
@@ -147,10 +158,14 @@ requests-oauthlib==2.0.0
     # via social-auth-core
 requests-toolbelt==1.0.0
     # via -r requirements.in
+s3transfer==0.19.3
+    # via boto3
 sgmllib3k==1.0.0
     # via feedparser
 six==1.17.0
-    # via markdownify
+    # via
+    #   markdownify
+    #   python-dateutil
 slacker==0.14.0
     # via -r requirements.in
 slugify==0.0.1
@@ -180,6 +195,7 @@ tzlocal==5.4.4
     # via clickhouse-driver
 urllib3==2.7.0
     # via
+    #   botocore
     #   django-anymail
     #   requests
 whitenoise==6.12.0

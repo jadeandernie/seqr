@@ -57,6 +57,7 @@ def list_files(wildcard_path, user, check_subfolders=False, allow_missing=True):
 def file_iter(file_path, byte_range=None, raw_content=False, user=None, **kwargs):
     if not does_file_exist(file_path, user=user):
         raise FileNotFoundError(f'Could not access file {file_path}')
+    should_unzip = file_path.endswith('gz') and not raw_content
     if is_google_bucket_file_path(file_path):
         for line in _google_bucket_file_iter(file_path, byte_range=byte_range, raw_content=raw_content, user=user, **kwargs):
             yield line
@@ -66,23 +67,17 @@ def file_iter(file_path, byte_range=None, raw_content=False, user=None, **kwargs
             size=byte_range[1]-byte_range[0] + 1,
             file_path=file_path,
         )
-        if file_path.endswith("gz") and not raw_content:  # Avoids unzipping BED files
+        if should_unzip:
             command += " | gunzip -c - "
         process = run_command(command, user=user)
-        if process.wait() != 0:  # Check subprocess status for errors
-            raise Exception(f'Run command failed: \nCommand: {command}\nError:{process.stdout}')
         for line in process.stdout:
             yield line
     else:
         mode = 'rb' if raw_content else 'r'
-        is_gz = file_path.endswith("gz")
-        if file_path.endswith("gz") and not raw_content:  # Avoids unzipping BED files
-            open_func = gzip.open
-        else:
-            open_func = open
+        open_func = gzip.open if should_unzip else open
         with open_func(file_path, mode) as f:
             for line in f:
-                if is_gz and not raw_content:
+                if should_unzip:
                     line = line.decode('utf-8')
                 yield line
 

@@ -28,7 +28,11 @@ import {
   HGMD_FIELD,
   ALL_RECESSIVE_INHERITANCE_FILTERS,
 } from '../constants'
+import { loadSearchFilterSchema } from '../reducers'
 import { getDatasetTypes, getHasHgmdPermission } from '../selectors'
+import DynamicFilterPanel, {
+  DynamicFilterSummary, DYNAMIC_FILTER_NAME, getSearchAdditionalFilterFields,
+} from './filters/DynamicFilterPanel'
 
 const ToggleHeader = styled(Header).attrs({ size: 'huge', block: true })`
   margin-top: 0px !important;
@@ -86,6 +90,15 @@ const ExpandCollapseCategoryContainer = styled.span`
   top: -2em;
 `
 
+const DYNAMIC_PANEL = {
+  name: DYNAMIC_FILTER_NAME,
+  headerProps: {
+    title: 'Additional Filters',
+    inputSize: 11,
+    inputProps: { component: DynamicFilterSummary, format: val => val || {} },
+  },
+}
+
 const PANELS = [
   INHERITANCE_PANEL,
   PATHOGENICITY_PANEL,
@@ -95,6 +108,7 @@ const PANELS = [
   FREQUENCY_PANEL,
   LOCATION_PANEL,
   QUALITY_PANEL,
+  DYNAMIC_PANEL,
   EXCLUDE_PANEL,
 ]
 
@@ -171,9 +185,17 @@ class VariantSearchFormPanels extends React.PureComponent {
     hasHgmdPermission: PropTypes.bool,
     inheritance: PropTypes.string,
     datasetTypes: PropTypes.string,
+    dynamicFilterFields: PropTypes.arrayOf(PropTypes.object),
+    hasDynamicFilters: PropTypes.bool,
+    loadFilterSchema: PropTypes.func,
   }
 
   state = { active: {} }
+
+  componentDidMount() {
+    const { loadFilterSchema } = this.props
+    loadFilterSchema()
+  }
 
   expandAll = (e) => {
     e.preventDefault()
@@ -191,7 +213,7 @@ class VariantSearchFormPanels extends React.PureComponent {
   }
 
   render() {
-    const { hasHgmdPermission, inheritance, datasetTypes } = this.props
+    const { hasHgmdPermission, inheritance, datasetTypes, dynamicFilterFields, hasDynamicFilters } = this.props
     const { active } = this.state
     return (
       <div>
@@ -210,6 +232,9 @@ class VariantSearchFormPanels extends React.PureComponent {
         <Accordion fluid exclusive={false}>
           {PANELS.reduce((acc, { name, headerProps, fields, ...panelContentProps }, i) => {
             if (name === ANNOTATION_SECONDARY_NAME && !hasSecondaryAnnotation(inheritance)) {
+              return acc
+            }
+            if (name === DYNAMIC_FILTER_NAME && !(hasDynamicFilters || (dynamicFilterFields || []).length)) {
               return acc
             }
             const showHgmd = name === PATHOGENICITY_PANEL_NAME && hasHgmdPermission
@@ -244,12 +269,14 @@ class VariantSearchFormPanels extends React.PureComponent {
                 padded
                 textAlign="center"
               >
-                <PanelContent
-                  name={name}
-                  datasetTypes={datasetTypes}
-                  fields={showHgmd ? HGMD_PATHOGENICITY_FIELDS : fields}
-                  {...panelContentProps}
-                />
+                {name === DYNAMIC_FILTER_NAME ? <DynamicFilterPanel fields={dynamicFilterFields} /> : (
+                  <PanelContent
+                    name={name}
+                    datasetTypes={datasetTypes}
+                    fields={showHgmd ? HGMD_PATHOGENICITY_FIELDS : fields}
+                    {...panelContentProps}
+                  />
+                )}
               </Accordion.Content>,
             ]
           }, [])}
@@ -263,9 +290,14 @@ class VariantSearchFormPanels extends React.PureComponent {
 const mapStateToProps = (state, ownProps) => ({
   hasHgmdPermission: getHasHgmdPermission(state, ownProps),
   datasetTypes: getDatasetTypes(state, ownProps),
+  dynamicFilterFields: getSearchAdditionalFilterFields(state, ownProps),
 })
 
-const ConnectedVariantSearchFormPanels = connect(mapStateToProps)(VariantSearchFormPanels)
+const mapDispatchToProps = {
+  loadFilterSchema: loadSearchFilterSchema,
+}
+
+const ConnectedVariantSearchFormPanels = connect(mapStateToProps, mapDispatchToProps)(VariantSearchFormPanels)
 
 const SUBSCRIPTION = { values: true }
 
@@ -276,6 +308,7 @@ export default props => (
         {...props}
         projectFamilies={values.projectFamilies}
         inheritance={values.search?.inheritance}
+        hasDynamicFilters={!!values.search?.dynamic}
       />
     )}
   </FormSpy>

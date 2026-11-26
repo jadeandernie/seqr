@@ -9,6 +9,7 @@ import mock
 import random
 import responses
 
+from clickhouse_search.managers import BaseEntriesManager
 from clickhouse_search.models.gt_stats_models import ProjectGtStatsSnvIndel, \
     ProjectsToGtStatsGRCh37SnvIndel, ProjectsToGtStatsSnvIndel, ProjectsToGtStatsMito, ProjectsToGtStatsGatkSv, \
     GtStatsDictGRCh37SnvIndel, GtStatsDictSnvIndel, GtStatsDictMito, GtStatsDictGatkSv
@@ -46,7 +47,7 @@ from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, GENE_VARIAN
     SAVED_VARIANT_DETAIL_FIELDS, FUNCTIONAL_FIELDS, TAG_FIELDS, FAMILY_FIELDS, INDIVIDUAL_FIELDS, IGV_SAMPLE_FIELDS, \
     FAMILY_NOTE_FIELDS, GENE_VARIANT_DISPLAY_FIELDS, LOCUS_LIST_FIELDS
 from seqr.views.apis.variant_search_api import query_variants_handler, get_variant_gene_breakdown, export_variants_handler, \
-    query_single_variant_handler, variant_lookup_handler
+    query_single_variant_handler, variant_lookup_handler, create_saved_search_handler, get_saved_search_handler
 
 
 SEARCH_RESPONSE_KEYS = {
@@ -2167,6 +2168,160 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
 
         self._set_grch37_search()
         self._assert_expected_search([GRCH37_VARIANT], in_silico=main_in_silico, is_37=True)
+
+    def _assert_dynamic_matches_legacy(self, expected_results, legacy_search, dynamic_search, check_login=None, **kwargs):
+        self._assert_expected_search(expected_results, check_login=check_login, **legacy_search, **kwargs)
+        self._assert_expected_search(expected_results, **dynamic_search, **kwargs)
+
+    def test_dynamic_filters(self):
+        # In silico
+        self._assert_dynamic_matches_legacy(
+            [VARIANT1, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+            {'in_silico': {'eigen': '3.5', 'mut_taster': 'N', 'vest': 0.5, 'alphagenome': 20}},
+            {'dynamic': {'in_silico': {'eigen': 3.5, 'mut_taster': 'N', 'vest': 0.5, 'alphagenome': 20}}},
+            check_login=self.check_collaborator_login,
+        )
+        self._assert_dynamic_matches_legacy(
+            [VARIANT2, MULTI_FAMILY_VARIANT],
+            {'in_silico': {'gnomad_noncoding': 0.5, 'requireScore': True}},
+            {'in_silico': {'requireScore': True}, 'dynamic': {'in_silico': {'gnomad_noncoding': 0.5}}},
+        )
+        self._assert_dynamic_matches_legacy(
+            [VARIANT2],
+            {'in_silico': {'alphamissense': 0.5, 'requireScore': True}},
+            {'in_silico': {'requireScore': True}, 'dynamic': {'in_silico': {'alphamissense': '0.5'}}},
+        )
+
+        # Frequency
+        self._assert_dynamic_matches_legacy(
+            [VARIANT2, MULTI_FAMILY_VARIANT, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2],
+            {'freqs': {'callset': {'ac': 1000}, 'gnomad_genomes': {'af': 0.03}, 'gnomad_mito': {'af': 0.005}}},
+            {'dynamic': {'frequency': {'gnomad_genomes_af': 0.03, 'gnomad_mito_af': 0.005}}},
+        )
+        self._assert_dynamic_matches_legacy(
+            [MULTI_FAMILY_VARIANT, GCNV_VARIANT3, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+            {'freqs': {'callset': {'ac': 7, 'hh': 0}, 'sv_callset': {'ac': 50}}},
+            {'freqs': {}, 'dynamic': {'frequency': {'callset_ac': 7, 'callset_hh': 0, 'sv_callset_ac': 50}}},
+        )
+        # A filter the query builder supports that is not offered by the hard-coded frequency panel
+        self._assert_dynamic_matches_legacy(
+            [VARIANT4, GCNV_VARIANT3, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+            {'freqs': {'callset': {'ac': 1000}, 'topmed': {'af': 0.05, 'hh': 1}, 'sv_callset': {'ac': 50}}},
+            {'dynamic': {'frequency': {'topmed_af': 0.05, 'topmed_hh': 1, 'sv_callset_ac': 50}}},
+        )
+
+        # Call quality
+        self._assert_dynamic_matches_legacy(
+            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT3],
+            {'quality_filter': {'min_gq': 40, 'min_qs': 30, 'min_hl': 5}},
+            {'dynamic': {'quality': {'min_gq': 40, 'min_qs': 30, 'min_hl': 5}}},
+        )
+        self._assert_dynamic_matches_legacy(
+            [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2],
+            {'quality_filter': {'min_gq': 40, 'min_qs': 200, 'vcf_filter': 'pass'}},
+            {'dynamic': {'quality': {'min_gq': 40, 'min_qs': 200, 'vcf_filter': True}}},
+        )
+        self._assert_dynamic_matches_legacy(
+            [VARIANT1, VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+            {'quality_filter': {'min_gq': 60, 'min_qs': 10, 'affected_only': True}},
+            {'quality_filter': {'affected_only': True}, 'dynamic': {'quality': {'min_gq': 60, 'min_qs': 10}}},
+        )
+
+        # Invalid filters are rejected and never reach the query builders
+        num_searches = VariantSearch.objects.count()
+        self._assert_expected_search_error(
+            'Unknown dynamic in_silico filter "not_a_score"', dynamic={'in_silico': {'not_a_score': 0.5}},
+        )
+        self._assert_expected_search_error(
+            'Invalid value for CADD (cadd): expected a number', dynamic={'in_silico': {'cadd': '20 OR 1=1'}},
+        )
+        self._assert_expected_search_error(
+            'seqr AC (callset_ac) is set to different values by the dynamic and freqs.callset.ac filters',
+            dynamic={'frequency': {'callset_ac': 7}},
+        )
+        self._assert_expected_search_error(
+            'Unknown dynamic quality filter "min_dp"', dynamic={'quality': {'min_dp': 25}},
+        )
+        self.assertEqual(VariantSearch.objects.count(), num_searches)
+
+        # A call field newly declared as filterable on the models is searchable with no other change
+        with mock.patch.dict(BaseEntriesManager.QUALITY_FILTERS, {'dp': {}}):
+            self._assert_dynamic_matches_legacy(
+                [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+                {'quality_filter': {'min_dp': 25}},
+                {'dynamic': {'quality': {'min_dp': 25}}},
+            )
+
+        self.login_manager()
+        self._assert_dynamic_matches_legacy(
+            [SV_VARIANT4],
+            {'in_silico': {'strvctvre': 0.1, 'requireScore': True}},
+            {'in_silico': {'requireScore': True}, 'dynamic': {'in_silico': {'strvctvre': 0.1}}},
+            project_families=SV_PROJECT_FAMILIES,
+        )
+        self._assert_dynamic_matches_legacy(
+            [SV_VARIANT1, SV_VARIANT3, SV_VARIANT4],
+            {'freqs': {'gnomad_svs': {'af': 0.001}}},
+            {'freqs': {}, 'dynamic': {'frequency': {'gnomad_svs_af': 0.001}}},
+            project_families=SV_PROJECT_FAMILIES,
+        )
+        self._assert_dynamic_matches_legacy(
+            [SV_VARIANT3, SV_VARIANT4],
+            {'quality_filter': {'min_gq_sv': 40}},
+            {'dynamic': {'quality': {'min_gq_sv': 40}}},
+            project_families=SV_PROJECT_FAMILIES,
+        )
+
+        self._set_grch37_search()
+        self._assert_dynamic_matches_legacy(
+            [GRCH37_VARIANT],
+            {'in_silico': {'eigen': '3.5', 'mut_taster': 'N', 'vest': 0.5, 'alphagenome': 20}},
+            {'dynamic': {'in_silico': {'eigen': 3.5, 'mut_taster': 'N', 'vest': 0.5, 'alphagenome': 20}}},
+            is_37=True,
+        )
+
+    def test_dynamic_filter_cache_and_saved_search(self):
+        all_variants = [VARIANT1, VARIANT2, MULTI_FAMILY_VARIANT, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3]
+        filtered_variants = [VARIANT2, MULTI_FAMILY_VARIANT, GCNV_VARIANT1, GCNV_VARIANT3, GCNV_VARIANT4, MITO_VARIANT1, MITO_VARIANT3]
+        dynamic = {'quality': {'min_gq': 40, 'min_qs': 30, 'min_hl': 5}}
+
+        # Searches that differ only in their dynamic filters are stored and cached separately
+        self._assert_expected_search(all_variants, search_hash=1234567, check_login=self.check_collaborator_login)
+        self._assert_expected_search(filtered_variants, search_hash=1234568, dynamic=dynamic)
+        results_models = {
+            results_model.search_hash: results_model for results_model in VariantSearchResults.objects.filter(
+                search_hash__in=['1234567', '1234568'],
+            ).select_related('variant_search')
+        }
+        self.assertEqual(len({results_model.variant_search.guid for results_model in results_models.values()}), 2)
+        self.assertEqual(len({results_model.guid for results_model in results_models.values()}), 2)
+        self.assertNotIn('dynamic', results_models['1234567'].variant_search.search)
+        self.assertDictEqual(results_models['1234568'].variant_search.search['dynamic'], dynamic)
+
+        # Cached results are returned for the search they were cached for only
+        self.set_cache('search_results__VRS1234568__xpos', self._format_cached_variants([VARIANT2]))
+        self._assert_expected_search([VARIANT2], search_hash=1234568, dynamic=dynamic, skip_cache_check=True)
+        self._assert_expected_search(all_variants, search_hash=1234567)
+
+        # Saved searches keep their dynamic filters
+        saved_search = {'freqs': {'callset': {'ac': 1000}}, 'dynamic': dynamic}
+        response = self.client.post(reverse(create_saved_search_handler), content_type='application/json', data=json.dumps({
+            'name': 'Dynamic Quality', **saved_search,
+        }))
+        self.assertEqual(response.status_code, 200)
+        saved_search_guid = next(iter(response.json()['savedSearchesByGuid']))
+        response = self.client.get(reverse(get_saved_search_handler))
+        self.assertEqual(response.status_code, 200)
+        loaded_search = response.json()['savedSearchesByGuid'][saved_search_guid]
+        self.assertEqual(loaded_search['name'], 'Dynamic Quality')
+        self.assertDictEqual(loaded_search['search'], saved_search)
+        self._assert_expected_search(filtered_variants, **loaded_search['search'])
+
+        response = self.client.post(reverse(create_saved_search_handler), content_type='application/json', data=json.dumps({
+            'name': 'Invalid Dynamic Quality', 'dynamic': {'quality': {'min_gq': 'high'}},
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Invalid value for Genotype Quality (min_gq): expected a number')
 
     def test_sort(self):
         self._assert_expected_search(

@@ -334,7 +334,7 @@ const selectCheckbox = (onChange, value, option) => ({ checked }) => {
 const chunkArray = (arr, maxChunkSize) => {
   const numChunks = Math.ceil(arr.length / maxChunkSize)
   const chunkSize = Math.ceil(arr.length / numChunks)
-  return [...Array(numChunks).keys().map(i => arr.slice(i * chunkSize, (i + 1) * chunkSize))]
+  return [...Array(numChunks).keys()].map(i => arr.slice(i * chunkSize, (i + 1) * chunkSize))
 }
 
 export const CheckboxGroup = React.memo((props) => {

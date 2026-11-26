@@ -2,6 +2,7 @@ import { combineReducers } from 'redux'
 
 import { reducers as dashboardReducers } from 'pages/Dashboard/reducers'
 import { reducers as projectReducers } from 'pages/Project/reducers'
+import { reducers as workbookReducers } from 'pages/Project/workbook/reducers'
 import { reducers as searchReducers } from 'pages/Search/reducers'
 import { reducers as dataManagementReducers } from 'pages/DataManagement/reducers'
 import { reducers as reportReducers } from 'pages/Report/reducers'
@@ -296,6 +297,7 @@ const rootReducer = combineReducers({
   ...modalReducers,
   ...dashboardReducers,
   ...projectReducers,
+  ...workbookReducers,
   ...searchReducers,
   ...reportReducers,
   ...dataManagementReducers,

@@ -5,6 +5,7 @@ import styled from 'styled-components'
 
 import { MAX_VISIBLE_TARGET_TABS, WORK_PANE_ID } from './constants'
 import { getWorkbookPath, splitTargetTabs } from './selectors'
+import TalosExportButton from './TalosExport'
 import { TargetDisplay, Workbook } from './types'
 import { AddTargetsButton, RemoveTargetButton } from './WorkbookButtons'
 
@@ -114,6 +115,7 @@ const TargetTabs = React.memo(({ workbook, targets, selectedTarget, queryGuid }:
         </TabControl>
       )}
       {workbook.canEdit && <TabControl><AddTargetsButton workbook={workbook} targets={targets} /></TabControl>}
+      <TabControl><TalosExportButton workbook={workbook} /></TabControl>
     </TabRow>
   )
 })

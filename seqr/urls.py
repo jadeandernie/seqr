@@ -143,6 +143,7 @@ from seqr.views.apis.workbook_api import project_workbooks_handler, create_workb
     reorder_worksheets_handler, update_worksheet_handler, delete_worksheet_handler, create_worksheet_query_handler, \
     reorder_worksheet_queries_handler, update_worksheet_query_handler, delete_worksheet_query_handler, \
     update_worksheet_query_result_handler, run_worksheet_query_handler
+from seqr.views.apis.workbook_talos_api import workbook_talos_export_handler
 from seqr.views.apis.project_api import create_project_handler, update_project_handler, delete_project_handler, \
     project_page_data, project_families, project_overview, project_mme_submisssions, project_individuals, \
     project_analysis_groups, update_project_workspace, project_family_notes, project_collaborators, project_locus_lists, \
@@ -260,6 +261,7 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/workbooks': project_workbooks_handler,
     'project/(?P<project_guid>[^/]+)/workbooks/create': create_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)': workbook_detail_handler,
+    'workbook/(?P<workbook_guid>[^/]+)/talos_export': workbook_talos_export_handler,
     'workbook/(?P<workbook_guid>[^/]+)/update': update_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)/delete': delete_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)/duplicate': duplicate_workbook_handler,

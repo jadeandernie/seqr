@@ -29,9 +29,14 @@ test('renders the project sections and the families table', () => {
 
   const sectionHeaders = wrapper.find('StyledComponents__SectionHeader').map(header => header.text())
   expect(sectionHeaders).toEqual([
-    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Notifications', 'Collaborators', 'Families',
+    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Workbooks', 'Overview', 'Variant Tags', 'Notifications',
+    'Collaborators', 'Families',
   ])
   expect(wrapper.find('FamilyTableRow').length).toEqual(2)
+  const workbooksLink = wrapper.find('Link').filterWhere(
+    link => link.prop('to') === '/project/R0237_1000_genomes_demo/workbooks',
+  )
+  expect(workbooksLink.text()).toEqual('View All')
 })
 
 test('renders an analysis group page without an edit button or notifications section', () => {
@@ -52,6 +57,7 @@ test('renders an analysis group page without an edit button or notifications sec
   expect(wrapper.find('Link').someWhere(
     link => link.prop('to') === '/project/R0237_1000_genomes_demo/saved_variants/analysis_group/AG0000183_test_group',
   )).toBe(true)
+  expect(wrapper.find('Link').someWhere(link => link.prop('to').endsWith('/workbooks'))).toBe(false)
 })
 
 test('renders a loader instead of section content when project data is loading', () => {

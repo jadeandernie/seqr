@@ -14,6 +14,8 @@ jest.mock('./components/CaseReview', () => () => <div>CaseReview</div>)
 jest.mock('./components/FamilyPage', () => () => <div>FamilyPageRouter</div>)
 jest.mock('./components/Matchmaker', () => () => <div>Matchmaker</div>)
 jest.mock('./components/SavedVariants', () => () => <div>SavedVariants</div>)
+jest.mock('./workbook/Workbooks', () => () => <div>Workbooks</div>)
+jest.mock('./workbook/WorkbookPage', () => ({ match }) => <div>{`WorkbookPage ${JSON.stringify(match.params)}`}</div>)
 
 configure({ adapter: new Adapter() })
 
@@ -134,6 +136,34 @@ test('renders the saved variants page', () => {
   const wrapper = renderProject(`/project/${PROJECT_GUID}/saved_variants`, { project: {} })
 
   expect(wrapper.text()).toContain('SavedVariants')
+})
+
+test('renders the workbooks page for users with full access', () => {
+  const wrapper = renderProject(`/project/${PROJECT_GUID}/workbooks`, { project: { partialAccess: false } })
+
+  expect(wrapper.text()).toEqual('Workbooks')
+})
+
+test('renders the workbook page with the selected family and query from the url', () => {
+  const path = `/project/${PROJECT_GUID}/workbook/WB0000001_trio_analysis`
+  const project = { partialAccess: false }
+
+  expect(renderProject(path, { project }).text()).toEqual('WorkbookPage {"workbookGuid":"WB0000001_trio_analysis"}')
+  expect(renderProject(`${path}/WBT1`, { project }).text()).toEqual(
+    'WorkbookPage {"workbookGuid":"WB0000001_trio_analysis","targetGuid":"WBT1"}',
+  )
+  expect(renderProject(`${path}/WBT1/WSQ1`, { project }).text()).toEqual(
+    'WorkbookPage {"workbookGuid":"WB0000001_trio_analysis","targetGuid":"WBT1","queryGuid":"WSQ1"}',
+  )
+})
+
+test('renders Error404 for the workbook routes when the user only has partial access', () => {
+  const project = { partialAccess: true }
+
+  expect(renderProject(`/project/${PROJECT_GUID}/workbooks`, { project }).text()).toContain('Error 404')
+  expect(renderProject(`/project/${PROJECT_GUID}/workbook/WB0000001_trio_analysis`, { project }).text()).toContain(
+    'Error 404',
+  )
 })
 
 test('renders Error404 for an unrecognized sub-route', () => {

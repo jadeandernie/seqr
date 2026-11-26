@@ -40,6 +40,7 @@ import {
   SAMPLE_EXPORT_DATA,
   PROJECT_CATEGORY_FAMILY_FILTERS,
 } from './constants'
+import { getWorkbooksByGuid } from './workbook/selectors'
 
 const FAMILY_SORT_LOOKUP = FAMILY_SORT_OPTIONS.reduce(
   (acc, opt) => ({
@@ -731,7 +732,8 @@ export const getPageHeaderBreadcrumbIdSections = createSelector(
   getPageHeaderAnalysisGroup,
   (state, props) => props.breadcrumb || props.match.params.breadcrumb,
   (state, props) => props.match,
-  (project, family, individualsByGuid, analysisGroup, breadcrumb, match) => {
+  getWorkbooksByGuid,
+  (project, family, individualsByGuid, analysisGroup, breadcrumb, match, workbooksByGuid) => {
     if (!project) {
       return null
     }
@@ -757,6 +759,18 @@ export const getPageHeaderBreadcrumbIdSections = createSelector(
     }
     if (breadcrumb === 'analysis_group') {
       return [{ content: `Analysis Group: ${analysisGroup.name || ''}`, link: match.url }]
+    }
+    if (breadcrumb === 'workbooks' || breadcrumb === 'workbook') {
+      const path = `/project/${project.projectGuid}/workbooks`
+      const breadcrumbIdSections = [{ content: 'Workbooks', link: path }]
+      if (breadcrumb === 'workbook') {
+        const { breadcrumbId } = match.params
+        breadcrumbIdSections.push({
+          content: workbooksByGuid[breadcrumbId]?.name,
+          link: `/project/${project.projectGuid}/workbook/${breadcrumbId}`,
+        })
+      }
+      return breadcrumbIdSections
     }
     if (breadcrumb === 'saved_variants') {
       const { variantPage, tag } = match.params

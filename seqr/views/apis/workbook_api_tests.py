@@ -9,16 +9,18 @@ from django.db.utils import IntegrityError
 from django.test import TestCase
 from django.urls.base import reverse
 
-from seqr.models import AnalysisGroup, Family, Project, VariantSearch, VariantSearchResults, Workbook, WorkbookTarget, \
-    Worksheet, WorksheetQuery, WorksheetQueryResult
+from seqr.models import AnalysisGroup, Family, Individual, Project, VariantSearch, VariantSearchResults, Workbook, \
+    WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult
 from seqr.views.apis.analysis_group_api import delete_analysis_group_handler
-from seqr.views.apis.variant_search_api import delete_saved_search_handler, query_variants_handler
+from seqr.views.apis.variant_search_api import delete_saved_search_handler, get_variant_gene_breakdown, \
+    query_variants_handler
 from seqr.views.apis.workbook_api import project_workbooks_handler, create_workbook_handler, workbook_detail_handler, \
     update_workbook_handler, delete_workbook_handler, duplicate_workbook_handler, add_workbook_targets_handler, \
     reorder_workbook_targets_handler, delete_workbook_target_handler, create_worksheet_handler, \
     reorder_worksheets_handler, update_worksheet_handler, delete_worksheet_handler, create_worksheet_query_handler, \
     reorder_worksheet_queries_handler, update_worksheet_query_handler, delete_worksheet_query_handler, \
-    update_worksheet_query_result_handler, run_worksheet_query_handler, _get_search_hash
+    update_worksheet_query_result_handler, run_worksheet_query_handler, worksheet_query_group_summary_handler, \
+    _get_search_hash
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase
 
 PROJECT_GUID = 'R0001_1kg'
@@ -97,6 +99,74 @@ WORKBOOK_DETAIL_JSON = {
 }
 
 SEARCH_HASH_REGEX = '^WB[0-9a-f]{48}$'
+
+MTHFR_GENE_ID = 'ENSG00000177000'
+CDC7_GENE_ID = 'ENSG00000097046'
+OR4F5_GENE_ID = 'ENSG00000186092'
+# 4 results: a variant in 2 families, a compound het pair, a variant in 1 family and a variant in no gene
+GROUP_SEARCH_RESULTS = [
+    {'variantId': '1-100-A-T', 'familyGuids': ['F000001_1', 'F000003_3'], 'transcripts': {MTHFR_GENE_ID: []}},
+    [
+        {'variantId': '1-200-C-G', 'familyGuids': ['F000001_1'], 'sortedTranscriptConsequences': [
+            {'geneId': CDC7_GENE_ID}, {'geneId': MTHFR_GENE_ID}, {'geneId': CDC7_GENE_ID},
+        ]},
+        {'variantId': '1-300-G-A', 'familyGuids': ['F000001_1'], 'sortedTranscriptConsequences': [
+            {'geneId': CDC7_GENE_ID},
+        ]},
+    ],
+    {'variantId': '2-400-T-C', 'familyGuids': ['F000003_3'], 'transcripts': {OR4F5_GENE_ID: []}},
+    {'variantId': '3-500-A-C', 'familyGuids': ['F000001_1'], 'sortedTranscriptConsequences': []},
+]
+# Affected individuals by family, the group also has F000005_5 which has no affected individuals:
+# F000001_1 (has results): HP:0001631 (HP:0025354), HP:0002011 (HP:0000707), HP:0001636 (HP:0033127)
+# F000002_2 (no results): HP:0002011 (HP:0000707), HP:0011675 (HP:0001626)
+# F000003_3 (has results): HP:0002011 (HP:0000707), HP:0012469 and HP:0001252 (both HP:0025031), HP:9999999 (unknown)
+GROUP_FAMILY_3_FEATURES = [{'id': 'HP:0002011'}, {'id': 'HP:0012469'}, {'id': 'HP:0001252'}, {'id': 'HP:9999999'}]
+GROUP_UNAFFECTED_FEATURES = [{'id': 'HP:0011675'}, {'id': 'HP:0003273'}]
+
+
+def _phenotype_row(phenotype_id, name, num_families, num_with_results):
+    return {'id': phenotype_id, 'name': name, 'numFamilies': num_families, 'numFamiliesWithResults': num_with_results}
+
+
+GROUP_SUMMARY_GENES = [
+    {'geneId': MTHFR_GENE_ID, 'numFamilies': 2, 'familyGuids': ['F000001_1', 'F000003_3'], 'numVariants': 2},
+    {'geneId': CDC7_GENE_ID, 'numFamilies': 1, 'familyGuids': ['F000001_1'], 'numVariants': 2},
+    {'geneId': OR4F5_GENE_ID, 'numFamilies': 1, 'familyGuids': ['F000003_3'], 'numVariants': 1},
+]
+GROUP_SUMMARY_TERMS = [
+    _phenotype_row('HP:0002011', 'Morphological abnormality of the central nervous system', 3, 2),
+    _phenotype_row('HP:0001252', 'Muscular hypotonia', 1, 1),
+    _phenotype_row('HP:0001631', 'Defect in the atrial septum', 1, 1),
+    _phenotype_row('HP:0001636', 'Tetralogy of Fallot', 1, 1),
+    _phenotype_row('HP:0011675', 'Arrhythmia', 1, 0),
+    _phenotype_row('HP:0012469', 'Infantile spasms', 1, 1),
+    _phenotype_row('HP:9999999', None, 1, 1),
+]
+GROUP_SUMMARY_JSON = {
+    'numFamilies': 4,
+    'numFamiliesWithResults': 2,
+    'numFamiliesWithPhenotypes': 3,
+    'totalVariants': 4,
+    'genes': GROUP_SUMMARY_GENES,
+    'totalGenes': 3,
+    'recurrentVariants': [{
+        'variantId': '1-100-A-T', 'geneIds': [MTHFR_GENE_ID], 'numFamilies': 2,
+        'familyGuids': ['F000001_1', 'F000003_3'],
+    }],
+    'totalRecurrentVariants': 1,
+    'phenotypeGeneId': None,
+    'phenotypeCategories': [
+        _phenotype_row('HP:0000707', None, 3, 2),
+        _phenotype_row(None, None, 1, 1),
+        _phenotype_row('HP:0001626', None, 1, 0),
+        _phenotype_row('HP:0025031', None, 1, 1),
+        _phenotype_row('HP:0025354', None, 1, 1),
+        _phenotype_row('HP:0033127', None, 1, 1),
+    ],
+    'phenotypeTerms': GROUP_SUMMARY_TERMS,
+    'totalPhenotypeTerms': 7,
+}
 
 # Simulates a user whose access to families was removed while still being able to view the project
 NO_FAMILY_ACCESS_PATCH = mock.patch(
@@ -996,6 +1066,154 @@ class WorkbookAPITest(object):
         self.assertEqual(response.status_code, 403)
         self._assert_workbook_counts(query_results=3)
 
+    def _assert_results_not_loaded(self, url, error):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 409)
+        self.assertDictEqual(response.json(), {'errors': [error], 'resultsNotLoaded': True})
+
+    @mock.patch('seqr.views.apis.variant_search_api.safe_redis_get_wildcard_json')
+    def test_worksheet_query_group_summary(self, mock_get_cached_results):
+        mock_get_cached_results.return_value = None
+        cell_args = [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID]
+        url = reverse(worksheet_query_group_summary_handler, args=cell_args)
+        self.check_collaborator_login(url)
+
+        with NO_FAMILY_ACCESS_PATCH:
+            self.assertEqual(self.client.get(url).status_code, 403)
+
+        analysis_group = AnalysisGroup.objects.get(guid=ANALYSIS_GROUP_GUID)
+        analysis_group.families.add(Family.objects.get(guid='F000002_2'))
+        Individual.objects.filter(guid='I000007_na20870').update(features=GROUP_FAMILY_3_FEATURES)
+        Individual.objects.filter(guid__in=['I000002_na19678', 'I000009_na20874']).update(
+            features=GROUP_UNAFFECTED_FEATURES)
+
+        not_run_error = 'This query has not been run for Test Group 1 yet, run it to see patterns'
+        self._assert_results_not_loaded(url, not_run_error)
+        mock_get_cached_results.assert_not_called()
+
+        response = self._post(reverse(run_worksheet_query_handler, args=cell_args))
+        self.assertEqual(response.status_code, 200)
+        search_hash = response.json()['searchHash']
+        results_model = VariantSearchResults.objects.get(search_hash=search_hash)
+
+        # The summary never runs the search
+        with mock.patch('seqr.views.apis.variant_search_api.get_clickhouse_variants') as mock_search:
+            self._assert_results_not_loaded(
+                url, 'The results of this query for Test Group 1 are no longer stored, run it again to see patterns')
+        mock_search.assert_not_called()
+        mock_get_cached_results.assert_called_once_with(f'search_results__{results_model.guid}__*')
+
+        mock_get_cached_results.return_value = GROUP_SEARCH_RESULTS
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        genes_by_id = response_json.pop('genesById')
+        self.assertDictEqual(response_json, {'searchHash': search_hash, **GROUP_SUMMARY_JSON})
+        self.assertSetEqual(set(genes_by_id.keys()), {MTHFR_GENE_ID, CDC7_GENE_ID, OR4F5_GENE_ID})
+        self.assertEqual(genes_by_id[MTHFR_GENE_ID]['geneSymbol'], 'MTHFR')
+
+        # The phenotype counts can be restricted to the families with results in a gene
+        response = self.client.get(f'{url}?geneId={CDC7_GENE_ID}')
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertDictEqual({k: v for k, v in response_json.items() if k != 'genesById'}, {
+            'searchHash': search_hash,
+            **GROUP_SUMMARY_JSON,
+            'phenotypeGeneId': CDC7_GENE_ID,
+            'phenotypeCategories': [
+                _phenotype_row('HP:0000707', None, 3, 1),
+                _phenotype_row(None, None, 1, 0),
+                _phenotype_row('HP:0001626', None, 1, 0),
+                _phenotype_row('HP:0025031', None, 1, 0),
+                _phenotype_row('HP:0025354', None, 1, 1),
+                _phenotype_row('HP:0033127', None, 1, 1),
+            ],
+            'phenotypeTerms': [
+                _phenotype_row('HP:0002011', 'Morphological abnormality of the central nervous system', 3, 1),
+                _phenotype_row('HP:0001252', 'Muscular hypotonia', 1, 0),
+                _phenotype_row('HP:0001631', 'Defect in the atrial septum', 1, 1),
+                _phenotype_row('HP:0001636', 'Tetralogy of Fallot', 1, 1),
+                _phenotype_row('HP:0011675', 'Arrhythmia', 1, 0),
+                _phenotype_row('HP:0012469', 'Infantile spasms', 1, 0),
+                _phenotype_row('HP:9999999', None, 1, 0),
+            ],
+        })
+
+        response = self.client.get(f'{url}?geneId=ENSG00000000000')
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json['numFamiliesWithResults'], 2)
+        self.assertSetEqual({row['numFamiliesWithResults'] for row in response_json['phenotypeCategories']}, {0})
+        self.assertSetEqual({row['numFamiliesWithResults'] for row in response_json['phenotypeTerms']}, {0})
+        self.assertListEqual(
+            [row['numFamilies'] for row in response_json['phenotypeCategories']], [3, 1, 1, 1, 1, 1])
+
+        # Long lists are truncated and report their full length
+        with mock.patch('seqr.views.apis.workbook_api.MAX_SUMMARY_ROWS', 1), \
+                mock.patch('seqr.views.apis.workbook_api.MAX_PHENOTYPE_TERMS', 2):
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.pop('genesById').keys()), {MTHFR_GENE_ID})
+        self.assertDictEqual(response_json, {
+            'searchHash': search_hash, **GROUP_SUMMARY_JSON, 'genes': GROUP_SUMMARY_GENES[:1],
+            'phenotypeTerms': GROUP_SUMMARY_TERMS[:2],
+        })
+
+        # A search with no results or a group with no phenotypes has an empty summary
+        Individual.objects.filter(family__guid__in=GROUP_TARGET_JSON['familyGuids'] + ['F000002_2']).update(features=None)
+        mock_get_cached_results.return_value = []
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {
+            'searchHash': search_hash, 'genesById': {}, 'numFamilies': 4, 'numFamiliesWithResults': 0,
+            'numFamiliesWithPhenotypes': 0, 'totalVariants': 0, 'genes': [], 'totalGenes': 0, 'recurrentVariants': [],
+            'totalRecurrentVariants': 0, 'phenotypeGeneId': None, 'phenotypeCategories': [], 'phenotypeTerms': [],
+            'totalPhenotypeTerms': 0,
+        })
+
+        # The gene breakdown of the search page is unchanged
+        with mock.patch('seqr.views.apis.variant_search_api._get_variants_with_cache') as mock_get_variants:
+            mock_get_variants.return_value = GROUP_SEARCH_RESULTS
+            response = self.client.get(reverse(get_variant_gene_breakdown, args=[search_hash]))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {'searchGeneBreakdown', 'genesById'})
+        self.assertDictEqual(response_json['searchGeneBreakdown'], {search_hash: {
+            MTHFR_GENE_ID: {'total': 2, 'families': {'F000001_1': 2, 'F000003_3': 1}},
+            CDC7_GENE_ID: {'total': 2, 'families': {'F000001_1': 2}},
+            OR4F5_GENE_ID: {'total': 1, 'families': {'F000003_3': 1}},
+        }})
+        self.assertSetEqual(set(response_json['genesById'].keys()), {MTHFR_GENE_ID, CDC7_GENE_ID, OR4F5_GENE_ID})
+
+        # The results of a group that has changed since the query was run are not summarized
+        mock_get_cached_results.return_value = GROUP_SEARCH_RESULTS
+        analysis_group.families.remove(Family.objects.get(guid='F000005_5'))
+        self._assert_results_not_loaded(
+            url, 'The families of Test Group 1 have changed since this query was run, run it again to see patterns')
+        analysis_group.families.add(Family.objects.get(guid='F000005_5'))
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        results_model.delete()
+        self._assert_results_not_loaded(url, not_run_error)
+
+        response = self.client.get(reverse(
+            worksheet_query_group_summary_handler, args=[WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID]))
+        self._assert_error(response, '1 is not an analysis group')
+
+        invalid_args = [
+            [WORKBOOK_GUID, NO_ACCESS_QUERY_GUID, GROUP_TARGET_GUID],
+            [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, NO_ACCESS_TARGET_GUID],
+            ['WB0000000_invalid', RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID],
+        ]
+        for args in invalid_args:
+            response = self.client.get(reverse(worksheet_query_group_summary_handler, args=args))
+            self.assertEqual(response.status_code, 404)
+        response = self.client.get(reverse(
+            worksheet_query_group_summary_handler,
+            args=[NO_ACCESS_WORKBOOK_GUID, NO_ACCESS_QUERY_GUID, NO_ACCESS_TARGET_GUID]))
+        self.assertEqual(response.status_code, 403)
+
     def test_run_worksheet_query_search_models(self):
         url = reverse(run_worksheet_query_handler, args=[WORKBOOK_GUID, RECESSIVE_QUERY_GUID, FAMILY_TARGET_GUID])
         self.login_manager()
@@ -1057,11 +1275,11 @@ class WorkbookAPITest(object):
 
 
 class LocalWorkbookAPITest(AuthenticationTestCase, WorkbookAPITest):
-    fixtures = ['users', 'social_auth', '1kg_project', 'variant_searches', 'workbooks']
+    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'variant_searches', 'workbooks']
 
 
 class AnvilWorkbookAPITest(AnvilAuthenticationTestCase, WorkbookAPITest):
-    fixtures = ['users', 'social_auth', '1kg_project', 'variant_searches', 'workbooks']
+    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'variant_searches', 'workbooks']
 
 
 class WorkbookModelTest(TestCase):

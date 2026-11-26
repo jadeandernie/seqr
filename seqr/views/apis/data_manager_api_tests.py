@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 from django.urls.base import reverse
+import gzip
 import json
 import mock
 from requests import HTTPError
@@ -10,7 +11,7 @@ from seqr.utils.communication_utils import _set_bulk_notification_stream
 from seqr.views.apis.data_manager_api import update_rna_seq, load_phenotype_prioritization_data, validate_callset, loading_vcfs, \
     get_loaded_projects, load_data, trigger_delete_family
 from seqr.views.utils.orm_to_json_utils import _get_json_for_models
-from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, AirtableTest
+from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, AirtableTest, MockGoogleStorage
 from seqr.models import Dataset, Individual, RnaSeqOutlier, RnaSeqTpm, RnaSeqSpliceOutlier, RnaSample, Project, PhenotypePrioritization
 from settings import SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL
 
@@ -22,6 +23,8 @@ RNA_OUTLIER_MUSCLE_SAMPLE_GUID = 'RS000172_E_na19675_d2'
 RNA_SPLICE_SAMPLE_GUID = 'RS000151_S_na19675_1'
 PLACEHOLDER_GUID = 'S0000100'
 RNA_FILE_ID = 'gs://rna_data/new_muscle_samples.tsv.gz'
+LIRICAL_FILE = 'gs://seqr_data/lirical_data.tsv.gz'
+GENE_ID_FILE = 'gs://seqr-loading-temp/v3.1/db_id_to_gene_id.csv.gz'
 SAMPLE_GENE_OUTLIER_DATA = [
     {'gene_id': 'ENSG00000240361', 'p_value': '0.01', 'p_adjust': '0.13', 'z_score': '-3.1'},
     {'gene_id': 'ENSG00000240361', 'p_value': '0.01', 'p_adjust': '0.13', 'z_score': '-3.1'},
@@ -507,11 +510,10 @@ class DataManagerAPITest(AirtableTest):
         },
     }
 
-    def _has_expected_file_loading_logs(self, file, file_path, user, info=None, warnings=None, additional_logs=None, additional_logs_offset=None):
+    def _has_expected_file_loading_logs(self, user, info=None, warnings=None, additional_logs=None, additional_logs_offset=None):
         expected_logs = [
             ('Fetching Samples records 0-1 from airtable', None),
             ('Fetched 10 Samples records from airtable', None),
-            (f'==> gsutil cp {file} tmp/temp_uploads/{file_path}', None),
         ] + [(info_log, None) for info_log in info or []] + [
             (warn_log, {'severity': 'WARNING'}) for warn_log in warnings or []
         ]
@@ -552,11 +554,10 @@ class DataManagerAPITest(AirtableTest):
     @mock.patch('seqr.views.utils.dataset_utils.datetime')
     @mock.patch('seqr.views.utils.dataset_utils.os.mkdir')
     @mock.patch('seqr.views.utils.dataset_utils.os.rename')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
     @mock.patch('seqr.utils.file_utils.open')
     @mock.patch('seqr.utils.file_utils.gzip.open')
     @responses.activate
-    def _test_update_rna_seq(self, data_type, mock_open, mock_unzipped_open, mock_subprocess,
+    def _test_update_rna_seq(self, data_type, mock_open, mock_unzipped_open,
                             mock_rename, mock_mkdir, mock_datetime, mock_send_slack, mock_send_email):
         url = reverse(update_rna_seq)
         self.check_pm_login(url)
@@ -571,15 +572,14 @@ class DataManagerAPITest(AirtableTest):
         # Test errors
         body = {'dataType': data_type, 'file': 'gs://rna_data/muscle_samples.tsv'}
         mock_datetime.now.return_value = datetime(2020, 4, 15)
-        mock_subprocess.return_value.wait.return_value = 1
-        mock_subprocess.return_value.stdout = [b'CommandException: No URLs matched gs://rna_data/muscle_samples.tsv']
         self.reset_logs()
         response = self._assert_expected_pm_access(
             lambda: self.client.post(url, content_type='application/json', data=json.dumps(body)), status_code=400,
         )
-        self.assertDictEqual(response.json(), {'error': 'Run command failed: CommandException: No URLs matched gs://rna_data/muscle_samples.tsv'})
+        self.assertDictEqual(response.json(), {'error': '404 No such object: gs://rna_data/muscle_samples.tsv'})
 
-        mock_subprocess.return_value.wait.return_value = 0
+        for file in ['gs://rna_data/muscle_samples.tsv', 'gs://rna_data/muscle_samples.xlsx', 'gs://rna_data/muscle_samples.tsv.gz', RNA_FILE_ID]:
+            self.mock_gcs.add_file(file, '')
         def _set_file_iter_stdout(rows):
             mock_unzipped_open.return_value.__enter__.return_value.__iter__.return_value = [
                 ('\t'.join([str(col) for col in row]) + '\n') for row in rows
@@ -587,10 +587,13 @@ class DataManagerAPITest(AirtableTest):
 
         file_path = RNA_FILENAME_TEMPLATE.format(data_type)
         mock_files = defaultdict(mock.MagicMock)
-        mock_open.side_effect = lambda file_name, *args: mock_files[file_name]
+        # Gzipped files are read from the opened file handle and written directly to the file path
+        mock_open.side_effect = lambda file, *args: mock_files[
+            file if isinstance(file, str) else mock_unzipped_open.call_args.args[0]
+        ]
         def _set_gzip_file_iter_stdout(mock_file, rows):
             mock_file.__enter__.return_value.__iter__.return_value = [
-                ('\t'.join([str(col) for col in row]) + '\n').encode() for row in rows
+                ('\t'.join([str(col) for col in row]) + '\n') for row in rows
             ]
 
         _set_file_iter_stdout([])
@@ -662,7 +665,7 @@ class DataManagerAPITest(AirtableTest):
         self.assertEqual(response.json()['errors'][0], 'No new samples detected')
 
         mock_send_slack.reset_mock()
-        mock_subprocess.reset_mock()
+        self.mock_gcs.calls.reset_mock()
         self.reset_logs()
         body['skipNewSampleValidation'] = True
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
@@ -673,12 +676,14 @@ class DataManagerAPITest(AirtableTest):
         ]
         warnings = ['Skipped loading for 1 samples already loaded from this file', 'No new samples detected']
         self.assertDictEqual(response.json(), {'info': info, 'warnings': warnings, 'sampleGuids': [], 'fileName': mock.ANY})
-        self._has_expected_file_loading_logs('gs://rna_data/muscle_samples.tsv.gz', file_path, info=info, warnings=warnings, user=self.data_manager_user)
+        self._has_expected_file_loading_logs(info=info, warnings=warnings, user=self.data_manager_user)
         self.assertEqual(model_cls.objects.count(), params['initial_model_count'])
         mock_send_slack.assert_not_called()
         mock_send_email.assert_not_called()
-        self.assertEqual(mock_subprocess.call_count, 1)
-        mock_subprocess.assert_called_with(f'gsutil cp {body["file"]} tmp/temp_uploads/{file_path}', stdout=-1, stderr=-2, shell=True) # nosec
+        self.mock_gcs.assert_calls(self, [
+            mock.call.download_to_filename(body['file'], f'tmp/temp_uploads/{file_path}/muscle_samples.tsv.gz'),
+        ])
+        mock_unzipped_open.assert_called_with(f'tmp/temp_uploads/{file_path}/muscle_samples.tsv.gz', 'rb')
 
         def _test_basic_data_loading(data, num_parsed_samples, num_loaded_samples, new_sample_individual_id, body,
                                      project_names, num_created_samples=1, warnings=None, additional_logs=None):
@@ -708,8 +713,8 @@ class DataManagerAPITest(AirtableTest):
                 'entityIds': response_json['sampleGuids'] if num_created_samples > 1 else [new_sample_guid],
             }})]
             self._has_expected_file_loading_logs(
-                'gs://rna_data/new_muscle_samples.tsv.gz', file_path, info=info, warnings=warnings, user=self.data_manager_user,
-                additional_logs=additional_logs, additional_logs_offset=3)
+                info=info, warnings=warnings, user=self.data_manager_user,
+                additional_logs=additional_logs, additional_logs_offset=2)
 
             self.assertEqual(len(responses.calls), 1)
             self.assert_expected_airtable_call(
@@ -724,7 +729,7 @@ class DataManagerAPITest(AirtableTest):
         mock_open.reset_mock()
         for mock_file in mock_files.values():
             mock_file.reset_mock()
-        mock_subprocess.reset_mock()
+        self.mock_gcs.calls.reset_mock()
         self.reset_logs()
         body.update({'ignoreExtraSamples': True, 'file': RNA_FILE_ID})
         warnings = [
@@ -771,14 +776,13 @@ class DataManagerAPITest(AirtableTest):
         self.assertSetEqual(set(response_json['sampleGuids']), {sample_guid, new_sample_guid})
 
         # test correct file interactions
-        expected_subprocess_calls = [
-            f'gsutil cp {RNA_FILE_ID} tmp/temp_uploads/{file_path}',
-            f'gsutil mv tmp/temp_uploads/{file_path}/*.json.gz gs://seqr-scratch-temp/{file_path}',
-        ]
-        self.assertEqual(mock_subprocess.call_count, len(expected_subprocess_calls))
-        mock_subprocess.assert_has_calls([call for calls in [
-            [mock.call(command, stdout=-1, stderr=-2, shell=True), mock.call().wait()] for command in expected_subprocess_calls  # nosec
-        ] for call in calls])
+        self.mock_gcs.assert_calls(self, [
+            mock.call.download_to_filename(RNA_FILE_ID, f'tmp/temp_uploads/{file_path}/new_muscle_samples.tsv.gz'),
+        ] + [
+            mock.call.upload_from_filename(
+                f'gs://seqr-scratch-temp/{file_path}/{guid}.json.gz', f'tmp/temp_uploads/{file_path}/{guid}.json.gz',
+            ) for guid in sorted([sample_guid, new_sample_guid])
+        ])
         mock_mkdir.assert_any_call(f'tmp/temp_uploads/{file_path}')
         filename = f'tmp/temp_uploads/{file_path}/{new_sample_guid}.json.gz'
         expected_files = {
@@ -803,46 +807,47 @@ class DataManagerAPITest(AirtableTest):
         mock_open.assert_has_calls([mock.call(file_rename[filename], 'at') for filename in expected_file_names])
         return file_rename
 
-    @classmethod
-    def _join_data(cls, data):
-        return ['\t'.join(line).encode('utf-8') for line in data]
+    def _set_lirical_data(self, data):
+        self.mock_gcs.add_file(LIRICAL_FILE, '\n'.join(['\t'.join(line) for line in data]))
+        self.mock_gcs.calls.reset_mock()
+
+    def _assert_read_lirical_file(self):
+        self.mock_gcs.assert_calls(self, [mock.call.exists(LIRICAL_FILE), mock.call.open(LIRICAL_FILE, 'rb')])
 
     @mock.patch('seqr.utils.communication_utils.BASE_URL', 'https://test-seqr.org/')
     @mock.patch('seqr.models.random')
     @mock.patch('seqr.utils.communication_utils.send_html_email')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_load_phenotype_prioritization_data(self, mock_subprocess, mock_send_email, mock_random):
+    def test_load_phenotype_prioritization_data(self, mock_send_email, mock_random):
         url = reverse(load_phenotype_prioritization_data)
         self.check_data_manager_login(url)
 
-        request_body = {'file': 'gs://seqr_data/lirical_data.tsv.gz'}
-        mock_subprocess.return_value.wait.return_value = 1
+        request_body = {'file': LIRICAL_FILE}
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'File not found: gs://seqr_data/lirical_data.tsv.gz')
-        mock_subprocess.assert_called_with('gsutil ls gs://seqr_data/lirical_data.tsv.gz', stdout=-1, stderr=-2, shell=True)  # nosec
+        self.mock_gcs.assert_calls(self, [
+            mock.call.exists(LIRICAL_FILE),
+            mock.call.list_blobs('gs://seqr_data', prefix='lirical_data.tsv.gz/', max_results=1),
+        ])
 
-        mock_subprocess.reset_mock()
-        mock_subprocess.return_value.wait.return_value = 0
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_MISS_HEADER)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_MISS_HEADER)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Invalid file: missing column(s) project, diseaseId')
-        mock_subprocess.assert_called_with('gsutil cat gs://seqr_data/lirical_data.tsv.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True)  # nosec
+        self._assert_read_lirical_file()
 
-        mock_subprocess.reset_mock()
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_NO_PROJECT_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_NO_PROJECT_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Both sample ID and project fields are required.')
-        mock_subprocess.assert_called_with('gsutil cat gs://seqr_data/lirical_data.tsv.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True)  # nosec
+        self._assert_read_lirical_file()
 
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_DATA + EXOMISER_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_DATA + EXOMISER_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Multiple tools found lirical and exomiser. Only one in a file is supported.')
 
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_PROJECT_NOT_EXIST_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_PROJECT_NOT_EXIST_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Project CMG_Beggs_WGS not found. ')
@@ -850,21 +855,20 @@ class DataManagerAPITest(AirtableTest):
         mock_random.randint.return_value = 12345
         project = Project.objects.create(created_by=self.data_manager_user,
                                          name='1kg project nåme with uniçøde', workspace_namespace='my-seqr-billing')
-        mock_subprocess.return_value.stdout = self._join_data(
+        self._set_lirical_data(
             PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_DATA + LIRICAL_PROJECT_NOT_EXIST_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Project CMG_Beggs_WGS not found. Projects with conflict name(s) 1kg project nåme with uniçøde.')
         project.delete()
 
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_NO_EXIST_INDV_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_NO_EXIST_INDV_DATA)
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], "Can't find individuals NA19678x, NA19679x")
 
         # Test a successful operation
-        mock_subprocess.reset_mock()
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + LIRICAL_DATA)
         self.reset_logs()
         mock_random.randint.side_effect = [256989491, 295284416]
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
@@ -876,8 +880,6 @@ class DataManagerAPITest(AirtableTest):
         ]
         self.assertEqual(response.json()['info'], info)
         self.assert_json_logs(self.data_manager_user, [
-            ('==> gsutil ls gs://seqr_data/lirical_data.tsv.gz', None),
-            ('==> gsutil cat gs://seqr_data/lirical_data.tsv.gz | gunzip -c -q - ', None),
             ('delete 1 PhenotypePrioritizations', {'dbUpdate': {
                 'dbEntity': 'PhenotypePrioritization', 'updateType': 'bulk_delete',
                 'entityIds': ['PP000003_NA19678_ENSG000002689'],
@@ -890,7 +892,7 @@ class DataManagerAPITest(AirtableTest):
         saved_data = _get_json_for_models(PhenotypePrioritization.objects.filter(tool='lirical').order_by('id'),
                                           nested_fields=[{'fields': ('individual', 'guid'), 'key': 'individualGuid'}])
         self.assertListEqual(saved_data, EXPECTED_LIRICAL_DATA)
-        mock_subprocess.assert_called_with('gsutil cat gs://seqr_data/lirical_data.tsv.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True)  # nosec
+        self._assert_read_lirical_file()
         self._assert_expected_notifications(mock_send_email, [
             {'data_type': 'Lirical', 'user': self.data_manager_user, 'email_body': 'data for 1 Lirical sample(s)'},
             {'data_type': 'Lirical', 'user': self.data_manager_user, 'email_body': 'data for 1 Lirical sample(s)',
@@ -901,7 +903,7 @@ class DataManagerAPITest(AirtableTest):
         self.reset_logs()
         mock_send_email.reset_mock()
         mock_send_email.side_effect = Exception('Email server down')
-        mock_subprocess.return_value.stdout = self._join_data(PHENOTYPE_PRIORITIZATION_HEADER + UPDATE_LIRICAL_DATA)
+        self._set_lirical_data(PHENOTYPE_PRIORITIZATION_HEADER + UPDATE_LIRICAL_DATA)
         mock_random.randint.side_effect = [177442291, 215071655]
         response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 200)
@@ -911,8 +913,6 @@ class DataManagerAPITest(AirtableTest):
         ]
         self.assertEqual(response.json()['info'], info)
         self.assert_json_logs(self.data_manager_user, [
-            ('==> gsutil ls gs://seqr_data/lirical_data.tsv.gz', None),
-            ('==> gsutil cat gs://seqr_data/lirical_data.tsv.gz | gunzip -c -q - ', None),
             ('delete 1 PhenotypePrioritizations', {'dbUpdate': {
                 'dbEntity': 'PhenotypePrioritization', 'updateType': 'bulk_delete',
                 'entityIds': ['PP256989491_na19678ensg0000010'],
@@ -923,7 +923,7 @@ class DataManagerAPITest(AirtableTest):
             }}),
         ])
         email_body = 'data for 2 Lirical sample(s)'
-        self.assert_json_logs(user=None,  offset=4, expected=[
+        self.assert_json_logs(user=None,  offset=2, expected=[
             ('Error sending project email for R0001_1kg: Email server down', {
                 'severity': 'ERROR',
                 '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
@@ -1017,20 +1017,20 @@ class DataManagerAPITest(AirtableTest):
             '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00735\tNA19675_1\tNA19679\n'
         ]
         vcf_samples = ['HG00735', 'NA19675_1', 'NA19679']
-        self._add_file_iter(vcf_file_rows, is_gz=False)
+        self._add_file('callset.vcf', vcf_file_rows)
         response = self.client.post(url, content_type='application/json', data=json.dumps(self.REQUEST_BODY))
 
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {'vcfSamples': vcf_samples})
 
-        self._add_file_iter(vcf_file_rows, is_gz=True)
+        self._add_file('callset.vcf.gz', vcf_file_rows)
         body = {**self.REQUEST_BODY, 'filePath': f'{self.CALLSET_DIR}/callset.vcf.gz'}
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {'vcfSamples': vcf_samples})
-        self._assert_expected_read_vcf_header_subprocess_calls(body)
+        self._assert_expected_read_vcf_header_calls(body)
 
-        self._set_file_not_found(list_files=True)
+        self._set_file_not_found()
         body = {**self.REQUEST_BODY, 'filePath': f'{self.CALLSET_DIR}/sharded_vcf/part0*.vcf'}
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 400)
@@ -1050,7 +1050,7 @@ class DataManagerAPITest(AirtableTest):
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
 
-        self._add_file_iter([])
+        self._add_file('mito_calls.mt', [])
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             **self.REQUEST_BODY, 'filePath': f'{self.CALLSET_DIR}/mito_calls.mt', 'datasetType': 'MITO',
         }))
@@ -1132,7 +1132,7 @@ class DataManagerAPITest(AirtableTest):
 
         self.reset_logs()
         responses.calls.reset()
-        self._set_file_not_found(has_mv_commands=True)
+        self._set_file_not_found()
         response = self._assert_expected_pm_access(
             lambda: self.client.post(url, content_type='application/json', data=json.dumps(body)),
         )
@@ -1157,17 +1157,23 @@ class DataManagerAPITest(AirtableTest):
             variables['skip_expect_tdr_metrics'] = True
         self._assert_success_notification(variables)
 
-        self.assert_json_logs(self.data_manager_user if load_data_logs else self.pm_user, [
+        log_user = self.data_manager_user if load_data_logs else self.pm_user
+        self.assert_json_logs(log_user, [
             (log, None) for log in load_data_logs
         ] + [
             ('Omitted invalid skip validations from loading request: validate_something_else', {
                 'severity': 'ERROR',
                 '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent',
             }),
-        ] + ped_file_logs + [('Triggered Loading Pipeline', {'detail': variables})])
+        ])
+        self.assert_json_logs(None, ped_file_logs, offset=len(load_data_logs) + 1)
+        self.assert_json_logs(
+            log_user, [('Triggered Loading Pipeline', {'detail': variables})],
+            offset=len(load_data_logs) + 1 + len(ped_file_logs),
+        )
 
         # Test loading trigger error
-        self._set_file_not_found(has_mv_commands=True)
+        self._set_file_not_found()
         mock_open.reset_mock()
         mock_gzip_open.reset_mock()
         mock_mkdir.reset_mock()
@@ -1213,7 +1219,7 @@ class DataManagerAPITest(AirtableTest):
 
         # Test when gene data is not fully loaded
         responses.calls.reset()
-        self._set_file_not_found(has_mv_commands=True)
+        self._set_file_not_found()
         mock_open.side_effect = None
         mock_current_gene_version.__int__.return_value = 39
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
@@ -1252,7 +1258,7 @@ class DataManagerAPITest(AirtableTest):
         })
         self._has_expected_ped_files(mock_open, mock_gzip_open, mock_mkdir, 'SV', sample_type='WES')
 
-        self._set_file_not_found(has_mv_commands=True)
+        self._set_file_not_found()
         self.reset_logs()
         responses.add(responses.POST, PIPELINE_RUNNER_URL, status=409)
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
@@ -1369,43 +1375,30 @@ class LocalDataManagerAPITest(AuthenticationTestCase, DataManagerAPITest):
         self.mock_glob = patcher.start()
         self.mock_glob.return_value = []
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.file_utils.gzip.open')
-        self.mock_open = patcher.start()
-        self.mock_file_iter = self.mock_open.return_value.__enter__.return_value.__iter__
-        self.mock_file_iter.return_value = []
-        self.mock_file_iter.stdout = []
-        self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.utils.file_utils.open')
-        self.mock_unzipped_open = patcher.start()
-        self.mock_unzipped_file_iter = self.mock_unzipped_open.return_value.__enter__.return_value.__iter__
-        self.mock_unzipped_file_iter.return_value = []
+        self.mock_open = patcher.start()
+        self.mock_file = self.mock_open.return_value.__enter__.return_value
+        self.mock_file.__iter__.return_value = []
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
-        self.mock_subprocess.side_effect = [self.mock_file_iter]
-        self.addCleanup(patcher.stop)
+        self.mock_gcs = MockGoogleStorage().start(self)
         patcher = mock.patch('seqr.utils.add_data_utils.LOADING_DATASETS_DIR', self.TRIGGER_CALLSET_DIR)
         patcher.start()
         self.addCleanup(patcher.stop)
         super().setUp()
 
-    def _set_file_not_found(self, file_name=None, sample_guid=None, list_files=False, has_mv_commands=False):
+    def _set_file_not_found(self):
         self.mock_does_file_exist.return_value = False
-        self.mock_file_iter.return_value = []
-        return []
 
     def _set_file_found(self):
         self.mock_does_file_exist.return_value = True
 
-    def _add_file_iter(self, stdout, is_gz=True):
+    def _add_file(self, file_name, rows):
         self.mock_does_file_exist.return_value = True
-        file_iter = self.mock_file_iter if is_gz else self.mock_unzipped_file_iter
-        file_iter.return_value += stdout
-        file_iter.stdout += stdout
+        self.mock_file.__iter__.return_value = rows
+        self.mock_file.read.return_value = gzip.compress(''.join(rows).encode('utf-8'))
 
-    def _add_file_list_iter(self, file_list, stdout):
-        self.mock_does_file_exist.return_value = True
-        self.mock_unzipped_file_iter.return_value = stdout
+    def _add_file_list_iter(self, file_list, rows):
+        self._add_file(None, rows)
         self.mock_glob.return_value = [f'/local_dir/{file}' for file in file_list]
 
     def _assert_expected_get_projects_requests(self):
@@ -1450,10 +1443,11 @@ class LocalDataManagerAPITest(AuthenticationTestCase, DataManagerAPITest):
             (error, {'severity': 'WARNING', 'requestBody': body, 'httpRequest': mock.ANY, 'traceback': mock.ANY}),
         ])
 
-    def _assert_expected_read_vcf_header_subprocess_calls(self, body):
-        self.mock_subprocess.assert_has_calls([
-            mock.call(f'dd skip=0 count=65537 bs=1 if={self.TRIGGER_CALLSET_DIR}{body["filePath"]} status="none" | gunzip -c - ', stdout=-1, stderr=-2, shell=True) # nosec
-        ])
+    def _assert_expected_read_vcf_header_calls(self, body):
+        self.mock_open.assert_called_with(f'{self.TRIGGER_CALLSET_DIR}{body["filePath"]}', 'rb')
+        self.mock_file.seek.assert_called_with(0)
+        self.mock_file.read.assert_called_with(65537)
+        self.mock_gcs.assert_calls(self, [])
 
     def _assert_write_pedigree_error(self, response):
         self.assertEqual(response.status_code, 500)
@@ -1503,14 +1497,7 @@ class AnvilDataManagerAPITest(AnvilAuthenticationTestCase, DataManagerAPITest):
     VCF_SAMPLES = [s for s in VCF_SAMPLES if s != 'NA21234']
 
     def setUp(self):
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
-        self.mock_does_file_exist = mock.MagicMock()
-        self.mock_file_iter = mock.MagicMock()
-        self.mock_file_iter.stdout = []
-        self.mock_file_iter.wait.return_value = 0
-        self.mock_subprocess.side_effect = [self.mock_does_file_exist, self.mock_file_iter]
-        self.addCleanup(patcher.stop)
+        self.mock_gcs = MockGoogleStorage().start(self)
         patcher = mock.patch('seqr.utils.add_data_utils.safe_post_to_slack')
         self.mock_slack = patcher.start()
         self.addCleanup(patcher.stop)
@@ -1519,48 +1506,24 @@ class AnvilDataManagerAPITest(AnvilAuthenticationTestCase, DataManagerAPITest):
         self.addCleanup(patcher.stop)
         super().setUp()
 
-    def _set_file_not_found(self, file_name=None, sample_guid=None, list_files=False, has_mv_commands=False):
-        self.mock_file_iter.stdout = []
-        self.mock_does_file_exist.wait.return_value = 1
-        subprocess_side_effect = [self.mock_does_file_exist]
-        error = b'CommandException: One or more URLs matched no objects'
-        if list_files:
-            self.mock_does_file_exist.communicate.return_value = (b'', error)
-            subprocess_side_effect.append(self.mock_does_file_exist)
-        else:
-            self.mock_does_file_exist.stdout = [error]
-        if has_mv_commands:
-            mock_mv = mock.MagicMock()
-            mock_mv.wait.return_value = 0
-            subprocess_side_effect = [mock_mv, self.mock_does_file_exist, mock_mv]
-        self.mock_subprocess.side_effect = subprocess_side_effect
-        return [
-            (f'==> gsutil ls gs://seqr-scratch-temp/{file_name}/{sample_guid}.json.gz', None),
-            ('CommandException: One or more URLs matched no objects', {'severity': 'WARNING'}),
-        ]
+    def _set_file_not_found(self):
+        self.mock_gcs.files.clear()
+        self.mock_gcs.calls.reset_mock()
 
     def _set_file_found(self):
-        self.mock_subprocess.reset_mock()
-        self.mock_does_file_exist.wait.return_value = 0
-        self.mock_subprocess.side_effect = [
-            self.mock_does_file_exist, self.mock_does_file_exist, self.mock_does_file_exist, self.mock_does_file_exist,
-        ]
+        self.mock_gcs.add_file(GENE_ID_FILE, '')
+        self.mock_gcs.calls.reset_mock()
 
-    def _add_file_iter(self, stdout, is_gz=True):
-        self.mock_does_file_exist.wait.return_value = 0
-        if not is_gz:
-            stdout = [row.encode('utf-8') for row in stdout]
-        self.mock_file_iter.stdout += stdout
-        self.mock_subprocess.side_effect = [self.mock_does_file_exist, self.mock_file_iter]
+    def _add_file(self, file_name, rows):
+        if file_name.endswith('.mt'):
+            # Hail tables are folders
+            file_name += '/metadata.json.gz'
+        self.mock_gcs.add_file(f'{self.CALLSET_DIR}/{file_name}', ''.join(rows))
 
-    def _add_file_list_iter(self, file_list, stdout):
-        formatted_files = '\n'.join([f'{self.CALLSET_DIR}/{file}' for file in file_list])
-        self.mock_does_file_exist.communicate.return_value = (f'{formatted_files}\n'.encode('utf-8'), b'')
-        self.mock_does_file_exist.wait.return_value = 0
-        self.mock_file_iter.stdout = [row.encode('utf-8') for row in stdout]
-        self.mock_subprocess.side_effect = [
-            self.mock_does_file_exist, self.mock_does_file_exist,  self.mock_file_iter, self.mock_does_file_exist, self.mock_does_file_exist, self.mock_file_iter,
-        ]
+    def _add_file_list_iter(self, file_list, rows):
+        self.mock_gcs.files.clear()
+        for file_name in file_list:
+            self._add_file(file_name, rows)
 
     def _assert_expected_get_projects_requests(self):
         pdo_filter = "OR(SEARCH('Methods (Loading)',ARRAYJOIN(PDOStatus,';')),SEARCH('On hold for phenotips, but ready to load',ARRAYJOIN(PDOStatus,';')))"
@@ -1650,7 +1613,7 @@ Loading pipeline is triggered with:
         }
         self.assert_json_logs(self.data_manager_user, [
             (f'Error Triggering Loading Pipeline: {error}', {'severity': 'WARNING', 'detail': variables}),
-        ], offset=6)
+        ], offset=3)
 
         error_message = f"""ERROR triggering internal WES SV loading: {error}
 Loading pipeline should be triggered with:
@@ -1727,21 +1690,21 @@ Loading pipeline should be triggered with:
         super()._has_expected_ped_files(mock_open, mock_gzip_open, mock_mkdir, dataset_type, sample_type, has_gene_id_file=has_gene_id_file, **kwargs)
 
         mock_mkdir.assert_not_called()
+        pedigree_dir = f'gs://seqr-loading-temp/v3.1/GRCh38/{dataset_type}/pedigrees/{sample_type}'
         expected_calls = [
-            f'gsutil mv /mock/tmp/* gs://seqr-loading-temp/v3.1/GRCh38/{dataset_type}/pedigrees/{sample_type}/',
-            'gsutil ls gs://seqr-loading-temp/v3.1/db_id_to_gene_id.csv.gz',
-        ]
+            mock.call.upload_from_filename(f'{pedigree_dir}/{project}_pedigree.tsv', f'/mock/tmp/{project}_pedigree.tsv')
+            for project in self.PROJECTS[(1 if kwargs.get('single_project') else 0):]
+        ] + [mock.call.exists(GENE_ID_FILE)]
+        logs = []
         if not has_gene_id_file:
-            expected_calls.append(
-                'gsutil mv /mock/tmp/* gs://seqr-loading-temp/v3.1/',
+            expected_calls += [
+                mock.call.list_blobs('gs://seqr-loading-temp', prefix='v3.1/db_id_to_gene_id.csv.gz/', max_results=1),
+                mock.call.upload_from_filename(GENE_ID_FILE, '/mock/tmp/db_id_to_gene_id.csv.gz'),
+            ]
+            logs.append(
+                (f'Unable to access {GENE_ID_FILE}: One or more URLs matched no objects.', {'severity': 'WARNING'})
             )
-        self.assertEqual(self.mock_subprocess.call_count, len(expected_calls))
-        self.mock_subprocess.assert_has_calls([
-            mock.call(call, stdout=-1, stderr=-2, shell=True) for call in expected_calls # nosec
-        ])
-        self.mock_subprocess.reset_mock()
-        logs = [(f'==> {call}', None) for call in expected_calls]
-        logs.insert(2, ('CommandException: One or more URLs matched no objects', {'severity': 'WARNING'}))
+        self.mock_gcs.assert_calls(self, expected_calls)
         return logs
 
     def _assert_write_pedigree_error(self, response):
@@ -1755,12 +1718,10 @@ Loading pipeline should be triggered with:
     def _test_expected_vcf_responses(self, response, url):
         self.assertEqual(response.status_code, 403)
 
-    def _assert_expected_read_vcf_header_subprocess_calls(self, body):
-        self.mock_subprocess.assert_has_calls([
-            mock.call(command, stdout=-1, stderr=-2, shell=True) # nosec
-            for command in [
-                f'gsutil cat -r 0-65536 {body["filePath"]} | gunzip -c -q - ',
-            ]
+    def _assert_expected_read_vcf_header_calls(self, body):
+        self.mock_gcs.calls.assert_has_calls([
+            mock.call.exists(body['filePath']),
+            mock.call.download_as_bytes(body['filePath'], start=0, end=65536),
         ])
 
     def _test_validate_dataset_type(self, url):
@@ -1794,19 +1755,18 @@ Loading pipeline should be triggered with:
             'Multiple samples found in gs://test_bucket/sv_callsets/merged.vcf.gz',
         ])
 
-        vcf_header_row_2 = '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00735\n'
-        vcf_file_rows[-1] = vcf_header_row_2
+        vcf_header_row_1 = '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tNA19675_1\n'
+        vcf_file_rows[-1] = vcf_header_row_1
         sv_vcfs = ['sv_callsets/NA19675_1.vcf.gz', 'sv_callsets/HG00735.vcf.gz']
         self._add_file_list_iter(sv_vcfs, vcf_file_rows)
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'],[
-            'VCF gs://test_bucket/sv_callsets/NA19675_1.vcf.gz contains unexpected sample "HG00735"',
+            'VCF gs://test_bucket/sv_callsets/HG00735.vcf.gz contains unexpected sample "NA19675_1"',
         ])
 
-        vcf_header_row_1 = '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tNA19675_1\n'
-        vcf_file_rows[-1] = vcf_header_row_1
-        self._add_file_list_iter(sv_vcfs, vcf_file_rows)
+        vcf_header_row_2 = '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00735\n'
+        self._add_file(sv_vcfs[1], vcf_file_rows[:-1] + [vcf_header_row_2])
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], [
@@ -1822,17 +1782,18 @@ Loading pipeline should be triggered with:
             '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">\n',
             '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n',
         ]
-        self._add_file_list_iter(sv_vcfs, vcf_file_rows + [vcf_header_row_1])
-        mock_file_iter_2 = mock.MagicMock()
-        mock_file_iter_2.wait.return_value = 0
-        mock_file_iter_2.stdout = [row.encode('utf-8') for row in vcf_file_rows + [vcf_header_row_2]]
-        self.mock_subprocess.side_effect = [
-            self.mock_does_file_exist, self.mock_does_file_exist,  self.mock_file_iter,
-            self.mock_does_file_exist, mock_file_iter_2,
-        ]
+        self._add_file(sv_vcfs[0], vcf_file_rows + [vcf_header_row_1])
+        self._add_file(sv_vcfs[1], vcf_file_rows + [vcf_header_row_2])
+        self.mock_gcs.calls.reset_mock()
         response = self.client.post(url, content_type='application/json', data=json.dumps(body))
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {'vcfSamples': ['HG00735', 'NA19675_1']})
+        self.mock_gcs.assert_calls(self, [
+            mock.call.list_blobs('gs://test_bucket', prefix='sv_callsets/', match_glob='sv_callsets/*.vcf.gz'),
+        ] + [call for file in sorted(sv_vcfs) for call in [
+            mock.call.exists(f'gs://test_bucket/{file}'),
+            mock.call.download_as_bytes(f'gs://test_bucket/{file}', start=0, end=65536),
+        ]])
 
         self._set_file_not_found()
 

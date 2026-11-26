@@ -3,6 +3,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import JSONField
 
+from matchmaker.result_status import STATUS_CHOICES, STATUS_NEW, STATUS_FLAG_UPDATES, TRIAGE_FLAGS, \
+    get_status_for_flags, get_status_for_flag_update
 from seqr.models import ModelWithGUID, Individual
 from settings import MME_DEFAULT_CONTACT_NAME, MME_DEFAULT_CONTACT_EMAIL
 
@@ -59,6 +61,14 @@ class MatchmakerIncomingQuery(ModelWithGUID):
 
 
 class MatchmakerResult(ModelWithGUID):
+    SOURCE_MME = 'mme'
+    MANUAL_SOURCE_CHOICES = (
+        ('variantmatcher', 'VariantMatcher'),
+        ('genematcher', 'GeneMatcher'),
+        ('other', 'Other'),
+    )
+    SOURCE_CHOICES = ((SOURCE_MME, 'Matchmaker Exchange'),) + MANUAL_SOURCE_CHOICES
+
     submission = models.ForeignKey(MatchmakerSubmission, on_delete=models.PROTECT, null=True)
     originating_submission = models.ForeignKey(MatchmakerSubmission, on_delete=models.PROTECT, null=True, related_name='origin_results')
     originating_query = models.ForeignKey(MatchmakerIncomingQuery, on_delete=models.SET_NULL, null=True)
@@ -73,8 +83,40 @@ class MatchmakerResult(ModelWithGUID):
 
     match_removed = models.BooleanField(default=False)
 
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW, db_index=True)
+    assigned_to = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default=SOURCE_MME)
+
     def __unicode__(self):
         return '{}_{}_result'.format(self.id, str(self.submission))
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_triage = instance._triage_state()
+        return instance
+
+    def _triage_state(self):
+        return {field: self.__dict__.get(field) for field in ('status', *TRIAGE_FLAGS)}
+
+    def save(self, *args, **kwargs):
+        self._sync_status_and_flags()
+        super().save(*args, **kwargs)
+        self._loaded_triage = self._triage_state()
+
+    def _sync_status_and_flags(self):
+        # See matchmaker/result_status.py: an edited status sets the legacy flags, edited flags move the status
+        loaded = getattr(self, '_loaded_triage', None)
+        flags = {flag: getattr(self, flag) for flag in TRIAGE_FLAGS}
+        if loaded is None and self.status == STATUS_NEW:
+            self.status = get_status_for_flags(**flags)
+        elif loaded is None or self.status != loaded['status']:
+            for flag, value in STATUS_FLAG_UPDATES[self.status].items():
+                setattr(self, flag, value)
+        else:
+            old_flags = {flag: loaded[flag] for flag in TRIAGE_FLAGS}
+            if flags != old_flags:
+                self.status = get_status_for_flag_update(self.status, old_flags, flags)
 
     GUID_PREFIX = 'MR'
 

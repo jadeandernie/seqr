@@ -144,6 +144,32 @@ test('reports a vocabulary that fails to load and retries on request', async () 
   expect(getFetchCalls().map(({ url }) => url)).toEqual(['/api/hpo_vocabulary?', '/api/hpo_vocabulary?'])
 })
 
+test('ignores a vocabulary response that arrives after the dialog was closed', async () => {
+  const consoleError = jest.spyOn(console, 'error')
+  const mountAndClose = async () => {
+    const wrapper = mount(
+      <Provider store={createTestStore()}>
+        <MemoryRouter>
+          <AutomaticHpoImport individual={STATE.individualsByGuid[INDIVIDUAL_GUID]} modalName={MODAL_NAME} />
+        </MemoryRouter>
+      </Provider>,
+    )
+    wrapper.unmount()
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+  }
+
+  await mountAndClose()
+  clearHpoIndex()
+  mockApi({ vocabulary: null })
+  await mountAndClose()
+
+  expect(consoleError).not.toHaveBeenCalled()
+  expect(getFetchCalls().map(({ url }) => url)).toEqual(['/api/hpo_vocabulary?', '/api/hpo_vocabulary?'])
+  consoleError.mockRestore()
+})
+
 test('highlights the matched text with a status that does not rely on colour', async () => {
   const wrapper = await mountImport()
   extract(wrapper)

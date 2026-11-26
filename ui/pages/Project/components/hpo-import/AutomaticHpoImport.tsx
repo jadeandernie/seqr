@@ -421,11 +421,19 @@ const BaseAutomaticHpoImport = ({ individual, individuals, modalName, save, setC
   // Notes are only ever held here, so they are gone as soon as the dialog is closed
   const [states, setStates] = useState<Record<string, ImportState>>({})
 
-  const load = useCallback(() => {
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  useEffect(() => {
+    let isOpen = true
     setLoadError(null)
-    loadHpoIndex().then(setIndex, (e: Error) => setLoadError(e.message))
-  }, [])
-  useEffect(load, [load])
+    loadHpoIndex().then(
+      loadedIndex => isOpen && setIndex(loadedIndex),
+      (e: Error) => isOpen && setLoadError(e.message),
+    )
+    return () => {
+      isOpen = false
+    }
+  }, [loadAttempt])
+  const load = useCallback(() => setLoadAttempt(attempt => attempt + 1), [])
 
   const update = useCallback(
     (individualGuid: string, getUpdates: (state: ImportState) => Partial<ImportState>) => setStates((prev) => {

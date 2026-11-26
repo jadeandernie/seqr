@@ -41,6 +41,7 @@ import { updateIndividuals, updateIndividualIGV } from '../../reducers'
 import { getCurrentProject, getParentOptionsByIndividual } from '../../selectors'
 
 import { IndividualCompletenessLabel } from '../ClinicalDataCompleteness'
+import { DataRequestIndicator } from '../DataRequests'
 import CaseReviewStatusDropdown from './CaseReviewStatusDropdown'
 import CollapsableLayout from './CollapsableLayout'
 
@@ -597,6 +598,7 @@ class IndividualRow extends React.PureComponent {
           </Detail>
         </div>
         <IndividualCompletenessLabel completeness={individual.completeness} />
+        <DataRequestIndicator individual={individual} />
         <EditIndividualButton
           initialValues={individual}
           project={project}

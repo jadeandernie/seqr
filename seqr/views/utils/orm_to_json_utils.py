@@ -9,7 +9,7 @@ import json
 from panelapp.models import PaLocusList
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import GeneNote, VariantNote, VariantTag, VariantFunctionalData, CAN_VIEW, CAN_EDIT, \
-    get_audit_field_names, RnaSeqOutlier, RnaSeqSpliceOutlier, VariantSearchResults, Individual
+    get_audit_field_names, RnaSeqOutlier, RnaSeqSpliceOutlier, VariantSearchResults
 from seqr.utils.xpos_utils import get_chrom_pos
 from seqr.views.utils.completeness_utils import get_individual_completeness
 from seqr.views.utils.json_utils import _to_camel_case
@@ -229,7 +229,8 @@ INDIVIDUAL_DISPLAY_NAME_EXPR = Coalesce(NullIf('display_name', Value('')), 'indi
 
 
 def _get_json_for_individuals(individuals, user=None, project_guid=None,
-                              add_hpo_details=False, is_analyst=None, has_case_review_perm=False):
+                              add_hpo_details=False, is_analyst=None, has_case_review_perm=False,
+                              additional_values=None):
     additional_model_fields = _get_case_review_fields(individuals.model, has_case_review_perm)
     nested_fields = [
         {'fields': ('family', 'guid')},
@@ -247,6 +248,7 @@ def _get_json_for_individuals(individuals, user=None, project_guid=None,
         'paternalId': F('father__individual_id'),
         'displayName': INDIVIDUAL_DISPLAY_NAME_EXPR,
         **{key: F(f'family__{field}') for key, field in COMPLETENESS_FAMILY_VALUES.items()},
+        **(additional_values or {}),
     }
 
     parsed_individuals = list(get_json_for_queryset(
@@ -270,10 +272,6 @@ def _get_json_for_individuals(individuals, user=None, project_guid=None,
 def get_completeness_json(individual, family):
     completeness = get_individual_completeness(individual, family)
     return completeness and {'score': completeness['score'], 'missing': completeness['missing']}
-
-
-def get_json_for_individual_completeness(individual):
-    return _get_json_for_individuals(Individual.objects.filter(id=individual.id))[0]['completeness']
 
 
 def add_individual_hpo_details(parsed_individuals):

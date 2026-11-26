@@ -5,7 +5,8 @@ from seqr.models import Project, IgvSample, SavedVariant, VariantNote, LocusList
 from seqr.views.utils.orm_to_json_utils import get_json_for_user, _get_json_for_project, \
     get_json_for_sample, get_json_for_variant_note, get_json_for_locus_list, \
     get_json_for_saved_searches, get_json_for_saved_variants_with_tags, get_json_for_current_user, \
-    _get_json_for_individuals, get_json_for_individual_completeness
+    _get_json_for_individuals
+from seqr.views.utils.data_request_utils import get_individual_completeness_and_fulfil_data_requests
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, \
     PROJECT_FIELDS, SAVED_VARIANT_FIELDS,  \
     FUNCTIONAL_FIELDS, SAVED_SEARCH_FIELDS, LOCUS_LIST_DETAIL_FIELDS, PA_LOCUS_LIST_FIELDS, IGV_SAMPLE_FIELDS, \
@@ -126,9 +127,10 @@ class JSONUtilsTest(object):
 
         individual = Individual.objects.get(guid='I000001_na19675')
         with self.assertNumQueries(1):
-            completeness = get_json_for_individual_completeness(individual)
+            completeness = get_individual_completeness_and_fulfil_data_requests(individual, user=None)
         self.assertDictEqual(completeness, individuals_by_guid['I000001_na19675']['completeness'])
-        self.assertIsNone(get_json_for_individual_completeness(Individual.objects.get(guid='I000002_na19678')))
+        self.assertIsNone(get_individual_completeness_and_fulfil_data_requests(
+            Individual.objects.get(guid='I000002_na19678'), user=None))
 
     def test_json_for_igv_sample(self):
         sample = IgvSample.objects.first()

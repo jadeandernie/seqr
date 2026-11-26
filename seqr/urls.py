@@ -143,6 +143,7 @@ from seqr.views.apis.project_api import create_project_handler, update_project_h
     project_notifications, mark_read_project_notifications, subscribe_project_notifications, \
     update_project_rna_seq, load_rna_seq_sample_data
 from seqr.views.apis.project_categories_api import update_project_categories_handler
+from seqr.views.apis.data_request_api import project_data_requests, create_data_request, update_data_request_status
 from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_project_from_workspace, \
     grant_workspace_access, validate_anvil_vcf, add_workspace_data, get_anvil_vcf_list, get_anvil_igv_options
 from matchmaker.views import external_api
@@ -214,6 +215,9 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/get_locus_lists': project_locus_lists,
     'project/(?P<project_guid>[^/]+)/get_overview': project_overview,
     'project/(?P<project_guid>[^/]+)/get_collaborators': project_collaborators,
+    'project/(?P<project_guid>[^/]+)/get_data_requests': project_data_requests,
+    'project/(?P<project_guid>[^/]+)/data_requests/create': create_data_request,
+    'project/(?P<project_guid>[^/]+)/data_requests/(?P<data_request_guid>[^/]+)/update_status': update_data_request_status,
     'project/(?P<project_guid>[^/]+)/notifications/mark_read': mark_read_project_notifications,
     'project/(?P<project_guid>[^/]+)/notifications/subscribe': subscribe_project_notifications,
     'project/(?P<project_guid>[^/]+)/notifications/(?P<read_status>(un)?read)': project_notifications,

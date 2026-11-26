@@ -390,3 +390,41 @@ test('shows the clinical data completeness of affected individuals and what is m
   expect(unscoredWrapper.text()).not.toContain('Clinical data')
   expect(renderRow(individual).text()).not.toContain('Clinical data')
 })
+
+test('shows the open data request of an individual, or the action to request missing clinical data', () => {
+  const individual = {
+    ...STATE_WITH_2_FAMILIES.individualsByGuid.I021475_na19675_1,
+    completeness: {
+      score: 62,
+      missing: [{ field: 'features', label: 'Observed features (HPO terms)', weight: 30, level: 'individual' }],
+    },
+  }
+  const renderRow = dataRequestsByGuid => mount(
+    <Provider store={configureStore({ ...STATE_WITH_2_FAMILIES, dataRequestsByGuid })}>
+      <MemoryRouter>
+        <IndividualRow individual={individual} />
+      </MemoryRouter>
+    </Provider>,
+  )
+
+  const wrapper = renderRow({})
+  expect(wrapper.find('ButtonLink').filterWhere(button => button.prop('content') === 'Request data')).toHaveLength(1)
+  expect(wrapper.text()).not.toContain('Data requested')
+
+  const requestedWrapper = renderRow({
+    DR1: {
+      dataRequestGuid: 'DR1',
+      individualGuid: 'I021475_na19675_1',
+      projectGuid: 'R0237_1000_genomes_demo',
+      status: 'O',
+      createdDate: new Date().toISOString(),
+      items: [{ field: 'features', label: 'Observed features (HPO terms)', recorded: false }],
+      canCancel: true,
+    },
+  })
+  expect(requestedWrapper.text()).toContain('Clinical data 62% partly completeData requested: 1 item, today')
+  expect(requestedWrapper.find('DataRequestActions').find('DispatchRequestButton').map(button => button.prop('buttonContent'))).toEqual(
+    ['Cancel request'],
+  )
+  expect(requestedWrapper.find('ButtonLink').filterWhere(button => button.prop('content') === 'Request data')).toHaveLength(0)
+})

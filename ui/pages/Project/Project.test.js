@@ -1,12 +1,13 @@
 import React from 'react'
 import { mount, configure } from 'enzyme'
+import { act } from 'react-dom/test-utils'
 import Adapter from '@wojtekmaj/enzyme-adapter-react-17'
 import configureStore from 'redux-mock-store'
 import thunk from 'redux-thunk'
 import { Provider } from 'react-redux'
 import { MemoryRouter, Route } from 'react-router-dom'
 
-import { getLastFetchUrl } from 'shared/utils/testHelpers'
+import { getLastFetchUrl, flushAll, mockFetchResponse } from 'shared/utils/testHelpers'
 import Project from './Project'
 
 jest.mock('./components/ProjectPageUI', () => () => <div>ProjectPageUI</div>)
@@ -140,4 +141,78 @@ test('renders Error404 for an unrecognized sub-route', () => {
   const wrapper = renderProject(`/project/${PROJECT_GUID}/not_a_real_page`, { project: {} })
 
   expect(wrapper.text()).toContain('Error 404')
+})
+
+describe('data requests', () => {
+  const mountProject = (project, state = {}) => {
+    const store = configureStore([thunk])({
+      currentProjectGuid: PROJECT_GUID,
+      projectsByGuid: { [PROJECT_GUID]: { projectGuid: PROJECT_GUID, ...project } },
+      projectDetailsLoading: { isLoading: false },
+      loadedProjectChildEntities: {},
+      dataRequestsLoading: { isLoading: false },
+      ...state,
+    })
+    const wrapper = mount(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={[`/project/${PROJECT_GUID}/saved_variants`]}>
+          <Route path="/project/:projectGuid" component={Project} />
+        </MemoryRouter>
+      </Provider>,
+    )
+    return { store, wrapper }
+  }
+  const DATA_REQUESTS_URL = `/api/project/${PROJECT_GUID}/get_data_requests?`
+  const fetchedUrls = () => fetch.mock.calls.map(([url]) => url)
+
+  test('are loaded for the project once its details are known', async () => {
+    const response = { dataRequestsByGuid: { DR1: { dataRequestGuid: 'DR1' } } }
+    mockFetchResponse(response)
+    const { store } = mountProject({ canEdit: false })
+    await flushAll()
+
+    expect(fetchedUrls()).toEqual([DATA_REQUESTS_URL])
+    expect(store.getActions().slice(1)).toEqual([
+      { type: 'REQUEST_DATA_REQUESTS' },
+      { type: 'RECEIVE_DATA', updatesById: response },
+      { type: 'RECEIVE_PROJECT_CHILD_ENTITES', updatesById: { [PROJECT_GUID]: { 'data requests': true } } },
+    ])
+  })
+
+  test('are not loaded before the project details, without access to the whole project, or more than once', () => {
+    mountProject({})
+    expect(fetchedUrls()).toEqual([`/api/project/${PROJECT_GUID}/details?`])
+
+    fetch.mockClear()
+    mountProject({ canEdit: true, partialAccess: true })
+    mountProject({ canEdit: true }, { dataRequestsLoading: { isLoading: true } })
+    mountProject({ canEdit: true }, { loadedProjectChildEntities: { [PROJECT_GUID]: { 'data requests': true } } })
+    expect(fetchedUrls()).toEqual([])
+  })
+
+  test('are loaded when the project details arrive after the page is shown', () => {
+    const state = {
+      currentProjectGuid: PROJECT_GUID,
+      projectsByGuid: { [PROJECT_GUID]: { projectGuid: PROJECT_GUID } },
+      projectDetailsLoading: { isLoading: true },
+      loadedProjectChildEntities: {},
+      dataRequestsLoading: { isLoading: false },
+    }
+    const store = configureStore([thunk])(() => ({ ...state }))
+    mount(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={[`/project/${PROJECT_GUID}/saved_variants`]}>
+          <Route path="/project/:projectGuid" component={Project} />
+        </MemoryRouter>
+      </Provider>,
+    )
+    expect(fetchedUrls()).toEqual([`/api/project/${PROJECT_GUID}/details?`])
+
+    fetch.mockClear()
+    state.projectsByGuid = { [PROJECT_GUID]: { projectGuid: PROJECT_GUID, canEdit: true } }
+    act(() => {
+      store.dispatch({ type: 'RECEIVE_DATA', updatesById: {} })
+    })
+    expect(fetchedUrls()).toEqual([DATA_REQUESTS_URL])
+  })
 })

@@ -18,9 +18,11 @@ import {
 import { toCamelcase, toSnakecase, snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import { compareObjects } from 'shared/utils/sortUtils'
 import { getCompletenessByFamily, getProjectCompleteness } from 'shared/utils/completeness'
+import { getOpenDataRequests, getOpenDataRequestsByIndividual } from 'shared/utils/dataRequests'
 
 import {
   getProjectsByGuid, getFamiliesGroupedByProjectGuid, getFamiliesByGuid, getIndividualsByGuid, getGenesById, getUser,
+  getDataRequestsByGuid,
   getAnalysisGroupsGroupedByProjectGuid, getSavedVariantsByGuid, getSortedIndividualsByFamily,
   getMmeResultsByGuid, getMmeSubmissionsByGuid, getHasActiveSearchSampleByFamily, getSelectableTagTypesByProject,
   getVariantTagsByGuid, getUserOptionsByUsername, getNotesByFamilyType,
@@ -460,19 +462,43 @@ const familyPassesTableFilters = createSelector(
   },
 )
 
+export const getOpenDataRequestsByIndividualGuid = createSelector(
+  getDataRequestsByGuid,
+  getOpenDataRequestsByIndividual,
+)
+
+// Oldest first, so that the requests that have been waiting longest are worked through first
+export const getProjectOpenDataRequests = createSelector(
+  getDataRequestsByGuid,
+  getProjectGuid,
+  (dataRequestsByGuid, projectGuid) => getOpenDataRequests(dataRequestsByGuid, projectGuid).sort(
+    (a, b) => a.createdDate.localeCompare(b.createdDate),
+  ),
+)
+
+const getOpenDataRequestFamilyGuids = createSelector(
+  getDataRequestsByGuid,
+  dataRequestsByGuid => new Set(getOpenDataRequests(dataRequestsByGuid).map(({ familyGuid }) => familyGuid)),
+)
+
 export const getVisibleFamilies = createSelector(
   getProjectAnalysisGroupFamiliesByGuid,
   getIndividualsByGuid,
   getFamiliesBySearchString,
   getFamiliesSearch,
   familyPassesTableFilters,
-  (familiesByGuid, individualsByGuid, familiesBySearchString, familiesSearch, familyFilter) => {
+  getOpenDataRequestFamilyGuids,
+  (
+    familiesByGuid, individualsByGuid, familiesBySearchString, familiesSearch, familyFilter,
+    openDataRequestFamilyGuids,
+  ) => {
     const searchedFamilies = familiesBySearchString ? Object.keys(familiesBySearchString).filter(
       familySearchString => familySearchString.includes(familiesSearch),
     ).map(familySearchString => familiesBySearchString[familySearchString]) : Object.values(familiesByGuid)
     return familyFilter ?
       searchedFamilies.filter(family => familyFilter({
         ...family,
+        hasOpenDataRequest: openDataRequestFamilyGuids.has(family.familyGuid),
         individuals: family?.individualGuids?.map(individualGuid => (individualsByGuid[individualGuid])),
       })) : searchedFamilies
   },

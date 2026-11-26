@@ -16,6 +16,8 @@ from seqr.views.utils.json_to_orm_utils import update_family_from_json, update_m
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case
 from seqr.views.utils.note_utils import create_note_handler, update_note_handler, delete_note_handler
 from seqr.views.utils.completeness_utils import FAMILY_COMPLETENESS_FIELDS
+from seqr.views.utils.data_request_utils import fulfil_data_requests, fulfil_family_data_requests, \
+    OPEN_DATA_REQUEST_VALUES, FAMILY_OPEN_DATA_REQUEST_ANNOTATION
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model,  get_json_for_family_note, get_json_for_datasets, \
     get_json_for_matchmaker_submissions, get_json_for_analysis_groups, _get_json_for_families, get_json_for_queryset, \
     _get_json_for_individuals
@@ -195,11 +197,15 @@ def edit_families_handler(request, project_guid):
     }
 
     if updated_completeness_family_ids:
+        parsed_individuals = _get_json_for_individuals(
+            Individual.objects.filter(family_id__in=updated_completeness_family_ids), request.user,
+            project_guid=project_guid, add_hpo_details=True, additional_values=OPEN_DATA_REQUEST_VALUES)
+        data_requests = fulfil_data_requests(parsed_individuals, request.user)
         updated_families_by_guid['individualsByGuid'] = {
-            individual['individualGuid']: individual for individual in _get_json_for_individuals(
-                Individual.objects.filter(family_id__in=updated_completeness_family_ids), request.user,
-                project_guid=project_guid, add_hpo_details=True)
+            individual['individualGuid']: individual for individual in parsed_individuals
         }
+        if data_requests:
+            updated_families_by_guid['dataRequestsByGuid'] = data_requests
 
     return create_json_response(updated_families_by_guid)
 
@@ -245,7 +251,7 @@ def delete_families_handler(request, project_guid):
 
 @login_and_policies_required
 def update_family_fields_handler(request, family_guid):
-    family = Family.objects.get(guid=family_guid)
+    family = Family.objects.annotate(**FAMILY_OPEN_DATA_REQUEST_ANNOTATION).get(guid=family_guid)
 
     # check permission - can be edited by anyone with access to the family
     check_family_view_permission(family, request.user)
@@ -258,6 +264,8 @@ def update_family_fields_handler(request, family_guid):
     ] + immutable_keys, updated_fields=updated_fields)
     if updated_fields.intersection({'post_discovery_omim_numbers', 'post_discovery_mondo_id', 'analysis_status'}):
         IndividualMetadataDict.reload(request.user)
+    if updated_fields.intersection(_to_snake_case(field) for field in FAMILY_COMPLETENESS_FIELDS):
+        fulfil_family_data_requests([family], request.user)
 
     return create_json_response({
         family.guid: _get_json_for_model(family, user=request.user, process_result=_set_display_name)

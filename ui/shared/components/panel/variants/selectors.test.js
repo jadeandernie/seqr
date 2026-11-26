@@ -6,6 +6,9 @@ import {
   getVisibleSortedSavedVariants,
   getPairedFilteredSavedVariants,
   getIndividualGeneDataByFamilyGene,
+  getSavedVariantVisibleIndices,
+  getSavedVariantTotalPages,
+  getSavedVariantPagedTableState,
 } from './selectors'
 
 const NON_PROJECT_PAGE_STATE = { ...STATE_WITH_2_FAMILIES, currentProjectGuid: null }
@@ -88,6 +91,47 @@ test('getVisibleSortedSavedVariants', () => {
   )
   expect(savedVariants.length).toEqual(1)
   expect(savedVariants[0].variantGuid).toEqual('SV0000002_1248367227_r0390_100')
+})
+
+describe('saved variant pagination', () => {
+  const PROPS = { match: { params: {} } }
+  const stateOnPage = (page, tableState) => ({
+    ...STATE_WITH_2_FAMILIES,
+    savedVariantTableState: { ...STATE_WITH_2_FAMILIES.savedVariantTableState, page, ...tableState },
+  })
+
+  test('shows the requested page when it exists', () => {
+    const state = stateOnPage(2)
+    expect(getSavedVariantTotalPages(state, PROPS)).toEqual(2)
+    expect(getSavedVariantVisibleIndices(state, PROPS)).toEqual([1, 2])
+    expect(getVisibleSortedSavedVariants(state, PROPS).map(({ variantGuid }) => variantGuid)).toEqual(
+      ['SV0000004_116042722_r0390_1000'],
+    )
+    expect(getSavedVariantPagedTableState(state, PROPS)).toBe(state.savedVariantTableState)
+  })
+
+  test('falls back to the last page when filtering leaves fewer pages than the current page', () => {
+    const state = stateOnPage(3)
+    expect(getSavedVariantTotalPages(state, PROPS)).toEqual(2)
+    expect(getSavedVariantVisibleIndices(state, PROPS)).toEqual([1, 2])
+    expect(getVisibleSortedSavedVariants(state, PROPS).map(({ variantGuid }) => variantGuid)).toEqual(
+      ['SV0000004_116042722_r0390_1000'],
+    )
+
+    expect(getSavedVariantPagedTableState(state, PROPS)).toEqual({ ...state.savedVariantTableState, page: 2 })
+
+    const singlePageState = stateOnPage(3, { recordsPerPage: 25 })
+    expect(getSavedVariantTotalPages(singlePageState, PROPS)).toEqual(1)
+    expect(getSavedVariantVisibleIndices(singlePageState, PROPS)).toEqual([0, 25])
+    expect(getVisibleSortedSavedVariants(singlePageState, PROPS).length).toEqual(2)
+  })
+
+  test('shows the first page when no variants match the filters', () => {
+    const state = stateOnPage(3, { taggedAfter: '2100-01-01' })
+    const props = { match: { params: { tag: 'Review' } } }
+    expect(getPairedFilteredSavedVariants(state, props).length).toEqual(0)
+    expect(getSavedVariantVisibleIndices(state, props)).toEqual([0, 1])
+  })
 })
 
 test('getIndividualGeneDataByFamilyGene', () => {

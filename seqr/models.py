@@ -1131,6 +1131,121 @@ class VariantSearchResults(ModelWithGUID):
     GUID_PREFIX = 'VSR'
 
 
+class Workbook(ModelWithGUID):
+    project = models.ForeignKey('Project', on_delete=models.CASCADE)
+    name = models.TextField()
+    description = models.TextField(null=True, blank=True)
+
+    def __unicode__(self):
+        return self.name.strip()
+
+    GUID_PREFIX = 'WB'
+
+    class Meta:
+        unique_together = ('project', 'name')
+
+        json_fields = ['guid', 'name', 'description', 'created_date', 'created_by', 'last_modified_date']
+
+
+class WorkbookTarget(ModelWithGUID):
+    workbook = models.ForeignKey('Workbook', on_delete=models.CASCADE)
+    family = models.ForeignKey('Family', null=True, blank=True, on_delete=models.CASCADE)
+    analysis_group = models.ForeignKey('AnalysisGroup', null=True, blank=True, on_delete=models.CASCADE)
+    order = models.IntegerField(default=0)
+
+    def __unicode__(self):
+        return str(self.family or self.analysis_group)
+
+    def save(self, *args, **kwargs):
+        if (self.family_id is None) == (self.analysis_group_id is None):
+            raise ValidationError('A workbook target must be exactly one of a family or an analysis group')
+        if (self.family or self.analysis_group).project_id != self.workbook.project_id:
+            raise ValidationError('A workbook target must belong to the project of its workbook')
+        super().save(*args, **kwargs)
+
+    GUID_PREFIX = 'WBT'
+
+    class Meta:
+        unique_together = (('workbook', 'family'), ('workbook', 'analysis_group'))
+        constraints = [models.CheckConstraint(
+            check=models.Q(family__isnull=False, analysis_group__isnull=True) |
+                  models.Q(family__isnull=True, analysis_group__isnull=False),
+            name='workbook_target_family_xor_analysis_group',
+        )]
+
+        json_fields = ['guid', 'order']
+
+
+class Worksheet(ModelWithGUID):
+    workbook = models.ForeignKey('Workbook', on_delete=models.CASCADE)
+    name = models.TextField()
+    order = models.IntegerField(default=0)
+
+    def __unicode__(self):
+        return self.name.strip()
+
+    GUID_PREFIX = 'WS'
+
+    class Meta:
+        unique_together = ('workbook', 'name')
+
+        json_fields = ['guid', 'name', 'order']
+
+
+class WorksheetQuery(ModelWithGUID):
+    worksheet = models.ForeignKey('Worksheet', on_delete=models.CASCADE)
+    name = models.TextField()
+    order = models.IntegerField(default=0)
+    # A frozen copy of the search pattern, in the same format as VariantSearch.search
+    search = models.JSONField()
+
+    def __unicode__(self):
+        return self.name.strip()
+
+    GUID_PREFIX = 'WSQ'
+
+    class Meta:
+        json_fields = ['guid', 'name', 'order', 'search', 'created_date', 'created_by']
+
+
+class WorksheetQueryResult(ModelWithGUID):
+    STATUS_NOT_REVIEWED = 'N'
+    STATUS_IN_PROGRESS = 'I'
+    STATUS_FINDINGS = 'F'
+    STATUS_NOTHING_FOUND = 'U'
+    STATUS_CHOICES = (
+        (STATUS_NOT_REVIEWED, 'Not reviewed'),
+        (STATUS_IN_PROGRESS, 'In progress'),
+        (STATUS_FINDINGS, 'Findings'),
+        (STATUS_NOTHING_FOUND, 'Nothing found'),
+    )
+
+    query = models.ForeignKey('WorksheetQuery', on_delete=models.CASCADE)
+    target = models.ForeignKey('WorkbookTarget', on_delete=models.CASCADE)
+    status = models.CharField(max_length=1, choices=STATUS_CHOICES, default=STATUS_NOT_REVIEWED)
+    note = models.TextField(null=True, blank=True)
+    results = models.ForeignKey('VariantSearchResults', null=True, blank=True, on_delete=models.SET_NULL)
+    last_run_date = models.DateTimeField(null=True, blank=True)
+    last_run_by = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
+    num_results = models.IntegerField(null=True, blank=True)
+
+    def __unicode__(self):
+        return f'{self.query_id}_{self.target_id}'
+
+    def save(self, *args, **kwargs):
+        if self.query.worksheet.workbook_id != self.target.workbook_id:
+            raise ValidationError('A worksheet query result must have a query and a target from the same workbook')
+        super().save(*args, **kwargs)
+
+    GUID_PREFIX = 'WQR'
+
+    class Meta:
+        unique_together = ('query', 'target')
+
+        json_fields = ['guid', 'status', 'note', 'last_run_date', 'num_results', 'last_modified_date']
+        audit_fields = {'status'}
+
+
 class BulkOperationBase(models.Model):
 
     @classmethod

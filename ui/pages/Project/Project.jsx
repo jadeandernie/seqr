@@ -13,6 +13,8 @@ import CaseReview from './components/CaseReview'
 import FamilyPageRouter from './components/FamilyPage'
 import Matchmaker from './components/Matchmaker'
 import SavedVariants from './components/SavedVariants'
+import Workbooks from './workbook/Workbooks'
+import WorkbookPage from './workbook/WorkbookPage'
 
 class Project extends React.PureComponent {
 
@@ -46,6 +48,10 @@ class Project extends React.PureComponent {
           <Route path={`${match.url}/family_page/:familyGuid/matchmaker_exchange`} component={Matchmaker} />
           <Route path={`${match.url}/family_page/:familyGuid`} component={FamilyPageRouter} />
           <Route path={`${match.url}/saved_variants`} component={SavedVariants} />
+          {!project.partialAccess && <Route path={`${match.url}/workbooks`} component={Workbooks} />}
+          {!project.partialAccess && (
+            <Route path={`${match.url}/workbook/:workbookGuid/:targetGuid?/:queryGuid?`} component={WorkbookPage} />
+          )}
           <Route component={Error404} />
         </Switch>
       )

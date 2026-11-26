@@ -32,21 +32,20 @@ if ! [[ "$REFERENCE_DATASETS_DIR" =~ gs://* ]]; then
      exit 0;
   fi
 else
-  result=$(gsutil -q stat "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"/_SUCCESS || echo 1)
-  if [[ "$result" != 1 ]]; then
+  if gcloud storage objects describe "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"/_SUCCESS > /dev/null 2>&1; then
     echo "Skipping rsync because already successful"
     exit 0;
   fi
 fi
 
-gsutil -m rsync -rd -x '.*\.parquet.*' "gs://seqr-reference-data/v3.2/$REFERENCE_GENOME" "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"
+gcloud storage rsync --recursive --delete-unmatched-destination-objects --exclude='.*\.parquet.*' "gs://seqr-reference-data/v3.2/$REFERENCE_GENOME" "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"
 if ! [[ "$REFERENCE_DATASETS_DIR" =~ gs://* ]]; then
   touch "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"/_SUCCESS
 else
   # If a different reference datasets dir is provided, sync vep data to the provided bucket.
-  gsutil cp "gs://seqr-reference-data/vep_data/loftee-beta/$REFERENCE_GENOME.tar.gz" "$REFERENCE_DATASETS_DIR"/vep_data/loftee-beta/"$REFERENCE_GENOME".tar.gz
-  gsutil -m rsync -rd "gs://seqr-reference-data/vep/$REFERENCE_GENOME" "$REFERENCE_DATASETS_DIR"/vep/"$REFERENCE_GENOME"
+  gcloud storage cp "gs://seqr-reference-data/vep_data/loftee-beta/$REFERENCE_GENOME.tar.gz" "$REFERENCE_DATASETS_DIR"/vep_data/loftee-beta/"$REFERENCE_GENOME".tar.gz
+  gcloud storage rsync --recursive --delete-unmatched-destination-objects "gs://seqr-reference-data/vep/$REFERENCE_GENOME" "$REFERENCE_DATASETS_DIR"/vep/"$REFERENCE_GENOME"
   touch _SUCCESS
-  gsutil cp _SUCCESS "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"/_SUCCESS
+  gcloud storage cp _SUCCESS "$REFERENCE_DATASETS_DIR"/"$REFERENCE_GENOME"/_SUCCESS
   rm -rf _SUCCESS
 fi

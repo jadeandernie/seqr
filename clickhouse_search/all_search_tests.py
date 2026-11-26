@@ -1,3 +1,4 @@
+import hashlib
 import re
 from collections import defaultdict
 from datetime import timedelta
@@ -197,7 +198,12 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         self.assertDictEqual(response.json(), expected_response)
 
         if not skip_cache_check:
-            cache_key = f'search_results__VRS{search_hash:07d}__{cache_sort or sort}'
+            cache_key_fields = ['search_results', f'VRS{search_hash:07d}']
+            if (kwargs.get('request_body') or {}).get('allGenomeProjectFamilies'):
+                searched_families = DEFAULT_PROJECT_FAMILIES if project_families is None else project_families
+                family_guids = sorted(guid for pf in searched_families for guid in pf['familyGuids'])
+                cache_key_fields.append(hashlib.sha256(','.join(family_guids).encode()).hexdigest())
+            cache_key = '__'.join([*cache_key_fields, cache_sort or sort])
             cached_variants = self._format_cached_variants(expected_results, cached_variant_fields=cached_variant_fields)
             self.assert_cached_results(cached_variants, cache_key)
 
@@ -2452,7 +2458,10 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
         )
 
         self.login_collaborator()
-        project_families = [{'projectGuid': 'R0001_1kg', 'familyGuids': mock.ANY}]
+        project_families = [{'projectGuid': 'R0001_1kg', 'familyGuids': [
+            'F000001_1', 'F000002_2', 'F000003_3', 'F000004_4', 'F000005_5', 'F000006_6', 'F000007_7', 'F000008_8',
+            'F000009_9', 'F000010_10', 'F000013_13',
+        ]}]
         self._assert_expected_search([
                 {**FAMILY_3_VARIANT, 'selectedMainTranscriptId': 'ENST00000497611'},
                 {**VARIANT4, 'selectedMainTranscriptId': 'ENST00000350997'},

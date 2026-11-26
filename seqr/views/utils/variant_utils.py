@@ -210,12 +210,18 @@ def get_saved_variant_annotations(variant_keys: abc.Iterable[tuple[int, str]], g
     return {v[group_by_field or key_field]: v for v in qs.values(*variant_fields, **variant_values)}
 
 
+ALL_PROJECT_CONTEXT_SEARCH_FIELD = 'all_project_families_context'
+ALL_PROJECT_FAMILIES_FIELD = 'allGenomeProjectFamilies'
+
+
 def reset_cached_search_results(project, reset_index_metadata=False):
     try:
         redis_client = redis.StrictRedis(host=REDIS_SERVICE_HOSTNAME, port=REDIS_SERVICE_PORT, socket_connect_timeout=3)
         keys_to_delete = []
         if project:
-            result_guids = [res.guid for res in VariantSearchResults.objects.filter(families__project=project)]
+            result_guids = set(VariantSearchResults.objects.filter(Q(families__project=project) | Q(**{
+                f'variant_search__search__{ALL_PROJECT_CONTEXT_SEARCH_FIELD}__{ALL_PROJECT_FAMILIES_FIELD}': project.genome_version,
+            })).values_list('guid', flat=True))
             for guid in result_guids:
                 keys_to_delete += redis_client.keys(pattern='search_results__{}*'.format(guid))
         else:

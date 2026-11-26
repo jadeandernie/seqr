@@ -55,20 +55,9 @@ def saved_variant_data(request, project_guid, variant_guids=None):
     return create_json_response(response)
 
 
-@login_and_policies_required
-def create_manual_saved_variant_handler(request, family_guid):
-    family = Family.objects.get(guid=family_guid)
-    check_family_view_permission(family, request.user)
-
-    variant_json = json.loads(request.body)
-    tags = variant_json.pop('tags', [])
-    saved_variant_guids = {guid for guid, is_selected in variant_json.pop('variants', {}).items() if is_selected}
-
-    try:
-        xpos = get_xpos(variant_json['chrom'], variant_json['pos'])
-        variant_id = variant_json.get('svName') or f"{variant_json['chrom']}-{variant_json['pos']}-{variant_json['ref']}-{variant_json['alt']}"
-    except (KeyError, ValueError) as e:
-        return create_json_response({'error': str(e)}, status=400)
+def _parse_manual_variant_json(variant_json, family):
+    xpos = get_xpos(variant_json['chrom'], variant_json['pos'])
+    variant_id = variant_json.get('svName') or f"{variant_json['chrom']}-{variant_json['pos']}-{variant_json['ref']}-{variant_json['alt']}"
 
     gene_id = variant_json.pop('geneId', None)
     main_transcript = {}
@@ -88,14 +77,57 @@ def create_manual_saved_variant_handler(request, family_guid):
         'main_transcript': main_transcript,
     })
 
-    model_json = parse_saved_variant_json(variant_json, family.id)
+    return parse_saved_variant_json(variant_json, family.id)
+
+
+@login_and_policies_required
+def create_manual_saved_variant_handler(request, family_guid):
+    family = Family.objects.get(guid=family_guid)
+    check_family_view_permission(family, request.user)
+
+    variant_json = json.loads(request.body)
+    tags = variant_json.pop('tags', [])
+    saved_variant_guids = {guid for guid, is_selected in variant_json.pop('variants', {}).items() if is_selected}
+
+    try:
+        model_json = _parse_manual_variant_json(variant_json, family)
+    except (KeyError, ValueError) as e:
+        return create_json_response({'error': str(e)}, status=400)
+
     saved_variant = create_model_from_json(SavedVariant, model_json, request.user)
     saved_variant_guids.add(saved_variant.guid)
 
     saved_variants = SavedVariant.objects.filter(family=family, guid__in=saved_variant_guids)
     _update_tags(saved_variants, {'tags': tags}, request.user)
 
-    response = get_json_for_saved_variants_with_tags(saved_variants)
+    response = get_variants_response(request, saved_variants, genome_version=family.project.genome_version)
+    return create_json_response(response)
+
+
+MANUAL_VARIANT_UNIQUE_FIELDS = ['xpos', 'xpos_end', 'variant_id']
+
+
+@login_and_policies_required
+def update_manual_saved_variant_handler(request, family_guid, variant_guid):
+    family = Family.objects.get(guid=family_guid)
+    check_project_edit_permission(family.project, request.user)
+    saved_variant = SavedVariant.objects.get(guid=variant_guid, family=family, key__isnull=True)
+
+    try:
+        model_json = _parse_manual_variant_json(json.loads(request.body), family)
+    except (KeyError, ValueError) as e:
+        return create_json_response({'error': str(e)}, status=400)
+
+    update_json = {k: v for k, v in model_json.items() if k not in {'key', 'family_id'}}
+    if SavedVariant.objects.filter(
+        family=family, **{field: update_json[field] for field in MANUAL_VARIANT_UNIQUE_FIELDS},
+    ).exclude(id=saved_variant.id).exists():
+        return create_json_response({'error': 'This variant is already saved for this family'}, status=400)
+
+    update_model_from_json(saved_variant, update_json, request.user)
+
+    response = get_variants_response(
+        request, SavedVariant.objects.filter(id=saved_variant.id), genome_version=family.project.genome_version)
     return create_json_response(response)
 
 

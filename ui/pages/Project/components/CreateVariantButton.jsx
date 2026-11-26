@@ -3,7 +3,9 @@ import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import { Grid, Divider, Accordion } from 'semantic-ui-react'
 
-import { getUser, getSortedIndividualsByFamily } from 'redux/selectors'
+import {
+  getUser, getSortedIndividualsByFamily, getGenesById, getFamiliesByGuid, getProjectsByGuid,
+} from 'redux/selectors'
 
 import UpdateButton from 'shared/components/buttons/UpdateButton'
 import { Select, IntegerInput, LargeMultiselect } from 'shared/components/form/Inputs'
@@ -12,7 +14,7 @@ import { AwesomeBarFormInput } from 'shared/components/page/AwesomeBar'
 import { SV_TYPES } from 'shared/utils/constants'
 
 import { TAG_FORM_FIELD } from '../constants'
-import { createManualVariant } from '../reducers'
+import { createManualVariant, updateManualVariant } from '../reducers'
 import { getTaggedVariantsByFamilyType, getProjectTagTypeOptions, getCurrentProject } from '../selectors'
 import SelectSavedVariantsTable, { VARIANT_POS_COLUMN, TAG_COLUMN, GENES_COLUMN } from './SelectSavedVariantsTable'
 
@@ -238,5 +240,90 @@ const CreateVariantButtons = React.memo(({ family }) => ([
 CreateVariantButtons.propTypes = {
   family: PropTypes.object,
 }
+
+const mapEditGeneInputStateToProps = (state, ownProps) => (
+  ownProps.value ? {
+    placeholder: `${getGenesById(state)[ownProps.value]?.geneSymbol || ownProps.value} (search to change)`,
+  } : {}
+)
+
+const EditGeneInput = connect(mapEditGeneInputStateToProps)(AwesomeBarFormInput)
+
+const NON_EDITABLE_FIELDS = new Set([TAG_FORM_FIELD.name, VARIANTS_FIELD_NAME])
+
+const getEditFields = fields => fields.filter(({ name }) => !NON_EDITABLE_FIELDS.has(name)).map(
+  field => (field.name === GENE_ID_FIELD_NAME ? { ...field, control: EditGeneInput } : field),
+)
+
+const EDIT_SNV_FIELDS = getEditFields(SNV_FIELDS)
+const EDIT_SV_FIELDS = getEditFields(SV_FIELDS)
+
+const getEditInitialValues = ({
+  chrom, pos, end, ref, alt, svType, genotypes, geneIds, mainTranscriptId, transcripts, variantId,
+}) => {
+  const mainTranscript = mainTranscriptId && Object.values(transcripts || {}).flat().find(
+    ({ transcriptId }) => transcriptId === mainTranscriptId,
+  )
+  return {
+    chrom,
+    pos,
+    end,
+    ref,
+    alt,
+    svType,
+    genotypes,
+    [GENE_ID_FIELD_NAME]: mainTranscript?.geneId || (geneIds || [])[0],
+    [TRANSCRIPT_ID_FIELD_NAME]: mainTranscriptId,
+    [HGVSC_FIELD_NAME]: mainTranscript?.hgvsc,
+    [HGVSP_FIELD_NAME]: mainTranscript?.hgvsp,
+    [SV_FIELD_NAME]: svType ? variantId : undefined,
+  }
+}
+
+const BaseEditManualVariantButton = React.memo(({ variant, family, project, onSubmit }) => {
+  const initialValues = React.useMemo(() => getEditInitialValues(variant), [variant])
+  if (!family || !project?.canEdit) {
+    return null
+  }
+  const variantType = variant.svType ? 'SV' : 'Variant'
+  return (
+    <UpdateButton
+      modalTitle={`Edit Manual ${variantType} for Family ${family.displayName}`}
+      modalId={`${variant.variantGuid}-editVariant`}
+      formMetaId={family.familyGuid}
+      modalSize="large"
+      buttonText={`Edit Manual ${variantType}`}
+      initialValues={initialValues}
+      formFields={variant.svType ? EDIT_SV_FIELDS : EDIT_SNV_FIELDS}
+      onSubmit={onSubmit}
+      showErrorPanel
+    />
+  )
+})
+
+BaseEditManualVariantButton.propTypes = {
+  variant: PropTypes.object.isRequired,
+  family: PropTypes.object,
+  project: PropTypes.object,
+  onSubmit: PropTypes.func,
+}
+
+const mapEditStateToProps = (state, ownProps) => {
+  const family = getFamiliesByGuid(state)[ownProps.variant.familyGuids[0]]
+  return {
+    family,
+    project: getProjectsByGuid(state)[family?.projectGuid],
+  }
+}
+
+const mapEditDispatchToProps = (dispatch, ownProps) => ({
+  onSubmit: values => dispatch(
+    updateManualVariant(ownProps.variant.familyGuids[0], ownProps.variant.variantGuid, values),
+  ),
+})
+
+export const EditManualVariantButton = connect(
+  mapEditStateToProps, mapEditDispatchToProps,
+)(BaseEditManualVariantButton)
 
 export default CreateVariantButtons

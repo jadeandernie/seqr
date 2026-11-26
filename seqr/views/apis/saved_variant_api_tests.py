@@ -7,7 +7,7 @@ from clickhouse_search.all_search_tests import ClickhouseSearchTestCase
 from seqr.models import SavedVariant, VariantNote, VariantTag, VariantFunctionalData, Project
 from seqr.views.apis.saved_variant_api import saved_variant_data, create_variant_note_handler, create_saved_variant_handler, \
     update_variant_note_handler, delete_variant_note_handler, update_variant_tags_handler, create_manual_saved_variant_handler, \
-    update_variant_main_transcript, update_variant_functional_data_handler, update_variant_acmg_classification_handler
+    update_manual_saved_variant_handler, update_variant_main_transcript, update_variant_functional_data_handler, update_variant_acmg_classification_handler
 from seqr.views.utils.orm_to_json_utils import get_json_for_saved_variants
 from seqr.views.utils.test_utils import SAVED_VARIANT_DETAIL_FIELDS, TAG_FIELDS, GENE_VARIANT_FIELDS, \
     TAG_TYPE_FIELDS, LOCUS_LIST_FIELDS, PA_LOCUS_LIST_FIELDS, FAMILY_FIELDS, INDIVIDUAL_FIELDS, IGV_SAMPLE_FIELDS, \
@@ -737,6 +737,92 @@ class SavedVariantAPITest(ClickhouseSearchTestCase):
         tag = response_json['variantTagsByGuid'][response_variant_json['tagGuids'][0]]
         self.assertEqual('Review', tag['name'])
         self.assertSetEqual({sv_variant_guid, 'SV0059956_11560662_f019313_1'}, set(tag['variantGuids']))
+
+        # Update manual variant
+        update_variant_url = reverse(update_manual_saved_variant_handler, args=['F000001_1', variant_guid])
+        self.client.logout()
+        self.check_manager_login(update_variant_url)
+
+        update_request_body = {
+            'alt': 'T',
+            'ref': 'GAG',
+            'chrom': '27',
+            'pos': 53417465,
+            'mainTranscriptId': 'ENST00000459627',
+            'geneId': 'ENSG00000277258',
+            'hgvsc': 'c.156GAG>T',
+            'genotypes': {
+                'I000001_na19675': {'numAlt': 2},
+                'I000002_na19678': {'numAlt': 1},
+                'I000003_na19679': {'numAlt': 1},
+            },
+        }
+        response = self.client.post(update_variant_url, content_type='application/json', data=json.dumps(update_request_body))
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'error': 'Invalid chromosome: 27'})
+
+        update_request_body['chrom'] = '7'
+        response = self.client.post(update_variant_url, content_type='application/json', data=json.dumps(update_request_body))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json['savedVariantsByGuid'].keys()), {variant_guid})
+        updated_main_transcript = {'hgvsc': 'c.156GAG>T', 'hgvsp': None, 'transcriptId': 'ENST00000459627'}
+        updated_variant_json = {
+            **variant_json,
+            'alt': 'T',
+            'variantId': '7-53417465-GAG-T',
+            'genotypes': update_request_body['genotypes'],
+            'transcripts': {'ENSG00000277258': [updated_main_transcript]},
+        }
+        self.assertDictEqual(response_json['savedVariantsByGuid'][variant_guid], {
+            **{k: v for k, v in updated_variant_json.items() if k in SAVED_VARIANT_FIELDS},
+            **base_variant_json,
+            'tagGuids': tag_guids,
+        })
+        self.assertSetEqual(set(response_json['variantsById'].keys()), {'7-53417465-GAG-T'})
+        response_variant = response_json['variantsById']['7-53417465-GAG-T']
+        self.assertDictEqual(response_variant['transcripts'], updated_variant_json['transcripts'])
+        self.assertDictEqual(response_variant['genotypes'], update_request_body['genotypes'])
+        self.assertEqual(response_variant['mainTranscriptId'], 'ENST00000459627')
+        saved_variant = SavedVariant.objects.get(guid=variant_guid, family__guid='F000001_1')
+        self.assertEqual(saved_variant.variant_id, '7-53417465-GAG-T')
+        self.assertEqual(saved_variant.xpos_end, 7053417467)
+        self._assert_created_variant(
+            saved_variant, updated_variant_json, gene_ids=['ENSG00000277258'], main_transcript=updated_main_transcript)
+
+        # A manual variant can not be updated to match another saved variant in the family
+        response = self.client.post(update_variant_url, content_type='application/json', data=json.dumps(
+            {k: v for k, v in manual_variant_request_body.items() if k not in {'tags', 'variants'}}
+        ))
+        self.assertEqual(response.status_code, 400)
+        self.assertDictEqual(response.json(), {'error': 'This variant is already saved for this family'})
+        self.assertEqual(SavedVariant.objects.get(guid=variant_guid).variant_id, '7-53417465-GAG-T')
+
+        # Update manual SV
+        sv_update_request_body = {
+            **{k: v for k, v in manual_variant_request_body.items() if k not in {'tags', 'variants'}},
+            'end': 11719900,
+            'genotypes': {'I000001_na19675': {'cn': 0}, 'I000002_na19678': {'cn': 1}, 'I000003_na19679': {'cn': 2}},
+        }
+        response = self.client.post(
+            update_variant_url.replace(variant_guid, sv_variant_guid), content_type='application/json',
+            data=json.dumps(sv_update_request_body))
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(set(response.json()['savedVariantsByGuid'].keys()), {sv_variant_guid})
+        self.assertEqual(response.json()['variantsById'][sv_variant_json['variantId']]['end'], 11719900)
+        saved_sv_variant = SavedVariant.objects.get(guid=sv_variant_guid, family__guid='F000001_1')
+        self.assertEqual(saved_sv_variant.xpos_end, 7011719900)
+        self._assert_created_variant(
+            saved_sv_variant, {**sv_variant_json, 'genotypes': sv_update_request_body['genotypes']},
+            gene_ids=['ENSG00000240361'], dataset_type='SV', sv_type='DEL')
+
+        # Only manual variants in the specified family can be updated
+        for family_guid, guid in [('F000002_2', variant_guid), ('F000002_2', VARIANT_GUID_2)]:
+            response = self.client.post(
+                reverse(update_manual_saved_variant_handler, args=[family_guid, guid]), content_type='application/json',
+                data=json.dumps(update_request_body))
+            self.assertEqual(response.status_code, 404)
+        self.assertEqual(SavedVariant.objects.get(guid=VARIANT_GUID_2).variant_id, '1-248367227-TC-T')
 
     def test_create_update_and_delete_variant_note(self):
         create_variant_note_url = reverse(create_variant_note_handler, args=[VARIANT_GUID])

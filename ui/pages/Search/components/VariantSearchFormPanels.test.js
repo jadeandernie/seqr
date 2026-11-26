@@ -21,14 +21,14 @@ configure({ adapter: new Adapter() })
 
 const PROJECT_FAMILIES = [{ projectGuid: PROJECT_GUID, familyGuids: [FAMILY_GUID] }]
 
-const rnaState = (rnaDataTypes: string[]) => ({
+const rnaState = rnaDataTypes => ({
   ...STATE,
   familiesByGuid: { ...STATE.familiesByGuid, [FAMILY_GUID]: { ...STATE.familiesByGuid[FAMILY_GUID], rnaDataTypes } },
 })
 
-const mountPanels = (state: object, search: object) => {
+const mountPanels = (state, search) => {
   const store = configureStore([thunk])(state)
-  let formValues: Record<string, any> = {}
+  let formValues = {}
   const wrapper = mount(
     <Provider store={store}>
       <Form onSubmit={() => {}} initialValues={{ projectFamilies: PROJECT_FAMILIES, search }}>
@@ -42,23 +42,24 @@ const mountPanels = (state: object, search: object) => {
   return { wrapper, getSearch: () => formValues.search }
 }
 
-const panelTitles = (wrapper: any): string[] => wrapper.find('AccordionTitle').map((title: any) => title.find('GridColumn').first().text())
+const panelTitles = wrapper => wrapper.find('AccordionTitle').map(title => title.find('GridColumn').first().text())
 
-const evidenceContent = (wrapper: any) => wrapper.find('AccordionContent').filterWhere(
-  (content: any) => content.key() === 'gene_evidence-content',
+const evidenceContent = wrapper => wrapper.find('AccordionContent').filterWhere(
+  content => content.key() === 'gene_evidence-content',
 )
 
-const checkboxLabels = (wrapper: any): string[] => evidenceContent(wrapper).find('Checkbox').map((checkbox: any) => checkbox.text().trim())
+const checkboxLabels = wrapper => evidenceContent(wrapper).find('Checkbox').map(checkbox => checkbox.text().trim())
 
-const toggle = (wrapper: any, label: string) => {
-  const checkbox = evidenceContent(wrapper).find('Checkbox').filterWhere((box: any) => box.text().trim() === label)
+const toggle = (wrapper, label) => {
+  const checkbox = evidenceContent(wrapper).find('Checkbox').filterWhere(box => box.text().trim() === label)
   checkbox.find('input').simulate('change')
   wrapper.update()
 }
 
-const summary = (wrapper: any): string => wrapper.find('AccordionTitle').filterWhere(
-  (title: any) => title.key() === 'gene_evidence-title',
-).find('i').not('.icon').text()
+const summary = wrapper => wrapper.find('AccordionTitle').filterWhere(
+  title => title.key() === 'gene_evidence-title',
+).find('i').not('.icon')
+  .text()
 
 test('hides the gene evidence panel when the searched family has no RNA outlier data', () => {
   const { wrapper } = mountPanels(rnaState([]), {})

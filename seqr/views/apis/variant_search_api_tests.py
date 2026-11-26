@@ -163,12 +163,16 @@ class VariantSearchAPITest(object):
         self.assertEqual(len(response_json['familiesByGuid']), 11)
         self.assertSetEqual(set(response_json['familiesByGuid']['F000001_1'].keys()), {
             'projectGuid', 'familyGuid', 'displayName', 'analysisStatus', 'analysedBy', 'assignedAnalyst', 'sampleTypes',
+            'rnaDataTypes',
         })
         self.assertDictEqual(response_json['familiesByGuid']['F000001_1'], {
             'projectGuid': PROJECT_GUID, 'familyGuid': 'F000001_1', 'displayName': '1', 'analysisStatus': 'Q',
             'assignedAnalyst': None, 'sampleTypes': [{'datasetType': 'SNV_INDEL', 'sampleType': 'WES', 'isActive': True}],
             'analysedBy': [{'createdBy': 'Test No Access User', 'dataType': 'SNP', 'lastModifiedDate': '2022-07-22T19:27:08.563+00:00'}],
+            'rnaDataTypes': ['E', 'S'],
         })
+        # Family 4 only has RNA TPM data, which is not gene evidence
+        self.assertListEqual(response_json['familiesByGuid']['F000004_4']['rnaDataTypes'], [])
 
     def test_search_context(self):
         search_context_url = reverse(search_context_handler)
@@ -424,6 +428,31 @@ class VariantSearchAPITest(object):
         delete_saved_search_url = reverse(delete_saved_search_handler, args=[global_saved_search_guid])
         response = self.client.get(delete_saved_search_url)
         self.assertEqual(response.status_code, 403)
+
+        # Test saved searches with gene evidence
+        gene_evidence_search = {**SEARCH, 'gene_evidence': {'rna_expression_outlier': True, 'rna_splice_outlier': False, 'match': 'all'}}
+        response = self.client.post(create_saved_search_url, content_type='application/json', data=json.dumps({
+            'name': 'RNA Evidence Search', **gene_evidence_search,
+        }))
+        self.assertEqual(response.status_code, 200)
+        saved_searches = response.json()['savedSearchesByGuid']
+        self.assertEqual(len(saved_searches), 1)
+        gene_evidence_search_guid = next(iter(saved_searches))
+        self.assertDictEqual(saved_searches[gene_evidence_search_guid], {
+            'savedSearchGuid': gene_evidence_search_guid, 'name': 'RNA Evidence Search', 'search': gene_evidence_search,
+            'createdById': 13, 'order': None,
+        })
+        response = self.client.get(get_saved_search_url)
+        self.assertDictEqual(
+            response.json()['savedSearchesByGuid'][gene_evidence_search_guid]['search'], gene_evidence_search,
+        )
+
+        response = self.client.post(create_saved_search_url, content_type='application/json', data=json.dumps({
+            'name': 'Invalid Evidence Search', **SEARCH, 'gene_evidence': {'rna_expression_outlier': True, 'match': 'most'},
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Invalid gene evidence match "most"')
+        self.assertFalse(VariantSearch.objects.filter(name='Invalid Evidence Search').exists())
 
     def test_search_results_redirect(self):
         response = self.client.get('/report/custom_search/6ebb895dfca0f63c34be1ca59d950205?page=2&sort=cadd')

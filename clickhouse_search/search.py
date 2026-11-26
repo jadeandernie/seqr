@@ -12,6 +12,7 @@ from pyliftover.liftover import LiftOver
 from clickhouse_search.backend.fields import NamedTupleField
 from clickhouse_search.backend.functions import Array, ArrayFilter, ArrayIntersect, ArraySort, GroupArrayArray, If, Tuple, \
     ArrayMap, Modulo
+from clickhouse_search.gene_evidence import get_family_evidence_gene_ids, parse_gene_evidence
 from clickhouse_search.managers import InvalidDatasetTypeException, InvalidSearchException
 from clickhouse_search.models.gt_stats_models import PROJECT_GT_STATS_VIEW_CLASS_MAP
 from clickhouse_search.models.postgres_dicts import SexDict, AffectedDict, IndividualMetadataDict, ExcludedVariantDict
@@ -41,12 +42,18 @@ SELECTED_GENE_FIELD = 'selectedGeneId'
 SELECTED_TRANSCRIPT_FIELD = 'selectedTranscript'
 
 
-def get_clickhouse_variants(families, user, genome_version=None, sort=None, sample_data_by_dataset_type=None, inheritance=None, locus=None, exclude_keys=None, exclude_key_pairs=None, no_access_project_genome_version=None, **search):
+def get_clickhouse_variants(families, user, genome_version=None, sort=None, sample_data_by_dataset_type=None, inheritance=None, locus=None, exclude_keys=None, exclude_key_pairs=None, no_access_project_genome_version=None, gene_evidence=None, **search):
     genome_version = genome_version or no_access_project_genome_version or _get_search_genome_version(families)
 
     search['inheritance_filter'] = (inheritance or {}).get('filter') or {}
     inheritance_mode = None if search['inheritance_filter'].get('genotype') else (inheritance or {}).get('mode')
     _parse_locus_search(locus or {}, genome_version, search)
+
+    if no_access_project_genome_version and parse_gene_evidence(gene_evidence):
+        raise InvalidSearchException('Gene evidence filters are not supported when including external projects')
+    family_evidence_gene_ids = get_family_evidence_gene_ids(families, gene_evidence)
+    if family_evidence_gene_ids is not None and not _set_gene_evidence_locus(family_evidence_gene_ids, genome_version, search):
+        return []
 
     has_comp_het = inheritance_mode in {RECESSIVE, COMPOUND_HET}
     has_x_chrom_comp_het = has_comp_het and _is_x_chrom_only(**search)
@@ -112,8 +119,63 @@ def get_clickhouse_variants(families, user, genome_version=None, sort=None, samp
     if not searched_dataset_types:
         _raise_dataset_type_errors(sample_data_errors, sample_data_by_dataset_type)
 
+    if family_evidence_gene_ids is not None:
+        results = _filter_gene_evidence_results(results, family_evidence_gene_ids)
+
     logger.info(f'Total results: {len(results)}', user)
     return get_sorted_search_results(results, sort, families)
+
+
+def _set_gene_evidence_locus(family_evidence_gene_ids, genome_version, search):
+    # Narrows the search to genes with evidence in any family where possible. Returns False if no variant can match
+    gene_ids = set().union(*family_evidence_gene_ids.values())
+    if search.get('genes'):
+        search['genes'] = {gene_id: gene for gene_id, gene in search['genes'].items() if gene_id in gene_ids}
+        return bool(search['genes'] or search.get('intervals'))
+
+    has_other_location = any(search.get(field) for field in ['intervals', 'exclude_intervals', 'raw_variant_items'])
+    if gene_ids and len(gene_ids) <= MAX_GENES_FOR_FILTER and not has_other_location:
+        search['genes'] = get_search_genes(gene_ids, genome_version)
+        return bool(search['genes'])
+
+    return bool(gene_ids)
+
+
+def _result_gene_ids(variant):
+    if variant.get(TRANSCRIPT_CONSEQUENCES_FIELD):
+        return {t['geneId'] for t in variant[TRANSCRIPT_CONSEQUENCES_FIELD]}
+    return set(variant.get('transcripts', {}).keys())
+
+
+def _filter_gene_evidence_results(results, family_evidence_gene_ids):
+    # A compound het pair is in a single gene, so the gene evidence is required once for the genes shared by the pair
+    filtered_results = []
+    for result in results:
+        variants = result if isinstance(result, list) else [result]
+        gene_ids = set.intersection(*[_result_gene_ids(variant) for variant in variants])
+        family_guids = [
+            family_guid for family_guid in variants[0]['familyGuids']
+            if all(family_guid in variant['familyGuids'] for variant in variants)
+            and gene_ids.intersection(family_evidence_gene_ids[family_guid])
+        ]
+        if not family_guids:
+            continue
+        variants = [_filter_variant_families(variant, family_guids) for variant in variants]
+        filtered_results.append(variants if isinstance(result, list) else variants[0])
+    return filtered_results
+
+
+def _filter_variant_families(variant, family_guids):
+    if len(family_guids) == len(variant['familyGuids']):
+        return variant
+    return {
+        **variant,
+        'familyGuids': family_guids,
+        'genotypes': {
+            individual_guid: genotype for individual_guid, genotype in variant['genotypes'].items()
+            if (genotype[0] if isinstance(genotype, list) else genotype)['familyGuid'] in family_guids
+        },
+    }
 
 
 def  _get_search_genome_version(families):

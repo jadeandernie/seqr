@@ -14,10 +14,12 @@ from math import ceil
 import re
 
 from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY
+from clickhouse_search.gene_evidence import parse_gene_evidence, RNA_EVIDENCE_DATA_TYPES
 from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
     get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
 from reference_data.models import HumanPhenotypeOntology, GENOME_VERSION_GRCh38, GENOME_VERSION_LOOKUP
-from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset
+from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset, \
+    RnaSample
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.logging_utils import SeqrLogger
@@ -131,6 +133,7 @@ def _get_or_create_results_model(search_hash, search_context, user):
             ).distinct()
 
         search_dict = search_context.get('search', {})
+        parse_gene_evidence(search_dict.get('gene_evidence'))
         if search_context.get('previousSearchHash') and (search_dict.get('exclude') or {}).get('previousSearch'):
             search_dict.update(_get_exclude_keys(search_context['previousSearchHash'], user))
         if include_no_access_projects:
@@ -440,8 +443,15 @@ def search_context_handler(request):
         **FAMILY_ADDITIONAL_VALUES,
     )}
 
+    family_rna_data_types = defaultdict(set)
+    for family_guid, data_type in RnaSample.objects.filter(
+        individual__family__guid__in=response['familiesByGuid'], is_active=True, data_type__in=RNA_EVIDENCE_DATA_TYPES,
+    ).values_list('individual__family__guid', 'data_type').distinct():
+        family_rna_data_types[family_guid].add(data_type)
+
     project_dataset_types = defaultdict(set)
     for family in response['familiesByGuid'].values():
+        family['rnaDataTypes'] = sorted(family_rna_data_types[family['familyGuid']])
         project_dataset_types[family['projectGuid']].update([s['datasetType'] for s in family['sampleTypes']])
     for project_guid, dataset_types in project_dataset_types.items():
         response['projectsByGuid'][project_guid]['datasetTypes'] = list(dataset_types)
@@ -502,6 +512,11 @@ def create_saved_search_handler(request):
     if (request_json.get('inheritance') or {}).get('filter', {}).get('genotype'):
         error = 'Saved searches cannot include custom genotype filters'
         return create_json_response({'error': error}, status=400, reason=error)
+
+    try:
+        parse_gene_evidence(request_json.get('gene_evidence'))
+    except InvalidSearchException as e:
+        return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
     try:
         saved_search, _ = get_or_create_model_from_json(

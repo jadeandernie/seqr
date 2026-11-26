@@ -40,7 +40,8 @@ from clickhouse_search.test_utils import VARIANT1, VARIANT2, VARIANT3, VARIANT4,
     DEFAULT_PROJECT_FAMILIES, SINGLE_FAMILY_PROJECT_FAMILIES, SV_PROJECT_FAMILIES, MULTI_PROJECT_PROJECT_FAMILIES, \
     format_cached_variant
 from reference_data.models import Omim
-from seqr.models import Project, Family, Dataset, VariantSearch, VariantSearchResults, Individual
+from seqr.models import Project, Family, Dataset, VariantSearch, VariantSearchResults, Individual, RnaSample, \
+    RnaSeqOutlier, RnaSeqSpliceOutlier
 from seqr.views.apis.data_manager_api import trigger_delete_project
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, GENE_VARIANT_FIELDS, MATCHMAKER_SUBMISSION_FIELDS, \
     SAVED_VARIANT_DETAIL_FIELDS, FUNCTIONAL_FIELDS, TAG_FIELDS, FAMILY_FIELDS, INDIVIDUAL_FIELDS, IGV_SAMPLE_FIELDS, \
@@ -863,6 +864,166 @@ class ClickhouseSearchTests(ClickhouseSearchTestCase):
 
         self._set_grch37_search()
         self._assert_expected_search([GRCH37_VARIANT], locus={'rawItems': '7:143268894-143271480'}, is_37=True)
+
+    @staticmethod
+    def _create_rna_outliers(individual_id, data_type, gene_ids, insignificant_gene_ids=None):
+        sample = RnaSample.objects.create(
+            individual_id=individual_id, data_type=data_type, tissue_type='M', sequencing_type='T', data_source='test.tsv',
+            is_active=True,
+        )
+        gene_p_adjusts = [(gene_id, 0.001) for gene_id in gene_ids] + [(gene_id, 0.9) for gene_id in insignificant_gene_ids or []]
+        for gene_id, p_adjust in gene_p_adjusts:
+            if data_type == 'E':
+                RnaSeqOutlier.objects.create(sample=sample, gene_id=gene_id, p_value=0.0001, p_adjust=p_adjust, z_score=-6)
+            else:
+                RnaSeqSpliceOutlier.objects.create(
+                    sample=sample, gene_id=gene_id, p_value=0.0001, p_adjust=p_adjust, delta_intron_jaccard_index=0.6,
+                    chrom='1', start=91500000, end=91501000, strand='+', type='psi5', counts=10, mean_counts=1.5,
+                    total_counts=20, mean_total_counts=2.5,
+                )
+
+    @mock.patch('clickhouse_search.gene_evidence.MAX_GENE_EVIDENCE_FAMILIES', 2)
+    def test_gene_evidence_search(self):
+        expression = {'rna_expression_outlier': True}
+        splice = {'rna_splice_outlier': True}
+        family_2_3 = [{'projectGuid': 'R0001_1kg', 'familyGuids': ['F000002_2', 'F000003_3']}]
+        selected_gene = {'selectedGeneId': 'ENSG00000097046'}
+        gcnv_gene_counts = {
+            'ENSG00000275023': {'total': 2, 'families': {'F000002_2': 2}},
+            'ENSG00000277258': {'total': 1, 'families': {'F000002_2': 1}},
+            'ENSG00000277972': {'total': 1, 'families': {'F000002_2': 1}},
+        }
+        gene_counts = {
+            'ENSG00000097046': {'total': 2, 'families': {'F000002_2': 2}},
+            'ENSG00000177000': {'total': 1, 'families': {'F000002_2': 1}},
+            **gcnv_gene_counts,
+        }
+
+        self._assert_expected_search_error(
+            'No RNA expression outlier data loaded for family 2', gene_evidence=expression,
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES, check_login=self.check_collaborator_login,
+        )
+        self._assert_expected_search_error(
+            'Invalid gene evidence filter: proteomics', gene_evidence={'proteomics': True},
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+
+        self._create_rna_outliers(4, 'E', ['ENSG00000097046', 'ENSG00000275023'], insignificant_gene_ids=['ENSG00000177000'])
+
+        # Without gene evidence, the same search returns variants in genes with no RNA evidence
+        no_evidence_search_hash = 7100001
+        self._assert_expected_search(
+            [VARIANT1, VARIANT2, VARIANT3, VARIANT4, GCNV_VARIANT1, GCNV_VARIANT2, GCNV_VARIANT3, GCNV_VARIANT4,
+             MITO_VARIANT1, MITO_VARIANT2, MITO_VARIANT3],
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES, search_hash=no_evidence_search_hash,
+        )
+
+        search_hash = 7100002
+        expression_results = [VARIANT3, VARIANT4, GCNV_VARIANT3, GCNV_VARIANT4]
+        expression_cached_fields = [selected_gene, selected_gene, {}, {}]
+        self._assert_expected_search(
+            expression_results, gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            cached_variant_fields=expression_cached_fields, gene_counts=gene_counts, search_hash=search_hash,
+        )
+
+        # Searches with different gene evidence are stored and cached separately
+        results_model = VariantSearchResults.objects.get(search_hash=search_hash)
+        no_evidence_results_model = VariantSearchResults.objects.get(search_hash=no_evidence_search_hash)
+        self.assertDictEqual(results_model.variant_search.search['gene_evidence'], expression)
+        self.assertNotIn('gene_evidence', no_evidence_results_model.variant_search.search)
+        self.assertNotEqual(results_model.variant_search_id, no_evidence_results_model.variant_search_id)
+        self.set_cache(f'search_results__VRS{search_hash:07d}__xpos', self._format_cached_variants(
+            [VARIANT3], cached_variant_fields=[selected_gene],
+        ))
+        self._assert_expected_search(
+            [VARIANT3], gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            search_hash=search_hash, skip_cache_check=True,
+        )
+        self.MOCK_CACHE.clear()
+
+        # The filter is applied to results when the evidence genes can not be used to restrict the search
+        with mock.patch('clickhouse_search.search.MAX_GENES_FOR_FILTER', 1):
+            self._assert_expected_search(
+                expression_results, gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+                gene_counts=gene_counts,
+            )
+        self._assert_expected_search(
+            [VARIANT3, VARIANT4], gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            locus={'rawItems': '1:1-100000000'}, exclude_svs=True,
+        )
+
+        # Gene evidence is combined with searched genes
+        self._assert_expected_search(
+            [VARIANT3, VARIANT4], gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            locus={'rawItems': ', '.join(GENE_IDS)}, cached_variant_fields=[selected_gene, selected_gene],
+        )
+        self._assert_expected_search(
+            [], gene_evidence=expression, project_families=SINGLE_FAMILY_PROJECT_FAMILIES, locus={'rawItems': GENE_IDS[1]},
+        )
+
+        self._assert_expected_search_error(
+            'No RNA splice outlier data loaded for family 2', gene_evidence={**expression, **splice},
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+        self._create_rna_outliers(4, 'S', ['ENSG00000275023'], insignificant_gene_ids=['ENSG00000097046'])
+        self._assert_expected_search(
+            [GCNV_VARIANT3, GCNV_VARIANT4], gene_evidence=splice, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+            gene_counts=gcnv_gene_counts,
+        )
+        self._assert_expected_search(
+            expression_results, gene_evidence={**expression, **splice, 'match': 'any'},
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES, cached_variant_fields=expression_cached_fields,
+        )
+        self._assert_expected_search(
+            [GCNV_VARIANT3, GCNV_VARIANT4], gene_evidence={**expression, **splice, 'match': 'all'},
+            project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+        RnaSeqSpliceOutlier.objects.filter(sample__individual_id=4).update(p_adjust=0.9)
+        self._assert_expected_search(
+            [], gene_evidence={**expression, **splice, 'match': 'all'}, project_families=SINGLE_FAMILY_PROJECT_FAMILIES,
+        )
+
+        # Both variants in a compound het pair are in the gene with evidence
+        comp_het_selected_gene = [{'selectedGeneId': 'ENSG00000275023'}, {'selectedGeneId': 'ENSG00000275023'}]
+        self._assert_expected_search(
+            [[MULTI_DATA_TYPE_COMP_HET_VARIANT2, GCNV_VARIANT4], [VARIANT3, VARIANT4], [GCNV_VARIANT3, GCNV_VARIANT4]],
+            inheritance_mode='compound_het', project_families=SINGLE_FAMILY_PROJECT_FAMILIES, **COMP_HET_ALL_PASS_FILTERS,
+            cached_variant_fields=[
+                [{'selectedGeneId': 'ENSG00000277258'}, {'selectedGeneId': 'ENSG00000277258'}],
+                [selected_gene, selected_gene], comp_het_selected_gene,
+            ],
+        )
+        self._assert_expected_search(
+            [[VARIANT3, VARIANT4], [GCNV_VARIANT3, GCNV_VARIANT4]], gene_evidence=expression,
+            inheritance_mode='compound_het', project_families=SINGLE_FAMILY_PROJECT_FAMILIES, **COMP_HET_ALL_PASS_FILTERS,
+            cached_variant_fields=[[selected_gene, selected_gene], comp_het_selected_gene], gene_counts=gene_counts,
+        )
+
+        # Gene evidence is required per family when searching multiple families
+        self._assert_expected_search_error(
+            'No RNA expression outlier data loaded for family 3', gene_evidence=expression, project_families=family_2_3,
+        )
+        self._create_rna_outliers(7, 'E', ['ENSG00000275023'])
+        self._assert_expected_search(
+            [VARIANT3, VARIANT4, GCNV_VARIANT3, GCNV_VARIANT4], gene_evidence=expression, project_families=family_2_3,
+            cached_variant_fields=expression_cached_fields, gene_counts=gene_counts,
+        )
+        RnaSeqOutlier.objects.create(
+            sample=RnaSample.objects.get(individual_id=7, data_type='E'), gene_id='ENSG00000177000', p_value=0.0001,
+            p_adjust=0.001, z_score=4,
+        )
+        self._assert_expected_search(
+            [MULTI_FAMILY_VARIANT, VARIANT4, GCNV_VARIANT3, GCNV_VARIANT4], gene_evidence=expression,
+            project_families=family_2_3, cached_variant_fields=expression_cached_fields,
+        )
+
+        self._assert_expected_search_error(
+            'Gene evidence filters are only supported when searching 2 or fewer families', gene_evidence=expression,
+        )
+        self._assert_expected_search_error(
+            'Gene evidence filters are not supported when including external projects', gene_evidence=expression,
+            locus={'rawItems': GENE_IDS[0]}, request_body={'allGenomeProjectFamilies': '38', 'includeNoAccessProjects': True},
+        )
 
     def test_variant_id_search(self):
         self._assert_expected_search([VARIANT1], **VARIANT_ID_SEARCH, check_login=self.check_collaborator_login)

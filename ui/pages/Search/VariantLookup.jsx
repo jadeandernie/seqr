@@ -247,7 +247,14 @@ const BaseLookupVariant = ({ variant, familiesByContactEmail, vlmDefaultContactE
         </LookupFamilyLayout>
       ))}
       {(disabled || []).map(familyGuid => (
-        <LookupFamilyLayout key={familyGuid} defaultEmail={vlmDefaultContactEmails.disabled} disabled buttonText="Contact Opted Out">
+        <LookupFamilyLayout
+          key={familyGuid}
+          defaultEmail={vlmDefaultContactEmails.disabled}
+          disabled
+          buttonText="Contact Opted Out"
+          hasLiftover={(variant.liftedFamilyGuids || []).includes(familyGuid)}
+          genomeVersion={variant.genomeVersion}
+        >
           <ExternalFamily familyGuid={familyGuid} variant={variant} />
         </LookupFamilyLayout>
       ))}

@@ -6,12 +6,17 @@ Permissions:
 - All endpoints require view access to the project of the workbook.
 - Any user with view access to a project can create a workbook in it. Changing a workbook and its targets, worksheets
   and queries requires view access and either edit access to the project or being the creator of the workbook.
-- Updating or running a cell requires view access to the project and to the families of the target.
+- Updating or running a cell, marking its results as reviewed and reading its run history require view access to
+  the project and to the families of the target.
 - Every endpoint that returns or uses targets checks view access to the families of those targets.
 
 The group summary of a cell is descriptive only: it counts families by gene, variant and HPO term from the cached
 results of the search of the cell and never runs a search. It does not read free text (notes, nonstandard features)
 and does not test for enrichment or significance.
+
+Run history and alerts are described in seqr.views.utils.workbook_utils. A cell has unreviewed results when its last
+completed run has results that were not marked as reviewed, except for variants that are tagged as excluded for the
+family: those never alert. Removed results are recorded in the history and do not alert.
 """
 from collections import defaultdict
 from copy import deepcopy
@@ -19,13 +24,13 @@ import json
 
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Max, Q, prefetch_related_objects
+from django.db.models import BooleanField, ExpressionWrapper, Max, Q, prefetch_related_objects
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import AnalysisGroup, Family, Individual, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, \
-    WorksheetQueryResult
+    WorksheetQueryResult, WorksheetQueryRun
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.middleware import ErrorsWarningsException
 from seqr.views.apis.variant_search_api import _get_or_create_results_model, flatten_search_results, \
@@ -37,6 +42,8 @@ from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import _get_json_for_models, get_json_for_saved_searches
 from seqr.views.utils.permissions_utils import check_families_view_permission, get_project_and_check_view_permission, \
     has_project_edit_permission, login_and_policies_required
+from seqr.views.utils.workbook_utils import get_completed_runs, get_key_variant_ids, get_unreviewed_keys_by_cell, \
+    to_key_set
 
 # The search page hashes are 32 character hex MD5 digests, so a prefixed hash can never be equal to one of them
 SEARCH_HASH_PREFIX = 'WB'
@@ -46,6 +53,8 @@ SEARCH_HASH_DIGEST_LENGTH = 48
 MAX_SUMMARY_ROWS = 200
 MAX_PHENOTYPE_TERMS = 10
 RESULTS_NOT_LOADED_STATUS = 409
+MAX_HISTORY_RUNS = 50
+MAX_UNREVIEWED_RESULTS = 100
 
 
 def _error(message):
@@ -150,10 +159,50 @@ def _queries_json(queries):
     return _by_guid(_get_json_for_models(queries, nested_fields=[{'fields': ('worksheet', 'guid')}]), 'worksheetQueryGuid')
 
 
-def _query_results_json(query_results):
+def _user_name(user):
+    return (user.get_full_name() or user.email) if user else None
+
+
+def _get_run_summaries():
+    return WorksheetQueryRun.objects.select_related('created_by').defer(
+        'keys_hash', 'result_keys', 'new_keys', 'removed_keys',
+    ).annotate(is_unchanged=ExpressionWrapper(
+        Q(status=WorksheetQueryRun.STATUS_COMPLETED, result_keys__isnull=True), output_field=BooleanField(),
+    ))
+
+
+def _run_json(run):
+    return {
+        'runId': run.id,
+        'createdDate': run.created_date,
+        'createdBy': _user_name(run.created_by),
+        'trigger': run.trigger,
+        'status': run.status,
+        'error': run.error,
+        'numResults': run.num_results,
+        'numNew': run.num_new,
+        'numRemoved': run.num_removed,
+        'isUnchanged': run.is_unchanged,
+    }
+
+
+def _query_results_json(query_results, unreviewed_keys_by_cell=None):
+    if unreviewed_keys_by_cell is None:
+        unreviewed_keys_by_cell = get_unreviewed_keys_by_cell(query_results)
+    last_runs = {
+        run.cell_id: run for run in
+        _get_run_summaries().filter(cell__in=query_results).order_by('cell_id', '-id').distinct('cell_id')
+    }
+
     def _process_result(result, query_result):
-        user = query_result.last_run_by
-        result['lastRunBy'] = (user.get_full_name() or user.email) if user else None
+        num_unreviewed = len(unreviewed_keys_by_cell.get(query_result.id, []))
+        last_run = last_runs.get(query_result.id)
+        result.update({
+            'lastRunBy': _user_name(query_result.last_run_by),
+            'hasUnreviewed': num_unreviewed > 0,
+            'numUnreviewed': num_unreviewed,
+            'lastRun': _run_json(last_run) if last_run else None,
+        })
 
     prefetch_related_objects(query_results, 'last_run_by')
     return _by_guid(_get_json_for_models(query_results, nested_fields=[
@@ -618,4 +667,54 @@ def worksheet_query_group_summary_handler(request, workbook_guid, query_guid, ta
         'searchHash': results_model.search_hash,
         'genesById': get_genes_for_variant_display(list(gene_ids), workbook.project.genome_version),
         **summary,
+    })
+
+
+@login_and_policies_required
+def mark_worksheet_query_result_reviewed_handler(request, workbook_guid, query_guid, target_guid):
+    _, query, target, _ = _get_query_and_target(workbook_guid, query_guid, target_guid, request.user)
+    with transaction.atomic():
+        query_result = WorksheetQueryResult.objects.select_for_update().filter(query=query, target=target).first()
+        run = get_completed_runs(query_result).first() if query_result else None
+        if not run:
+            raise _error(f'This query has no results for {target} to mark as reviewed')
+        reviewed_keys = sorted(to_key_set(query_result.reviewed_keys) | to_key_set(run.result_keys))
+        update_model_from_json(query_result, {
+            'reviewed_keys': [list(key) for key in reviewed_keys], 'has_unreviewed': False,
+        }, request.user)
+    return create_json_response({'worksheetQueryResultsByGuid': _query_results_json([query_result])})
+
+
+def _unreviewed_results_json(keys, query_result, user):
+    results = get_cached_search_results(query_result.results, user) if keys and query_result.results else None
+    gene_ids_by_variant = {
+        variant['variantId']: sorted(get_variant_gene_ids(variant)) for variant in flatten_search_results(results or [])
+    }
+    return [{
+        'familyGuid': key[0],
+        'variantIds': get_key_variant_ids(key),
+        'geneIds': sorted({
+            gene_id for variant_id in get_key_variant_ids(key) for gene_id in gene_ids_by_variant.get(variant_id, [])
+        }),
+    } for key in keys]
+
+
+@login_and_policies_required
+def worksheet_query_result_history_handler(request, workbook_guid, query_guid, target_guid):
+    workbook, query, target, _ = _get_query_and_target(workbook_guid, query_guid, target_guid, request.user)
+    query_result = WorksheetQueryResult.objects.filter(query=query, target=target).select_related('results').first()
+    query_results = [query_result] if query_result else []
+
+    runs = _get_run_summaries().filter(cell__in=query_results).order_by('-id')
+    unreviewed_keys_by_cell = get_unreviewed_keys_by_cell(query_results)
+    unreviewed_keys = unreviewed_keys_by_cell[query_result.id] if unreviewed_keys_by_cell else []
+    unreviewed_results = _unreviewed_results_json(unreviewed_keys[:MAX_UNREVIEWED_RESULTS], query_result, request.user)
+    gene_ids = {gene_id for result in unreviewed_results for gene_id in result['geneIds']}
+    return create_json_response({
+        'worksheetQueryResultsByGuid': _query_results_json(query_results, unreviewed_keys_by_cell),
+        'runs': [_run_json(run) for run in runs[:MAX_HISTORY_RUNS]],
+        'totalRuns': runs.count(),
+        'unreviewedResults': unreviewed_results,
+        'totalUnreviewedResults': len(unreviewed_keys),
+        'genesById': get_genes_for_variant_display(list(gene_ids), workbook.project.genome_version),
     })

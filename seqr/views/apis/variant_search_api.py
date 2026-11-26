@@ -17,8 +17,7 @@ from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PA
 from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
     get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
 from reference_data.models import HumanPhenotypeOntology, GENOME_VERSION_GRCh38, GENOME_VERSION_LOOKUP
-from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset, \
-    WorksheetQueryResult
+from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.logging_utils import SeqrLogger
@@ -34,6 +33,7 @@ from seqr.views.utils.permissions_utils import check_family_view_permission, get
 from seqr.views.utils.project_context_utils import get_project_analysis_groups, get_project_locus_lists
 from seqr.views.utils.variant_utils import get_variants_response, variant_dataset_type
 from seqr.views.utils.vlm_utils import vlm_lookup
+from seqr.views.utils.workbook_utils import get_results_and_record_worksheet_query_runs
 
 logger = SeqrLogger(__name__)
 
@@ -54,10 +54,9 @@ def query_variants_handler(request, search_hash):
 
     _check_results_permission(results_model, request.user)
 
-    all_variants = _get_variants_with_cache(
+    all_variants = get_results_and_record_worksheet_query_runs(results_model, request.user, lambda: _get_variants_with_cache(
         _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
-    )
-    WorksheetQueryResult.objects.filter(results=results_model).update(num_results=len(all_variants))
+    ))
     variants = all_variants[(page-1)*per_page:page*per_page]
 
     response = _process_variants(variants or [], results_model.families.all(), request,

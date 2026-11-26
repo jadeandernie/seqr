@@ -15,12 +15,8 @@ class TooManyRequestsError(Exception):
 
 
 def _get_latest_ensembl_id(grch38_versions):
-    if not grch38_versions:
-        return None
-    def sort_key(k):
-        return (int(k), k) if k.isdigit() else (-1, k)
-    latest_key = max(grch38_versions.keys(), key=sort_key)
-    return grch38_versions[latest_key].get('ensembl_id')
+    latest_version = max(grch38_versions, key=lambda v: int(v) if v.isdecimal() else -1, default=None)
+    return grch38_versions[latest_version].get('ensembl_id') if latest_version is not None else None
 
 
 def get_valid_panel_genes(panel_app_id, panel, panels_api_url, genes_by_panel_id, gene_ids_to_gene):
@@ -28,12 +24,23 @@ def get_valid_panel_genes(panel_app_id, panel, panels_api_url, genes_by_panel_id
         panel_genes_url = f'{panels_api_url}/{panel_app_id}/genes'
         _get_all_genes(panel_app_id, panel_genes_url, genes_by_panel_id)
 
-    panel_genes_by_id = {
-        _get_latest_ensembl_id(gene['gene_data']['ensembl_genes'].get('GRch38', {})): gene
-        for gene in genes_by_panel_id[panel_app_id] if isinstance(gene.get('gene_data', {}).get('ensembl_genes'), dict)
-    }
+    panel_genes_by_id = {}
+    missing_id_genes = []
+    for gene in genes_by_panel_id[panel_app_id]:
+        ensembl_genes = gene.get('gene_data', {}).get('ensembl_genes')
+        if not isinstance(ensembl_genes, dict):
+            continue
+        gene_id = _get_latest_ensembl_id(ensembl_genes.get('GRch38') or {})
+        if gene_id:
+            panel_genes_by_id[gene_id] = gene
+        else:
+            missing_id_genes.append(gene.get('entity_name'))
+    if missing_id_genes:
+        logger.warning('Genes found in panel {} with no GRCh38 Ensembl ID, ignoring genes {}'
+                       .format(panel_app_id, missing_id_genes), user=None)
+
     valid_panel_genes = {
-        gene_id: panel_gene for gene_id, panel_gene in panel_genes_by_id.items() if gene_id and gene_id in gene_ids_to_gene
+        gene_id: panel_gene for gene_id, panel_gene in panel_genes_by_id.items() if gene_id in gene_ids_to_gene
     }
     if len(panel_genes_by_id) > len(valid_panel_genes):
         invalid_items = sorted(set(panel_genes_by_id.keys()) - set(valid_panel_genes.keys()))

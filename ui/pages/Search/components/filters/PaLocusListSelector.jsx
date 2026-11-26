@@ -1,8 +1,9 @@
 import React from 'react'
 import { BaseSemanticInput } from 'shared/components/form/Inputs'
 import { connect } from 'react-redux'
-import { getLocusListsWithGenes } from 'redux/selectors'
-import { formatPanelAppItems } from 'shared/utils/panelAppUtils'
+import { getParsedLocusListsByGuid } from 'redux/selectors'
+import { getSelectedLocusLists } from 'shared/utils/locusListUtils'
+import { formatMergedPanelAppItems } from 'shared/utils/panelAppUtils'
 import PropTypes from 'prop-types'
 
 const EMPTY_STRING = ''
@@ -11,7 +12,8 @@ class PaLocusListSelector extends React.Component {
 
   static propTypes = {
     locus: PropTypes.object,
-    locusList: PropTypes.object,
+    locusListsByGuid: PropTypes.object,
+    dispatch: PropTypes.func,
     onChange: PropTypes.func,
     value: PropTypes.string,
     color: PropTypes.string,
@@ -24,11 +26,11 @@ class PaLocusListSelector extends React.Component {
   }
 
   componentDidUpdate(prevProps) {
-    const { locus, locusList, onChange, color } = this.props
+    const { locus, locusListsByGuid, onChange, color } = this.props
     const { selectedMOIs } = locus
 
     if (prevProps.locus.selectedMOIs !== selectedMOIs) {
-      const panelAppItems = formatPanelAppItems(locusList?.items, selectedMOIs)
+      const panelAppItems = formatMergedPanelAppItems(getSelectedLocusLists(locus, locusListsByGuid), selectedMOIs)
       if (panelAppItems[color]) {
         onChange(panelAppItems[color])
       } else {
@@ -38,13 +40,14 @@ class PaLocusListSelector extends React.Component {
   }
 
   render() {
-    return <BaseSemanticInput {...this.props} />
+    const { locusListsByGuid, dispatch, ...props } = this.props
+    return <BaseSemanticInput {...props} />
   }
 
 }
 
-const mapStateToProps = (state, ownProps) => ({
-  locusList: getLocusListsWithGenes(state)[ownProps.locus.locusListGuid],
+const mapStateToProps = state => ({
+  locusListsByGuid: getParsedLocusListsByGuid(state),
 })
 
 export default connect(mapStateToProps)(PaLocusListSelector)

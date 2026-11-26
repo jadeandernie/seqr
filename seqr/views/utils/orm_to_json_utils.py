@@ -641,16 +641,21 @@ EXPRESSION_OUTLIERS = 'outliers'
 SPLICE_OUTLIERS = 'spliceOutliers'
 
 
+def rna_seq_outlier_significance_q(model):
+    significance_q = Q(p_adjust__lt=model.MAX_SIGNIFICANT_P_ADJUST)
+    if hasattr(model, 'SIGNIFICANCE_ABS_VALUE_THRESHOLDS'):
+        for field, threshold in model.SIGNIFICANCE_ABS_VALUE_THRESHOLDS.items():
+            significance_q &= (Q(**{f'{field}__gt': threshold}) | Q(**{f'{field}__lt': -threshold}))
+    return significance_q
+
+
 def get_json_for_rna_seq_outliers(filters, significant_only=True, individual_guid=None):
     filters = {'sample__is_active': True, **filters}
 
     data_by_individual_gene = defaultdict(lambda: {EXPRESSION_OUTLIERS: defaultdict(list), SPLICE_OUTLIERS: defaultdict(list)})
 
     for model, outlier_type in [(RnaSeqOutlier, EXPRESSION_OUTLIERS), (RnaSeqSpliceOutlier, SPLICE_OUTLIERS)]:
-        significance_q = Q(p_adjust__lt=model.MAX_SIGNIFICANT_P_ADJUST)
-        if hasattr(model, 'SIGNIFICANCE_ABS_VALUE_THRESHOLDS'):
-            for field, threshold in model.SIGNIFICANCE_ABS_VALUE_THRESHOLDS.items():
-                significance_q &= (Q(**{f'{field}__gt': threshold}) | Q(**{f'{field}__lt': -threshold}))
+        significance_q = rna_seq_outlier_significance_q(model)
 
         models = model.objects.filter(**filters)
         if significant_only:

@@ -1,5 +1,7 @@
 import { getProjectDatasetTypes } from 'redux/selectors'
-import { getIntitialSearch, getLocusListOptions, getDatasetTypes, getSearchGeneBreakdownValues } from './selectors'
+import {
+  getIntitialSearch, getLocusListOptions, getDatasetTypes, getSearchGeneBreakdownValues, getRnaDataTypes,
+} from './selectors'
 
 import {
   STATE,
@@ -76,4 +78,22 @@ test('getSearchGeneBreakdownValues', () => {
     geneId: GENE_ID,
     geneSymbol: 'OR2M3',
   }])
+})
+
+test('getRnaDataTypes', () => {
+  const projectFamilies = [{ projectGuid: PROJECT_GUID, familyGuids: [FAMILY_GUID] }]
+  expect(getRnaDataTypes(STATE, { projectFamilies })).toEqual('')
+  expect(getRnaDataTypes(STATE, {})).toEqual('')
+
+  const rnaState = {
+    ...STATE,
+    familiesByGuid: {
+      ...STATE.familiesByGuid,
+      [FAMILY_GUID]: { ...STATE.familiesByGuid[FAMILY_GUID], rnaDataTypes: ['S', 'E'] },
+      F_OTHER: { familyGuid: 'F_OTHER', projectGuid: 'R_OTHER', rnaDataTypes: ['S'] },
+    },
+  }
+  expect(getRnaDataTypes(rnaState, { projectFamilies })).toEqual('E,S')
+  expect(getRnaDataTypes(rnaState, { projectFamilies: [{ projectGuid: 'R_OTHER' }] })).toEqual('S')
+  expect(getRnaDataTypes(rnaState, { projectFamilies: [{ projectGuid: 'R_OTHER', familyGuids: ['F_MISSING'] }] })).toEqual('')
 })

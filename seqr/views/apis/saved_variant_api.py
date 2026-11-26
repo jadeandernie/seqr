@@ -303,7 +303,8 @@ def _update_variant_tag_models(request, variant_guids, tag_key, model_cls, get_t
         tag_guids = variant_tag_map[saved_variant.guid]
         saved_variants_by_guid[saved_variant.guid] = {response_guid_key: tag_guids}
         if delete_variants_if_empty and not tag_guids:
-            if saved_variant.variantnote_set.count() == 0 and saved_variant.matchmakersubmissiongenes_set.count() == 0:
+            if saved_variant.variantnote_set.count() == 0 and saved_variant.matchmakersubmissiongenes_set.count() == 0 \
+                    and saved_variant.clinvarsubmission_set.count() == 0:
                 saved_variant.delete_model(request.user, user_can_delete=True)
                 saved_variants_by_guid[saved_variant.guid] = None
 

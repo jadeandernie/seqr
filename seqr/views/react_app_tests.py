@@ -75,7 +75,7 @@ class AppPageTest(object):
     databases = ['default']
     fixtures = ['users']
 
-    def _check_page_html(self, response,  user, user_key='user', vlm_enabled=False, user_email=None, user_fields=None, ga_token_id=None, last_feature_update=None):
+    def _check_page_html(self, response,  user, user_key='user', vlm_enabled=False, clinvar_mode=None, user_email=None, user_fields=None, ga_token_id=None, last_feature_update=None):
         user_fields = user_fields or USER_FIELDS
         self.assertEqual(response.status_code, 200)
         initial_json = self.get_initial_page_json(response)
@@ -87,6 +87,7 @@ class AppPageTest(object):
             'hijakEnabled': False,
             'oauthLoginProvider': self.OAUTH_PROVIDER,
             'vlmEnabled': vlm_enabled,
+            'clinvarSubmissionMode': clinvar_mode,
             'warningMessages': [{'id': 1, 'header': 'Warning!', 'message': 'A sample warning'}],
             'lastFeatureUpdate': last_feature_update,
         })
@@ -118,6 +119,16 @@ class AppPageTest(object):
 
         mock_redis.return_value.set.assert_called_with('feature_updates_latest_date', '"2023-11-08T15:11:31+00:00"')
         mock_redis.return_value.expire.assert_called_with('feature_updates_latest_date', 10800)
+
+    @responses.activate
+    def test_clinvar_submission_mode(self, mock_redis):
+        url = reverse(main_app)
+        self.client.force_login(self.no_policy_user)
+        for mode, expected_mode in [('dry_run', 'dry_run'), ('test', 'test'), ('live', 'live'), ('disabled', None), ('invalid', None)]:
+            with self.settings(CLINVAR_SUBMISSION_MODE=mode, CLINVAR_API_KEY='k' * 64):
+                response = self.client.get(url, secure=True)
+            self._check_page_html(response, 'test_user_no_policies', clinvar_mode=expected_mode)
+            self.assertNotIn('k' * 64, response.content.decode('utf-8'))
 
     @responses.activate
     def test_local_react_page(self, mock_redis):

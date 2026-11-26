@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'matchmaker',
     'social_django',
     'panelapp',
+    'clinvar_submission',
 ]
 
 MIDDLEWARE = [
@@ -344,6 +345,11 @@ AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
 
 CLINGEN_ALLELE_REGISTRY_LOGIN = os.environ.get('CLINGEN_ALLELE_REGISTRY_LOGIN')
 CLINGEN_ALLELE_REGISTRY_PASSWORD = os.environ.get('CLINGEN_ALLELE_REGISTRY_PASSWORD')
+
+# ClinVar submission: nothing is ever sent unless the mode is explicitly "test" or "live" AND an API key is set
+CLINVAR_SUBMISSION_MODE = os.environ.get('CLINVAR_SUBMISSION_MODE', 'disabled')
+CLINVAR_API_KEY = os.environ.get('CLINVAR_API_KEY')
+CLINVAR_ASSERTION_CRITERIA = os.environ.get('CLINVAR_ASSERTION_CRITERIA')
 
 GREGOR_DATA_MODEL_URL = os.environ.get('GREGOR_DATA_MODEL_URL', 'https://raw.githubusercontent.com/UW-GAC/gregor_data_models/main/GREGoR_data_model.json')
 

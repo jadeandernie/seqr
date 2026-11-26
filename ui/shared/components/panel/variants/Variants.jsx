@@ -10,6 +10,7 @@ import { TagFieldDisplay } from '../view-fields/TagFieldView'
 import FamilyReads from '../family/FamilyReads'
 import FamilyVariantTags, { LoadedFamilyLabel, taggedByPopup } from './FamilyVariantTags'
 import Annotations from './Annotations'
+import ArtifactFlags from './ArtifactFlags'
 import Pathogenicity from './Pathogenicity'
 import Predictions from './Predictions'
 import Frequencies from './Frequencies'
@@ -149,6 +150,7 @@ export const Variant = React.memo((
       topContent={
         <div>
           <Pathogenicity variant={variant} />
+          <ArtifactFlags variant={variant} />
           {(variant.discoveryTags?.length > 0 || variant.noAccessDiscoveryFamilies > 0) && (
             <InlinePopup
               on="click"

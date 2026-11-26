@@ -1,6 +1,7 @@
 # _seqr_ Changes
 
 ## dev
+* Adds in-app requests for missing clinical data, tracked per individual and fulfilled automatically once the data is recorded (REQUIRES DB MIGRATION)
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
 
 ## 11/24/26

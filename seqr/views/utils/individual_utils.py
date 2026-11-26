@@ -5,6 +5,8 @@ from matchmaker.models import MatchmakerSubmission, MatchmakerResult
 from seqr.models import Dataset, IgvSample, RnaSample, Individual, Family, FamilyNote
 from seqr.utils.middleware import ErrorsWarningsException
 from seqr.utils.add_data_utils import trigger_rebuild_gt_stats
+from seqr.views.utils.data_request_utils import fulfil_data_requests, fulfil_family_data_requests, \
+    OPEN_DATA_REQUEST_VALUES, FAMILY_OPEN_DATA_REQUEST_ANNOTATION
 from seqr.views.utils.json_to_orm_utils import update_individual_from_json, update_individual_parents, create_model_from_json, \
     update_family_from_json
 from seqr.views.utils.orm_to_json_utils import _get_json_for_individuals, _get_json_for_families, get_json_for_family_notes
@@ -27,12 +29,14 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
     updated_sex = set()
     updated_metadata = set()
     updated_note_ids = []
+    updated_completeness_families = []
     parent_updates = []
     num_created_families = 0
     num_created_individuals = 0
 
     family_ids = {_get_record_family_id(record) for record in individual_records}
-    families_by_id = {f.family_id: f for f in Family.objects.filter(project=project, family_id__in=family_ids)}
+    families_by_id = {f.family_id: f for f in Family.objects.filter(
+        project=project, family_id__in=family_ids).annotate(**FAMILY_OPEN_DATA_REQUEST_ANNOTATION)}
 
     missing_family_ids = family_ids - set(families_by_id.keys())
     for family_id in sorted(missing_family_ids):
@@ -58,7 +62,7 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
     all_individuals = set()
     for record in individual_records:
         created_individual, individual_db_id = _update_from_record(
-            record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update)
+            record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update, updated_completeness_families)
         if created_individual:
             num_created_individuals += 1
         if get_individual_db_ids:
@@ -83,9 +87,11 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
     if updated_metadata or num_created_families > 0 or num_created_individuals > 0:
         IndividualMetadataDict.reload(user)
 
+    data_requests = fulfil_family_data_requests(updated_completeness_families, user)
     pedigree_json = None
     if get_update_json:
-        pedigree_json = _get_updated_pedigree_json(updated_individuals, updated_family_models, updated_note_ids, user)
+        pedigree_json = _get_updated_pedigree_json(
+            updated_individuals, updated_family_models, updated_note_ids, user, data_requests)
 
     if get_individual_db_ids:
         return pedigree_json, all_individuals
@@ -96,7 +102,7 @@ def add_or_update_individuals_and_families(project, individual_records, user, ge
     return pedigree_json
 
 
-def _update_from_record(record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update):
+def _update_from_record(record, user, families_by_id, individual_lookup, updated_family_ids, updated_individuals, updated_affected, updated_sex, updated_metadata, parent_updates, updated_note_ids, allow_features_update, updated_completeness_families):
     family_id = _get_record_family_id(record)
     family = families_by_id.get(family_id)
     created_individual = False
@@ -151,6 +157,7 @@ def _update_from_record(record, user, families_by_id, individual_lookup, updated
         is_updated = update_family_from_json(family, family_record, user=user)
         if is_updated:
             updated_family_ids.add(family.id)
+            updated_completeness_families.append(family)
 
     updated_fields = update_individual_from_json(individual, record, user=user, allow_unknown_keys=True, allow_features_update=allow_features_update, allow_search_field_update=True)
     if updated_fields:
@@ -226,13 +233,12 @@ def _remove_pedigree_images(families, user):
     Family.bulk_update(user, {'pedigree_image': None}, queryset=families)
 
 
-def _get_updated_pedigree_json(updated_individuals, updated_families, updated_note_ids, user):
-    individuals_by_guid = {
-        individual['individualGuid']: individual for individual in
-        _get_json_for_individuals(Individual.objects.filter(id__in=[
-            i.id for i in updated_individuals
-        ]), user)
-    }
+def _get_updated_pedigree_json(updated_individuals, updated_families, updated_note_ids, user, data_requests):
+    parsed_individuals = _get_json_for_individuals(Individual.objects.filter(id__in=[
+        i.id for i in updated_individuals
+    ]), user, additional_values=OPEN_DATA_REQUEST_VALUES)
+    data_requests = {**data_requests, **fulfil_data_requests(parsed_individuals, user)}
+    individuals_by_guid = {individual['individualGuid']: individual for individual in parsed_individuals}
     families_by_guid = {
         family['familyGuid']: family for family in
         _get_json_for_families(updated_families, user, add_individual_guids_field=True)
@@ -242,6 +248,8 @@ def _get_updated_pedigree_json(updated_individuals, updated_families, updated_no
         'individualsByGuid': individuals_by_guid,
         'familiesByGuid': families_by_guid,
     }
+    if data_requests:
+        response['dataRequestsByGuid'] = data_requests
     if updated_note_ids:
         family_notes_by_guid = {note['noteGuid']: note for note in get_json_for_family_notes(
             FamilyNote.objects.filter(id__in=updated_note_ids)

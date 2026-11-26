@@ -20,7 +20,6 @@ from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file, 
 from seqr.views.utils.json_to_orm_utils import update_individual_from_json
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case, _to_camel_case
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_for_individuals, add_individual_hpo_details, \
-    get_json_for_individual_completeness, \
     _get_json_for_families, get_json_for_rna_seq_outliers, get_project_collaborators_by_username, INDIVIDUAL_DISPLAY_NAME_EXPR, \
     GREGOR_FINDING_TAG_TYPE
 from seqr.views.utils.pedigree_info_utils import parse_pedigree_table, validate_fam_file_records, parse_hpo_terms, \
@@ -30,6 +29,8 @@ from seqr.views.utils.permissions_utils import get_project_and_check_edit_permis
     pm_or_data_manager_required, check_workspace_perm, check_family_view_permission
 from seqr.views.utils.project_context_utils import add_project_tag_type_counts
 from seqr.views.utils.individual_utils import delete_individuals, add_or_update_individuals_and_families
+from seqr.views.utils.data_request_utils import get_individual_completeness_and_fulfil_data_requests, \
+    fulfil_data_requests, OPEN_DATA_REQUEST_VALUES
 from seqr.views.utils.variant_utils import bulk_create_tagged_variants, get_saved_variant_annotations
 
 
@@ -69,7 +70,7 @@ def update_individual_handler(request, individual_guid):
     update_individual_from_json(individual, update_json, user=request.user, allow_unknown_keys=True)
     individual_json = _get_json_for_model(individual, user=request.user)
     individual_json['displayName'] = individual_json['displayName'] or individual_json['individualId']
-    individual_json['completeness'] = get_json_for_individual_completeness(individual)
+    individual_json['completeness'] = get_individual_completeness_and_fulfil_data_requests(individual, request.user)
 
     return create_json_response({
         individual.guid: individual_json
@@ -100,7 +101,7 @@ def update_individual_hpo_terms(request, individual_guid):
 
     individual_json = {k: getattr(individual, _to_snake_case(k)) for k in feature_fields}
     add_individual_hpo_details([individual_json])
-    individual_json['completeness'] = get_json_for_individual_completeness(individual)
+    individual_json['completeness'] = get_individual_completeness_and_fulfil_data_requests(individual, request.user)
 
     return create_json_response({
         individual.guid: individual_json
@@ -676,12 +677,16 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
     if any(FEATURES_COL in record for record in json_records):
         IndividualMetadataDict.reload(request.user)
 
+    parsed_individuals = _get_json_for_individuals(
+        individuals, user=request.user, add_hpo_details=True, project_guid=project_guid,
+        additional_values=OPEN_DATA_REQUEST_VALUES,
+    )
+    data_requests = fulfil_data_requests(parsed_individuals, request.user)
     response = {
-        'individualsByGuid': {
-            individual['individualGuid']: individual for individual in _get_json_for_individuals(
-            individuals, user=request.user, add_hpo_details=True, project_guid=project_guid,
-        )},
+        'individualsByGuid': {individual['individualGuid']: individual for individual in parsed_individuals},
     }
+    if data_requests:
+        response['dataRequestsByGuid'] = data_requests
 
     if family_assigned_analysts:
         updated_families = set()

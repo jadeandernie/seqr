@@ -17,6 +17,7 @@ from seqr.utils.constants import SEX_MALE, SEX_FEMALE, SEX_UNKNOWN, FEMALE_ANEUP
     SAMPLE_TYPE_WES, SAMPLE_TYPE_WGS, DATASET_TYPE_VARIANT_CALLS, DATASET_TYPE_SV_CALLS, DATASET_TYPE_MITO_CALLS
 from seqr.utils.logging_utils import log_model_update, log_model_bulk_update, SeqrLogger
 from seqr.utils.xpos_utils import get_chrom_pos
+from seqr.views.utils.completeness_utils import COMPLETENESS_FIELD_LABELS
 from seqr.views.utils.json_utils import DjangoJSONEncoderWithSets
 from seqr.views.utils.terra_api_utils import anvil_enabled
 from reference_data.models import GENOME_VERSION_GRCh37, GENOME_VERSION_CHOICES
@@ -681,6 +682,55 @@ class Individual(ModelWithGUID):
             'proband_relationship', 'primary_biosample', 'tissue_affected_status', 'analyte_type', 'solve_status',
         ]
         audit_fields = {'case_review_status'}
+
+
+def validate_data_request_fields(fields):
+    invalid_fields = sorted(set(fields) - set(COMPLETENESS_FIELD_LABELS))
+    if invalid_fields:
+        raise ValidationError(f'Invalid clinical data fields: {", ".join(invalid_fields)}')
+    if not fields:
+        raise ValidationError('At least one clinical data field is required')
+
+
+class DataRequest(ModelWithGUID):
+    STATUS_OPEN = 'O'
+    STATUS_FULFILLED = 'F'
+    STATUS_DECLINED = 'D'
+    STATUS_CANCELLED = 'C'
+    STATUS_CHOICES = (
+        (STATUS_OPEN, 'Open'),
+        (STATUS_FULFILLED, 'Fulfilled'),
+        (STATUS_DECLINED, 'Declined'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    )
+    REASON_CHOICES = (
+        ('A', 'Needed for analysis'),
+        ('I', 'To confirm inheritance'),
+        ('M', 'For matchmaking'),
+        ('O', 'Other'),
+    )
+
+    individual = models.ForeignKey(Individual, on_delete=models.CASCADE)
+    # keys of seqr.views.utils.completeness_utils.COMPLETENESS_FIELDS: requests never hold free text
+    requested_fields = ArrayField(models.CharField(max_length=30), validators=[validate_data_request_fields])
+    reason = models.CharField(max_length=1, choices=REASON_CHOICES, null=True, blank=True)
+    status = models.CharField(max_length=1, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    assigned_to = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
+    resolved_by = models.ForeignKey(User, null=True, blank=True, related_name='+', on_delete=models.SET_NULL)
+    resolved_date = models.DateTimeField(null=True, blank=True)
+
+    def __unicode__(self):
+        return self.individual.individual_id
+
+    GUID_PREFIX = 'DR'
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['individual'], condition=models.Q(status='O'), name='unique_open_data_request_per_individual',
+        )]
+
+        json_fields = ['guid', 'requested_fields', 'reason', 'status', 'created_date', 'created_by', 'resolved_date']
+        audit_fields = {'status'}
 
 
 class Dataset(ModelWithGUID):

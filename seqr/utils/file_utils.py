@@ -1,15 +1,20 @@
+from datetime import datetime, timedelta, timezone
 import glob
 import gzip
 import os
 import subprocess # nosec
 
-from seqr.utils.logging_utils import SeqrLogger
-
-from urllib.parse import urlparse
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+from seqr.utils.logging_utils import SeqrLogger
 from settings import S3_ARN_ASSUME_ROLE
 
 logger = SeqrLogger(__name__)
+
+S3_CHUNK_SIZE = 65536
+S3_CREDENTIAL_REFRESH_BUFFER = timedelta(minutes=5)
+S3_CLIENT_CACHE = {}
 
 
 def run_command(command, user=None, pipe_errors=False):
@@ -35,35 +40,36 @@ def is_google_bucket_file_path(file_path):
     return file_path.startswith("gs://")
 
 
-# Code below is the s3 equivalent code that performs similar stuff to the gs code
-
-def _is_s3_file_path(file_path):
+def is_s3_file_path(file_path):
     return file_path.startswith("s3://")
-def parse_s3_path(s3path):
-    parsed = urlparse(s3path)
-    bucket = parsed.netloc
-    path = parsed.path[1:]
-    object_list = path.split('/')
-    filename = object_list[-1]
-    return {
-        "bucket" : bucket,
-        "key" : path,
-        "filename" : filename
-    }
-#Need cross AWS account access
-def create_s3_session():
-    sts_client = boto3.client('sts')
-    assumed_role_object = sts_client.assume_role(
-        RoleArn=S3_ARN_ASSUME_ROLE,
-        RoleSessionName='seqr'
-    )
-    credentials = assumed_role_object['Credentials']
-    session = boto3.Session(
-        aws_access_key_id=credentials['AccessKeyId'],
-        aws_secret_access_key=credentials['SecretAccessKey'],
-        aws_session_token=credentials['SessionToken']
-    )
-    return session
+
+
+def _parse_s3_path(s3_path):
+    bucket, _, key = s3_path[5:].partition('/')
+    return {'Bucket': bucket, 'Key': key}
+
+
+def _get_s3_client():
+    expiration = S3_CLIENT_CACHE.get('expiration')
+    is_expired = expiration and expiration - S3_CREDENTIAL_REFRESH_BUFFER <= datetime.now(timezone.utc)
+    if 'client' not in S3_CLIENT_CACHE or is_expired:
+        if S3_ARN_ASSUME_ROLE:
+            credentials = boto3.client('sts').assume_role(
+                RoleArn=S3_ARN_ASSUME_ROLE, RoleSessionName='seqr',
+            )['Credentials']
+            S3_CLIENT_CACHE.update({
+                'client': boto3.client(
+                    's3',
+                    aws_access_key_id=credentials['AccessKeyId'],
+                    aws_secret_access_key=credentials['SecretAccessKey'],
+                    aws_session_token=credentials['SessionToken'],
+                ),
+                'expiration': credentials['Expiration'],
+            })
+        else:
+            S3_CLIENT_CACHE['client'] = boto3.client('s3')
+    return S3_CLIENT_CACHE['client']
+
 
 def get_google_project(gs_path):
     return 'anvil-datastorage' if gs_path.startswith('gs://fc-secure') else None
@@ -78,19 +84,13 @@ def does_file_exist(file_path, user=None):
             logger.warning(' '.join(errors), user)
         return success
 
-    # Equivalent code for s3
-    elif _is_s3_file_path(file_path):
-        if S3_ARN_ASSUME_ROLE == 'none':
-            s3_client = boto3.client('s3')
-        else:
-            s3_client = create_s3_session().client('s3')
-        parts = parse_s3_path(file_path)
-        response = s3_client.list_objects(
-            Bucket = parts['bucket'],
-            Prefix = parts['key']
-        )
-        # This does not seem to be returning true?
-        return 'Contents' in response and len(response['Contents']) > 0
+    if is_s3_file_path(file_path):
+        try:
+            _get_s3_client().head_object(**_parse_s3_path(file_path))
+        except (BotoCoreError, ClientError) as e:
+            logger.warning(str(e), user)
+            return False
+        return True
 
     return os.path.isfile(file_path)
 
@@ -109,10 +109,9 @@ def file_iter(file_path, byte_range=None, raw_content=False, user=None, **kwargs
     if is_google_bucket_file_path(file_path):
         for line in _google_bucket_file_iter(file_path, byte_range=byte_range, raw_content=raw_content, user=user, **kwargs):
             yield line
-    # s3 equivalent code to the gs
-    elif _is_s3_file_path(file_path):
-        for line in _s3_file_iter(file_path,byte_range=byte_range):
-            yield line    
+    elif is_s3_file_path(file_path):
+        for line in _s3_file_iter(file_path, byte_range=byte_range, raw_content=raw_content, user=user):
+            yield line
     elif byte_range:
         command = 'dd skip={offset} count={size} bs=1 if={file_path} status="none"'.format(
             offset=byte_range[0],
@@ -144,20 +143,25 @@ def _google_bucket_file_iter(gs_path, byte_range=None, raw_content=False, user=N
             line = line.decode('utf-8')
         yield line
 
-def _s3_file_iter(file_path, byte_range = None):
-    if S3_ARN_ASSUME_ROLE == 'none':
-        client = boto3.client('s3')
-    else:
-        client = create_s3_session().client('s3')
-    range_arg = f"bytes={byte_range[0]}-{byte_range[1]}" if byte_range else ''
-    parts = parse_s3_path(file_path)
-    r = client.get_object(
-        Bucket=parts['bucket'],
-        Key=parts['key'],
-        Range=range_arg,
-    )
-    for line in r['Body']:
-        yield line
+
+def _s3_file_iter(s3_path, byte_range=None, raw_content=False, user=None):
+    range_kwargs = {'Range': f'bytes={byte_range[0]}-{byte_range[1]}'} if byte_range else {}
+    try:
+        body = _get_s3_client().get_object(**_parse_s3_path(s3_path), **range_kwargs)['Body']
+    except (BotoCoreError, ClientError) as e:
+        logger.warning(str(e), user)
+        raise FileNotFoundError(f'Could not access file {s3_path}')
+    try:
+        if raw_content:
+            for chunk in body.iter_chunks(S3_CHUNK_SIZE):
+                yield chunk
+        else:
+            lines = gzip.GzipFile(fileobj=body) if s3_path.endswith("gz") else body.iter_lines(keepends=True)
+            for line in lines:
+                yield line.decode('utf-8')
+    finally:
+        body.close()
+
 
 def mv_file_to_gs(local_path, gs_path, user=None):
     command = 'mv {}'.format(local_path)

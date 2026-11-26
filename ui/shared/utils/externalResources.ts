@@ -260,7 +260,7 @@ const VARIANT_RESOURCE_CONFIGS: ResourceConfig<ResourceVariant>[] = [
     label: 'Google',
     frameable: false,
     shouldShow: ({ genes, variations }) => genes.length > 0 && variations.length > 0,
-    getUrl: ({ genes, variations }) => `https://scholar.google.com/scholar?q=${getLitSearch(genes, variations).replaceAll('=', '')}`,
+    getUrl: ({ genes, variations }) => `https://scholar.google.com/scholar?q=${getLitSearch(genes, variations).replace(/=/g, '')}`,
   },
   {
     key: 'pubmed',

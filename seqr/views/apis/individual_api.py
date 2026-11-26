@@ -13,10 +13,12 @@ from reference_data.models import HumanPhenotypeOntology
 from seqr.models import Individual, Family, CAN_VIEW
 from seqr.utils.file_utils import file_iter
 from seqr.utils.gene_utils import get_genes, get_gene_ids_for_gene_symbols
+from seqr.utils.phenopacket_utils import load_phenopacket_json, parse_phenopackets, combine_parsed_phenopackets, \
+    PhenopacketError
 from seqr.utils.xpos_utils import get_xpos
 from seqr.views.utils.anvil_metadata_utils import PARTICIPANT_TABLE, PHENOTYPE_TABLE, EXPERIMENT_TABLE, \
     EXPERIMENT_LOOKUP_TABLE, FINDINGS_TABLE, FINDING_METADATA_COLUMNS, TRANSCRIPT_FIELDS, GENE_COLUMN, parse_population
-from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file, parse_file
+from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file, parse_file, save_temp_json_records
 from seqr.views.utils.json_to_orm_utils import update_individual_from_json
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case, _to_camel_case
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_for_individuals, add_individual_hpo_details, \
@@ -29,6 +31,7 @@ from seqr.views.utils.permissions_utils import get_project_and_check_edit_permis
     pm_or_data_manager_required, check_workspace_perm, check_family_view_permission
 from seqr.views.utils.project_context_utils import add_project_tag_type_counts
 from seqr.views.utils.individual_utils import delete_individuals, add_or_update_individuals_and_families
+from seqr.views.utils.phenopacket_import_utils import get_phenopacket_import_preview, apply_phenopacket_import
 from seqr.views.utils.variant_utils import bulk_create_tagged_variants, get_saved_variant_annotations
 
 
@@ -692,6 +695,60 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
         )}
 
     return create_json_response(response)
+
+
+MAX_PHENOPACKET_ERRORS = 50
+
+
+@login_and_policies_required
+def receive_phenopackets_handler(request, project_guid):
+    """
+    Parses uploaded GA4GH Phenopacket v2 JSON files and returns a preview of the changes they would make to existing
+    individuals. Nothing is saved to the database: the non-identifying parsed values are stashed in a temporary file
+    and applied by save_phenopackets_handler for the fields the uploader confirms.
+    """
+    project = get_project_and_check_edit_permission(project_guid, request.user)
+
+    files = [f for field in request.FILES for f in request.FILES.getlist(field)]
+    if not files:
+        return create_json_response({'errors': ['No files were uploaded'], 'warnings': []}, status=400)
+
+    results = []
+    errors = []
+    for i, f in enumerate(files):
+        try:
+            results.append(parse_phenopackets(load_phenopacket_json(f.read())))
+        except PhenopacketError as e:
+            errors += [f'File {i + 1}: {error}' for error in e.errors]
+    if errors:
+        if len(errors) > MAX_PHENOPACKET_ERRORS:
+            errors = errors[:MAX_PHENOPACKET_ERRORS] + [f'{len(errors) - MAX_PHENOPACKET_ERRORS} more errors not shown']
+        return create_json_response({'errors': errors, 'warnings': []}, status=400)
+
+    parsed = combine_parsed_phenopackets(results)
+    records, preview = get_phenopacket_import_preview(parsed, project, request.user)
+    return create_json_response({
+        'uploadedFileId': save_temp_json_records(records, request.user),
+        'info': [
+            f'{len(parsed["individuals"])} subject(s) read from {len(files)} file(s)',
+            f'{len(records)} existing individual(s) have proposed changes',
+        ],
+        **preview,
+    })
+
+
+@login_and_policies_required
+def save_phenopackets_handler(request, project_guid, upload_file_id):
+    """
+    Applies the confirmed fields of an upload previewed by receive_phenopackets_handler.
+
+    Request body: {'individuals': {<individualGuid>: {<field>: 'merge' | 'replace'}}}. 'merge' adds to term lists and
+    fills empty values only; 'replace' overwrites the existing value.
+    """
+    project = get_project_and_check_edit_permission(project_guid, request.user)
+    selections = json.loads(request.body).get('individuals')
+    records = load_uploaded_file(upload_file_id)
+    return create_json_response(apply_phenopacket_import(project, records, selections, request.user))
 
 
 @pm_or_data_manager_required

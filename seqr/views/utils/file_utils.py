@@ -115,16 +115,21 @@ def save_uploaded_file(request, process_records=None, allow_json=False):
     if process_records:
         json_records = process_records(json_records, filename=filename)
 
-    # save json to temporary file
+    uploaded_file_id = save_temp_json_records(json_records, request.user)
+
+    return uploaded_file_id, filename, json_records
+
+
+def save_temp_json_records(json_records, user):
     uploaded_file_id = hashlib.md5(str(json_records).encode('utf-8')).hexdigest() # nosec
     file_name = _compute_serialized_file_name(uploaded_file_id)
     serialized_file_path = get_temp_file_path(file_name, is_local=True)
     with gzip.open(serialized_file_path, 'wt') as f:
         json.dump(json_records, f)
 
-    persist_temp_file(file_name, request.user)
+    persist_temp_file(file_name, user)
 
-    return uploaded_file_id, filename, json_records
+    return uploaded_file_id
 
 
 def persist_temp_file(file_name, user, src_suffix=''):

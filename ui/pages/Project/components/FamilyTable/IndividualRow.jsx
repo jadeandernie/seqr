@@ -33,6 +33,7 @@ import { snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import { updateIndividual } from 'redux/rootReducer'
 import { getDatasetsByIndividual, getMmeSubmissionsByGuid, getIGVSamplesByFamilySampleIndividual } from 'redux/selectors'
 import { HPO_FORM_FIELDS } from '../HpoTerms'
+import HpoImportButton from '../hpo-import/HpoImportButton'
 import {
   CASE_REVIEW_STATUS_MORE_INFO_NEEDED, CASE_REVIEW_STATUS_OPTIONS, CASE_REVIEW_TABLE_NAME, INDIVIDUAL_DETAIL_FIELDS,
   ONSET_AGE_OPTIONS, INHERITANCE_MODE_OPTIONS, INHERITANCE_MODE_LOOKUP, AR_FIELDS,
@@ -383,7 +384,7 @@ const INDIVIDUAL_FIELD_RENDER_LOOKUP = {
     ),
     fieldDisplay: population => POPULATION_MAP[population] || population || 'Not Loaded',
   },
-  [INDIVIDUAL_FIELD_FEATURES]: { formFields: HPO_FORM_FIELDS },
+  [INDIVIDUAL_FIELD_FEATURES]: { formFields: HPO_FORM_FIELDS, editButtonComponent: HpoImportButton },
   disorders: {
     component: ListFieldView,
     formFieldProps: {

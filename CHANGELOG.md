@@ -2,6 +2,8 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds HPO term synonyms to the reference data, used to propose HPO terms from pasted clinical notes (REQUIRES DB MIGRATION)
+  * Synonyms are loaded the next time `update_all_reference_data` runs. Until then terms are matched on their names only.
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

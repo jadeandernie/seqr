@@ -1330,14 +1330,17 @@ const getGeneConstraintSortScore = ({ constraints }) => {
   return constraints.louef - missenseOffset
 }
 
-const populationComparator =
-  population => (a, b) => ((a.populations || {})[population] || {}).af - ((b.populations || {})[population] || {}).af
+const MISSING_FREQUENCY_SORT_VALUE = Number.MAX_VALUE
+const populationComparator = (population, field = 'af') => (a, b) => (
+  (a.populations?.[population]?.[field] ?? MISSING_FREQUENCY_SORT_VALUE) -
+    (b.populations?.[population]?.[field] ?? MISSING_FREQUENCY_SORT_VALUE)
+)
 
 const predictionComparator =
   prediction => (a, b) => ((b.predictions || {})[prediction] || -1) - ((a.predictions || {})[prediction] || -1)
 
 const getTranscriptValues = (transcripts, getValue) => (
-  Object.values(transcripts || {}).flat().map(getValue).filter(val => val)
+  Object.values(transcripts || {}).flat().map(getValue).filter(val => val || val === 0)
 )
 
 const getConsequenceRank = ({ transcripts, svType }) => (
@@ -1381,7 +1384,7 @@ const VARIANT_SORT_OPTONS = [
   },
   { value: SORT_BY_GNOMAD_GENOMES, text: 'gnomAD Genomes Frequency', comparator: populationComparator('gnomad_genomes') },
   { value: SORT_BY_GNOMAD_EXOMES, text: 'gnomAD Exomes Frequency', comparator: populationComparator('gnomad_exomes') },
-  { value: SORT_BY_SEQR_AC, text: 'seqr AC', comparator: (a, b) => a.populations?.seqr?.ac - b.populations?.seqr?.ac },
+  { value: SORT_BY_SEQR_AC, text: 'seqr AC', comparator: populationComparator('seqr', 'ac') },
   { value: SORT_BY_CADD, text: 'CADD', comparator: predictionComparator('cadd') },
   { value: SORT_BY_REVEL, text: 'REVEL', comparator: predictionComparator('revel') },
   { value: SORT_BY_EIGEN, text: 'Eigen', comparator: predictionComparator('eigen') },

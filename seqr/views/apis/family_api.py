@@ -15,8 +15,10 @@ from seqr.views.utils.individual_utils import delete_individuals
 from seqr.views.utils.json_to_orm_utils import update_family_from_json, update_model_from_json, create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.note_utils import create_note_handler, update_note_handler, delete_note_handler
+from seqr.views.utils.completeness_utils import FAMILY_COMPLETENESS_FIELDS
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model,  get_json_for_family_note, get_json_for_datasets, \
-    get_json_for_matchmaker_submissions, get_json_for_analysis_groups, _get_json_for_families, get_json_for_queryset
+    get_json_for_matchmaker_submissions, get_json_for_analysis_groups, _get_json_for_families, get_json_for_queryset, \
+    _get_json_for_individuals
 from seqr.views.utils.project_context_utils import add_families_context, families_discovery_tags, add_project_tag_types, \
     MME_TAG_NAME
 from seqr.models import Family, FamilyAnalysedBy, Individual, FamilyNote, Dataset, VariantTag, AnalysisGroup, RnaSeqTpm, \
@@ -187,6 +189,13 @@ def edit_families_handler(request, project_guid):
                 Family.objects.filter(id__in=updated_family_ids), request.user, add_individual_guids_field=True)
         }
     }
+
+    if any(field in fields for fields in modified_families for field in FAMILY_COMPLETENESS_FIELDS):
+        updated_families_by_guid['individualsByGuid'] = {
+            individual['individualGuid']: individual for individual in _get_json_for_individuals(
+                Individual.objects.filter(family_id__in=updated_family_ids), request.user, project_guid=project_guid,
+                add_hpo_details=True)
+        }
 
     return create_json_response(updated_families_by_guid)
 

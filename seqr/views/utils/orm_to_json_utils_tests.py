@@ -1,14 +1,15 @@
 from django.contrib.auth.models import User
 import mock
 from copy import deepcopy
-from seqr.models import Project, IgvSample, SavedVariant, VariantNote, LocusList, VariantSearch
+from seqr.models import Project, IgvSample, SavedVariant, VariantNote, LocusList, VariantSearch, Individual
 from seqr.views.utils.orm_to_json_utils import get_json_for_user, _get_json_for_project, \
     get_json_for_sample, get_json_for_variant_note, get_json_for_locus_list, \
-    get_json_for_saved_searches, get_json_for_saved_variants_with_tags, get_json_for_current_user
+    get_json_for_saved_searches, get_json_for_saved_variants_with_tags, get_json_for_current_user, \
+    _get_json_for_individuals, get_json_for_individual_completeness
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, \
     PROJECT_FIELDS, SAVED_VARIANT_FIELDS,  \
     FUNCTIONAL_FIELDS, SAVED_SEARCH_FIELDS, LOCUS_LIST_DETAIL_FIELDS, PA_LOCUS_LIST_FIELDS, IGV_SAMPLE_FIELDS, \
-    TAG_FIELDS, VARIANT_NOTE_FIELDS
+    TAG_FIELDS, VARIANT_NOTE_FIELDS, INDIVIDUAL_CORE_FIELDS
 
 class JSONUtilsTest(object):
     databases = ['default']
@@ -94,6 +95,40 @@ class JSONUtilsTest(object):
         json = _get_json_for_project(project, user)
 
         self.assertSetEqual(set(json.keys()), PROJECT_FIELDS)
+
+    def test_json_for_individuals(self):
+        individuals = Individual.objects.filter(family__project__guid='R0001_1kg').order_by('id')
+        with self.assertNumQueries(1):
+            individuals_json = _get_json_for_individuals(individuals)
+            individuals_by_guid = {i['individualGuid']: i for i in individuals_json}
+        self.assertEqual(len(individuals_by_guid), 14)
+
+        # HPO terms and family fields are read to score completeness but are not returned without HPO details
+        fields = {'projectGuid', 'familyGuid', 'paternalId', 'maternalId', 'paternalGuid', 'maternalGuid'}
+        fields.update(INDIVIDUAL_CORE_FIELDS)
+        for individual in individuals_json:
+            self.assertSetEqual(set(individual.keys()), fields)
+
+        self.assertDictEqual(individuals_by_guid['I000001_na19675']['completeness'], {
+            'score': 96,
+            'missing': [{'field': 'mondoId', 'label': 'Family MONDO disease ID', 'weight': 4, 'level': 'family'}],
+        })
+        completeness = individuals_by_guid['I000013_na20878']['completeness']
+        self.assertEqual(completeness['score'], 41)
+        self.assertListEqual([item['field'] for item in completeness['missing']], [
+            'absentFeatures', 'onsetAge', 'birthYear', 'consanguinity', 'ancestry', 'expectedInheritance',
+            'disorders', 'codedPhenotype', 'mondoId',
+        ])
+        self.assertSetEqual(
+            {i['affected'] for i in individuals_json if i['completeness'] is None}, {'N'})
+        self.assertSetEqual(
+            {i['affected'] for i in individuals_json if i['completeness'] is not None}, {'A'})
+
+        individual = Individual.objects.get(guid='I000001_na19675')
+        with self.assertNumQueries(1):
+            completeness = get_json_for_individual_completeness(individual)
+        self.assertDictEqual(completeness, individuals_by_guid['I000001_na19675']['completeness'])
+        self.assertIsNone(get_json_for_individual_completeness(Individual.objects.get(guid='I000002_na19678')))
 
     def test_json_for_igv_sample(self):
         sample = IgvSample.objects.first()

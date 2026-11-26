@@ -75,6 +75,7 @@ COMPLETENESS_FIELDS = [
 ]
 
 ITEM_KEYS = ['field', 'label', 'weight', 'level']
+FAMILY_COMPLETENESS_FIELDS = [config['field'] for config in COMPLETENESS_FIELDS if config['level'] == FAMILY_LEVEL]
 NO_FEATURES_FIELD = 'features'
 
 

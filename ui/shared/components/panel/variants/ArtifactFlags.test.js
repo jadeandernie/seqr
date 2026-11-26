@@ -22,9 +22,9 @@ const CLEAN_VARIANT = {
   pos: 248367227,
   genomeVersion: '38',
   genotypes: {
-    I_CHILD: { numAlt: 1, gq: 99, ab: 0.48, dp: 60, filters: [] as string[] },
-    I_MOM: { numAlt: 1, gq: 99, ab: 0.51, dp: 55, filters: [] as string[] },
-    I_DAD: { numAlt: 0, gq: 99, ab: 0, dp: 48, filters: [] as string[] },
+    I_CHILD: { numAlt: 1, gq: 99, ab: 0.48, dp: 60, filters: [] },
+    I_MOM: { numAlt: 1, gq: 99, ab: 0.51, dp: 55, filters: [] },
+    I_DAD: { numAlt: 0, gq: 99, ab: 0, dp: 48, filters: [] },
   },
 }
 
@@ -37,7 +37,7 @@ const FLAGGED_VARIANT = {
   },
 }
 
-const render = (variant: object) => mount(
+const render = variant => mount(
   <Provider store={configureStore()(STATE)}><ArtifactFlags variant={variant} /></Provider>,
 )
 

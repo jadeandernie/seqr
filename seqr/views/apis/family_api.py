@@ -13,10 +13,12 @@ from seqr.utils.logging_utils import SeqrLogger
 from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file
 from seqr.views.utils.individual_utils import delete_individuals
 from seqr.views.utils.json_to_orm_utils import update_family_from_json, update_model_from_json, create_model_from_json
-from seqr.views.utils.json_utils import create_json_response
+from seqr.views.utils.json_utils import create_json_response, _to_snake_case
 from seqr.views.utils.note_utils import create_note_handler, update_note_handler, delete_note_handler
+from seqr.views.utils.completeness_utils import FAMILY_COMPLETENESS_FIELDS
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model,  get_json_for_family_note, get_json_for_datasets, \
-    get_json_for_matchmaker_submissions, get_json_for_analysis_groups, _get_json_for_families, get_json_for_queryset
+    get_json_for_matchmaker_submissions, get_json_for_analysis_groups, _get_json_for_families, get_json_for_queryset, \
+    _get_json_for_individuals
 from seqr.views.utils.project_context_utils import add_families_context, families_discovery_tags, add_project_tag_types, \
     MME_TAG_NAME
 from seqr.models import Family, FamilyAnalysedBy, Individual, FamilyNote, Dataset, VariantTag, AnalysisGroup, RnaSeqTpm, \
@@ -176,10 +178,14 @@ def edit_families_handler(request, project_guid):
             ]))}, status=400)
 
     updated_family_ids = []
+    updated_completeness_family_ids = []
     for fields in modified_families:
         family = family_models[fields['familyGuid']]
+        completeness_values = _get_completeness_values(family)
         update_family_from_json(family, fields, user=request.user, allow_unknown_keys=True)
         updated_family_ids.append(family.id)
+        if _get_completeness_values(family) != completeness_values:
+            updated_completeness_family_ids.append(family.id)
 
     updated_families_by_guid = {
         'familiesByGuid': {
@@ -188,7 +194,18 @@ def edit_families_handler(request, project_guid):
         }
     }
 
+    if updated_completeness_family_ids:
+        updated_families_by_guid['individualsByGuid'] = {
+            individual['individualGuid']: individual for individual in _get_json_for_individuals(
+                Individual.objects.filter(family_id__in=updated_completeness_family_ids), request.user,
+                project_guid=project_guid, add_hpo_details=True)
+        }
+
     return create_json_response(updated_families_by_guid)
+
+
+def _get_completeness_values(family):
+    return [bool(getattr(family, _to_snake_case(field))) for field in FAMILY_COMPLETENESS_FIELDS]
 
 
 @login_and_policies_required

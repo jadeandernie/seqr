@@ -17,9 +17,10 @@ import {
 } from 'shared/utils/constants'
 import { toCamelcase, toSnakecase, snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import { compareObjects } from 'shared/utils/sortUtils'
+import { getCompletenessByFamily, getProjectCompleteness } from 'shared/utils/completeness'
 
 import {
-  getProjectsByGuid, getFamiliesGroupedByProjectGuid, getIndividualsByGuid, getGenesById, getUser,
+  getProjectsByGuid, getFamiliesGroupedByProjectGuid, getFamiliesByGuid, getIndividualsByGuid, getGenesById, getUser,
   getAnalysisGroupsGroupedByProjectGuid, getSavedVariantsByGuid, getSortedIndividualsByFamily,
   getMmeResultsByGuid, getMmeSubmissionsByGuid, getHasActiveSearchSampleByFamily, getSelectableTagTypesByProject,
   getVariantTagsByGuid, getUserOptionsByUsername, getNotesByFamilyType,
@@ -608,6 +609,18 @@ export const getAnalysisStatusCounts = createSelector(
       option => ({ ...option, count: (analysisStatusCounts[option.value] || 0) }),
     )
   },
+)
+
+export const getCompletenessByFamilyGuid = createSelector(
+  getFamiliesByGuid,
+  getIndividualsByGuid,
+  getCompletenessByFamily,
+)
+
+export const getProjectAnalysisGroupCompleteness = createSelector(
+  getProjectAnalysisGroupFamiliesByGuid,
+  getIndividualsByGuid,
+  (familiesByGuid, individualsByGuid) => getProjectCompleteness(Object.values(familiesByGuid), individualsByGuid),
 )
 
 export const getDefaultMmeSubmission = createSelector(

@@ -102,3 +102,43 @@ test('renders compact family detail without variant details or expanded content'
   expect(wrapper.find('ExpandedFamily').length).toEqual(0)
   expect(wrapper.find('VariantDetail').length).toEqual(0)
 })
+
+test('shows the clinical data completeness of the family and of its affected individuals', () => {
+  const missing = [{ field: 'onsetAge', label: 'Age of onset', weight: 10, level: 'individual' }]
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    individualsByGuid: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid,
+      I021476_na19678_1: { ...STATE_WITH_2_FAMILIES.individualsByGuid.I021476_na19678_1, completeness: null },
+      I021474_na19679_1: { ...STATE_WITH_2_FAMILIES.individualsByGuid.I021474_na19679_1, completeness: null },
+      I021475_na19675_1: {
+        ...STATE_WITH_2_FAMILIES.individualsByGuid.I021475_na19675_1, completeness: { score: 90, missing },
+      },
+    },
+  }
+  const renderFamily = (familyGuid, props) => mount(
+    <Provider store={configureStore(state)}>
+      <MemoryRouter>
+        <FamilyDetail familyGuid={familyGuid} {...props} />
+      </MemoryRouter>
+    </Provider>,
+  )
+
+  const wrapper = renderFamily('F011652_1', { showVariantDetails: true })
+  expect(wrapper.find('FamilyCompletenessLabel').text()).toEqual('Clinical data 90% partly complete')
+  expect(wrapper.find('FamilyCompletenessLabel').prop('completeness')).toEqual(
+    { score: 90, numIndividuals: 1, numNoFeatures: 0 },
+  )
+  expect(wrapper.find('IndividualCompletenessLabel').map(label => label.text())).toEqual(
+    ['Clinical data 90% partly complete', '', ''],
+  )
+  expect(wrapper.find('Connect(BaseVariantDetail)').exists()).toBe(true)
+
+  const compactWrapper = renderFamily('F011652_1', { compact: true })
+  expect(compactWrapper.find('FamilyCompletenessLabel').text()).toEqual('Clinical data 90% partly complete')
+  expect(compactWrapper.find('IndividualCompletenessLabel')).toHaveLength(0)
+  expect(compactWrapper.find('Connect(BaseVariantDetail)').exists()).toBe(false)
+
+  // families with no scored individuals have no indicator
+  expect(renderFamily('F011652_2', { compact: true }).find('FamilyCompletenessLabel').isEmptyRender()).toBe(true)
+})

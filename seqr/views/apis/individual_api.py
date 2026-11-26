@@ -20,6 +20,7 @@ from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file, 
 from seqr.views.utils.json_to_orm_utils import update_individual_from_json
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case, _to_camel_case
 from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_for_individuals, add_individual_hpo_details, \
+    get_json_for_individual_completeness, \
     _get_json_for_families, get_json_for_rna_seq_outliers, get_project_collaborators_by_username, INDIVIDUAL_DISPLAY_NAME_EXPR, \
     GREGOR_FINDING_TAG_TYPE
 from seqr.views.utils.pedigree_info_utils import parse_pedigree_table, validate_fam_file_records, parse_hpo_terms, \
@@ -68,6 +69,7 @@ def update_individual_handler(request, individual_guid):
     update_individual_from_json(individual, update_json, user=request.user, allow_unknown_keys=True)
     individual_json = _get_json_for_model(individual, user=request.user)
     individual_json['displayName'] = individual_json['displayName'] or individual_json['individualId']
+    individual_json['completeness'] = get_json_for_individual_completeness(individual)
 
     return create_json_response({
         individual.guid: individual_json
@@ -98,6 +100,7 @@ def update_individual_hpo_terms(request, individual_guid):
 
     individual_json = {k: getattr(individual, _to_snake_case(k)) for k in feature_fields}
     add_individual_hpo_details([individual_json])
+    individual_json['completeness'] = get_json_for_individual_completeness(individual)
 
     return create_json_response({
         individual.guid: individual_json

@@ -7,6 +7,7 @@ import { reducers as dataManagementReducers } from 'pages/DataManagement/reducer
 import { reducers as reportReducers } from 'pages/Report/reducers'
 import { reducers as summaryDataReducers } from 'pages/SummaryData/reducers'
 import { HttpRequestHelper } from 'shared/utils/httpRequestHelper'
+import { hasFamilyCompletenessUpdate } from 'shared/utils/completeness'
 import {
   createObjectsByIdReducer, loadingReducer, zeroActionsReducer, createSingleObjectReducer, createSingleValueReducer,
 } from './utils/reducerFactories'
@@ -95,10 +96,18 @@ export const updateFamily = (values) => {
   }
 
   const familyField = values.familyField ? `_${values.familyField}` : ''
-  return dispatch => new HttpRequestHelper(`${urlBase}/update${familyField}`,
+  return (dispatch, getState) => new HttpRequestHelper(`${urlBase}/update${familyField}`,
     (responseJson) => {
+      const family = getState().familiesByGuid[values.familyGuid]
       const updatesById = values.rawResponse ? responseJson : { familiesByGuid: responseJson }
       dispatch({ type: RECEIVE_DATA, updatesById })
+      const updatedFamily = (updatesById.familiesByGuid || {})[values.familyGuid]
+      if (family && updatedFamily && hasFamilyCompletenessUpdate(family, updatedFamily)) {
+        // The completeness of the family's individuals depends on the updated family fields
+        new HttpRequestHelper(`${urlBase}/details`, (detailsJson) => {
+          dispatch({ type: RECEIVE_DATA, updatesById: detailsJson })
+        }).get()
+      }
     }).post(values)
 }
 

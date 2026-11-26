@@ -33,7 +33,9 @@ import {
   getProjectAnalysisGroupMmeSubmissionDetails,
   getMmeSubmissionsLoading,
   getCurrentAnalysisGroup,
+  getProjectAnalysisGroupCompleteness,
 } from '../selectors'
+import { ProjectCompletenessSummary } from './ClinicalDataCompleteness'
 import EditFamiliesAndIndividualsButton from './edit-families-and-individuals/EditFamiliesAndIndividualsButton'
 import EditIndividualMetadataButton from './edit-families-and-individuals/EditIndividualMetadataButton'
 import EditDatasetsButton from './EditDatasetsButton'
@@ -448,6 +450,23 @@ const mapAnalysisStatusStateToProps = (state, ownProps) => ({
 
 const AnalysisStatusOverview = connect(mapAnalysisStatusStateToProps)(AnalysisStatus)
 
+const ClinicalData = React.memo(({ completeness }) => (
+  <DetailSection
+    title="Clinical Data Completeness"
+    content={<ProjectCompletenessSummary completeness={completeness} />}
+  />
+))
+
+ClinicalData.propTypes = {
+  completeness: PropTypes.object,
+}
+
+const mapClinicalDataStateToProps = (state, ownProps) => ({
+  completeness: getProjectAnalysisGroupCompleteness(state, ownProps),
+})
+
+const ClinicalDataOverview = connect(mapClinicalDataStateToProps)(ClinicalData)
+
 const LoadingSection = ({ loading, children }) => (
   loading ? <Dimmer inverted active><Loader /></Dimmer> : children
 )
@@ -501,6 +520,10 @@ const ProjectOverview = React.memo(({
     <Grid.Column width={6}>
       <LoadingSection loading={familiesLoading}>
         <AnalysisStatusOverview analysisGroupGuid={analysisGroupGuid} />
+      </LoadingSection>
+      <VerticalSpacer height={10} />
+      <LoadingSection loading={familiesLoading}>
+        <ClinicalDataOverview analysisGroupGuid={analysisGroupGuid} />
       </LoadingSection>
       <VerticalSpacer height={10} />
       <AnvilOverview analysisGroupGuid={analysisGroupGuid} />

@@ -475,7 +475,7 @@ class ProjectAPITest(object):
 
         family_fields = {
             'individualGuids', 'discoveryGeneIds', 'caseReviewStatuses', 'caseReviewStatusLastModified',
-            'hasRequiredMetadata', 'parents', 'hasPhenotypePrioritization', 'hasRna', 'externalData',
+            'hasRequiredMetadata', 'parents', 'hasPhenotypePrioritization', 'hasRna', 'externalData', 'completeness',
         }
         family_fields.update(SUMMARY_FAMILY_FIELDS)
         expected_family = {k: mock.ANY for k in family_fields}
@@ -543,6 +543,15 @@ class ProjectAPITest(object):
         }, {0})
 
         self.assertSetEqual(set(response_json['genesById'].keys()), {'ENSG00000135953'})
+        self.assertDictEqual(family_1['completeness'], {'score': 96, 'numIndividuals': 1, 'numNoFeatures': 0})
+        self.assertDictEqual(
+            response_json['familiesByGuid']['F000002_2']['completeness'],
+            {'score': 64, 'numIndividuals': 1, 'numNoFeatures': 0},
+        )
+        self.assertDictEqual(family_3['completeness'], {'score': 9, 'numIndividuals': 1, 'numNoFeatures': 1})
+        # Families with no affected individuals are not scored
+        self.assertIsNone(response_json['familiesByGuid']['F000005_5']['completeness'])
+        self.assertIsNone(empty_family['completeness'])
 
     def test_project_individuals(self):
         url = reverse(project_individuals, args=[PROJECT_GUID])
@@ -566,6 +575,28 @@ class ProjectAPITest(object):
         self.assertSetEqual(
             set(response_json['individualsByGuid']['I000001_na19675']['absentFeatures'][0].keys()),
             {'id', 'category', 'label'}
+        )
+        self.assertDictEqual(response_json['individualsByGuid']['I000001_na19675']['completeness'], {
+            'score': 96,
+            'missing': [{'field': 'mondoId', 'label': 'Family MONDO disease ID', 'weight': 4, 'level': 'family'}],
+        })
+        completeness = response_json['individualsByGuid']['I000004_hg00731']['completeness']
+        self.assertEqual(completeness['score'], 64)
+        self.assertListEqual(
+            [item['field'] for item in completeness['missing']],
+            ['onsetAge', 'birthYear', 'consanguinity', 'ancestry', 'expectedInheritance', 'disorders'],
+        )
+        completeness = response_json['individualsByGuid']['I000007_na20870']['completeness']
+        self.assertEqual(completeness['score'], 9)
+        self.assertListEqual([item['field'] for item in completeness['missing']], [
+            'features', 'absentFeatures', 'onsetAge', 'birthYear', 'consanguinity', 'ancestry', 'expectedInheritance',
+            'disorders', 'codedPhenotype', 'mondoId',
+        ])
+        # Unaffected individuals are not scored
+        self.assertIsNone(response_json['individualsByGuid']['I000002_na19678']['completeness'])
+        self.assertSetEqual(
+            {i['completeness'] is None for i in response_json['individualsByGuid'].values() if i['affected'] != 'A'},
+            {True},
         )
 
         # Test empty project

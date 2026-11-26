@@ -19,6 +19,7 @@ import {
 import { DISCOVERY_CATEGORY_NAME, MME_TAG_NAME, GREGOR_FINDING_TAG_NAME } from 'shared/utils/constants'
 import { snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import VariantClassify from './VariantClassify'
+import RememberVariantButton from '../known-variants/RememberVariantButton'
 import PopupWithModal from '../../PopupWithModal'
 import { HorizontalSpacer } from '../../Spacers'
 import { NoBorderTable, InlineHeader } from '../../StyledComponents'
@@ -319,6 +320,8 @@ const FamilyVariantTags = React.memo(({
           <Table.Cell collapsing textAlign="right">
             {variant.variantGuid && !Array.isArray(variant) &&
               <VariantClassify variant={variant} familyGuid={family.familyGuid} />}
+            {variant.variantGuid && !Array.isArray(variant) && !variant.svType &&
+              <RememberVariantButton variantGuid={variant.variantGuid} />}
           </Table.Cell>
           <Table.Cell collapsing textAlign="right">
             {(!Array.isArray(variant) || variantTagNotes) &&

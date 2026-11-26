@@ -29,8 +29,15 @@ test('renders the project sections and the families table', () => {
 
   const sectionHeaders = wrapper.find('StyledComponents__SectionHeader').map(header => header.text())
   expect(sectionHeaders).toEqual([
-    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Notifications', 'Collaborators', 'Families',
+    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Known Variant Matches',
+    'Notifications', 'Collaborators', 'Families',
   ])
+  expect(wrapper.find('KnownVariantMatches').props()).toEqual(
+    expect.objectContaining({ projectGuid: 'R0237_1000_genomes_demo' }),
+  )
+  expect(global.fetch.mock.calls.map(call => call[0])).toContain(
+    '/api/project/R0237_1000_genomes_demo/known_variant_matches?',
+  )
   expect(wrapper.find('FamilyTableRow').length).toEqual(2)
 })
 
@@ -49,6 +56,7 @@ test('renders an analysis group page without an edit button or notifications sec
   expect(sectionHeaders).toEqual([
     'Analysis Group', 'Gene Lists', 'Overview', 'Variant Tags', 'Collaborators', 'Families',
   ])
+  expect(wrapper.find('KnownVariantMatches').length).toEqual(0)
   expect(wrapper.find('Link').someWhere(
     link => link.prop('to') === '/project/R0237_1000_genomes_demo/saved_variants/analysis_group/AG0000183_test_group',
   )).toBe(true)

@@ -72,7 +72,8 @@ const getCompoundHetToggle = (flattenCompoundHet, toggleUnpair) => geneId => (
 
 const BaseVariantSearchResultsContent = React.memo(({
   match, variantSearchDisplay, searchedVariantExportConfig, totalVariantsCount,
-  displayVariants, flattenCompoundHet, toggleUnpair, hasCompHet, ...props
+  displayVariants, flattenCompoundHet, toggleUnpair, hasCompHet, variantsComponent: VariantsComponent = DisplayVariants,
+  ...props
 }) => {
   const { searchHash } = match.params
   const { page = 1, recordsPerPage } = variantSearchDisplay
@@ -95,7 +96,7 @@ const BaseVariantSearchResultsContent = React.memo(({
         <GeneBreakdown searchHash={searchHash} />
       </Grid.Column>
     </LargeRow>,
-    <DisplayVariants key="variants" displayVariants={displayVariants} compoundHetToggle={compoundHetToggle} searchHash={searchHash} />,
+    <VariantsComponent key="variants" displayVariants={displayVariants} compoundHetToggle={compoundHetToggle} searchHash={searchHash} />,
     <LargeRow key="bottomPagination">
       <Grid.Column width={11} floated="right" textAlign="right">
         <SearchDisplayForm formLocation="Bottom" match={match} paginationOnly searchOnSubmit {...props} />
@@ -116,6 +117,7 @@ BaseVariantSearchResultsContent.propTypes = {
   hasCompHet: PropTypes.bool,
   flattenCompoundHet: PropTypes.object,
   toggleUnpair: PropTypes.func,
+  variantsComponent: PropTypes.elementType,
 }
 
 const mapContentStateToProps = (state, ownProps) => ({

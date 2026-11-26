@@ -45,6 +45,34 @@ test('renders the family description on the family page', () => {
   expect(wrapper.find('Breadcrumb').text()).toContain('Family: 1')
 })
 
+const getBreadcrumbLinks = wrapper => wrapper.find('Breadcrumb a').map(link => [link.text(), link.prop('href')])
+
+test('renders the workbooks breadcrumb on the workbooks page', () => {
+  const wrapper = renderPageHeader({ match: { params: { breadcrumb: 'workbooks' } } })
+
+  expect(getBreadcrumbLinks(wrapper)).toEqual([
+    ['1000 Genomes Demo', '/project/R0237_1000_genomes_demo/project_page'],
+    ['Workbooks', '/project/R0237_1000_genomes_demo/workbooks'],
+  ])
+})
+
+test('renders the workbook name in the breadcrumb once the workbook is loaded', () => {
+  const match = { params: { breadcrumb: 'workbook', breadcrumbId: 'WB0000001_trio_analysis', breadcrumbIdSection: 'WBT1' } }
+  const loading = renderPageHeader({ match }, { ...STATE_WITH_2_FAMILIES, workbooksByGuid: {} })
+
+  expect(getBreadcrumbLinks(loading).map(([text]) => text)).toEqual(['1000 Genomes Demo', 'Workbooks'])
+
+  const wrapper = renderPageHeader({ match }, {
+    ...STATE_WITH_2_FAMILIES, workbooksByGuid: { WB0000001_trio_analysis: { name: 'Trio analysis' } },
+  })
+
+  expect(getBreadcrumbLinks(wrapper)).toEqual([
+    ['1000 Genomes Demo', '/project/R0237_1000_genomes_demo/project_page'],
+    ['Workbooks', '/project/R0237_1000_genomes_demo/workbooks'],
+    ['Trio analysis', '/project/R0237_1000_genomes_demo/workbook/WB0000001_trio_analysis'],
+  ])
+})
+
 test('renders nothing when there is no current project', () => {
   const store = configureStore()({ ...STATE_WITH_2_FAMILIES, currentProjectGuid: null })
   const wrapper = mount(

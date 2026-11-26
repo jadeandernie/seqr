@@ -3,7 +3,9 @@ import mock
 import responses
 
 from datetime import datetime
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
+from social_django.models import UserSocialAuth
 
 from seqr.views.utils.test_utils import AuthenticationTestCase, TEST_TERRA_API_ROOT_URL, GOOGLE_TOKEN_RESULT,\
     GOOGLE_ACCESS_TOKEN_URL, TOKEN_AUTH_TIME, REGISTER_RESPONSE, TEST_SERVICE_ACCOUNT, TEST_OAUTH2_PROVIDER
@@ -18,6 +20,10 @@ LIST_WORKSPACE_RESPONSE = '[{"accessLevel": "PROJECT_OWNER", "public": false, "w
 {"accessLevel": "READER","public": true, "workspace": {"attributes": {"tag:tags": {"itemsType": "AttributeValue","items": ["differential-expression","tutorial"]},"description": "[DEGenome](https://github.com/eweitz/degenome) transforms differential expression data into inputs for [exploratory genome analysis with Ideogram.js](https://eweitz.github.io/ideogram/differential-expression?annots-url=https://www.googleapis.com/storage/v1/b/degenome/o/GLDS-4_array_differential_expression_ideogram_annots.json).  \\n\\nTry the [Notebook tutorial](https://app.terra.bio/#workspaces/degenome/degenome/notebooks/launch/degenome-tutorial.ipynb), where you can step through using DEGenome to analyze expression for mice flown in space!"},"authorizationDomain": [],"bucketName": "fc-2706d493-5fce-4fb2-9993-457c30364a06","createdBy": "test2@test.com","createdDate": "2020-01-14T10:21:14.575Z","isLocked": false,"lastModified": "2020-02-01T13:28:27.309Z","name": "degenome","namespace": "degenome","workflowCollectionName": "2706d493-5fce-4fb2-9993-457c30364a06","workspaceId": "2706d493-5fce-4fb2-9993-457c30364a06"},"workspaceSubmissionStats": {"runningSubmissionsCount": 0}},\
 {"accessLevel": "PROJECT_OWNER","public": false, "workspace": {"attributes": {"description": "A workspace for seqr project"},"authorizationDomain": [],"bucketName": "fc-6a048145-c134-4004-a009-42824f826ee8","createdBy": "test3@test.com","createdDate": "2020-09-09T15:12:30.142Z","isLocked": false,"lastModified": "2020-09-09T15:12:30.145Z","name": "seqr-project 1000 Genomes Demo","namespace": "my-seqr-billing","workflowCollectionName": "6a048145-c134-4004-a009-42824f826ee8","workspaceId": "6a048145-c134-4004-a009-42824f826ee8"},"workspaceSubmissionStats": {"runningSubmissionsCount": 0}}]'
 USERS_GROUP = 'TGG_USERS'
+AZURE_PROVIDER = 'azuread-v2-tenant-oauth2'
+MULTIPLE_PROVIDERS = [TEST_OAUTH2_PROVIDER, AZURE_PROVIDER]
+AZURE_EXTRA_DATA = {'expires': 3599, 'auth_time': TOKEN_AUTH_TIME, 'token_type': 'Bearer', 'access_token': 'entra.EXAMPLE'}  # nosec
+WORKSPACE = ('my-seqr-billing', 'my-seqr-workspace')
 
 
 EXCEPTIONS = {
@@ -31,7 +37,7 @@ EXCEPTIONS = {
 class TerraApiUtilsHelpersCase(AuthenticationTestCase):
     fixtures = ['users', 'social_auth']
 
-    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
     def test_is_cloud_authenticated(self):
         r = is_cloud_authenticated(self.analyst_user)
         self.assertTrue(r)
@@ -43,7 +49,9 @@ class TerraApiUtilsHelpersCase(AuthenticationTestCase):
         r = is_cloud_authenticated(self.local_user)
         self.assertFalse(r)
 
-    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+        self.assertFalse(is_cloud_authenticated(AnonymousUser()))
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
     @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL')
     def test_is_anvil_authenticated(self, mock_terra_url):
         mock_terra_url.__bool__.return_value = False
@@ -54,6 +62,8 @@ class TerraApiUtilsHelpersCase(AuthenticationTestCase):
         r = is_anvil_authenticated(self.local_user)
         self.assertFalse(r)
 
+        self.assertFalse(is_anvil_authenticated(AnonymousUser()))
+
         r = is_anvil_authenticated(self.analyst_user)
         self.assertTrue(r)
 
@@ -61,7 +71,7 @@ class TerraApiUtilsHelpersCase(AuthenticationTestCase):
         r = is_anvil_authenticated(self.analyst_user)
         self.assertFalse(r)
 
-    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', '')
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [])
     @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL')
     def test_is_authenticated_no_provider(self, mock_terra_url):
         r = is_cloud_authenticated(self.analyst_user)
@@ -78,10 +88,84 @@ class TerraApiUtilsHelpersCase(AuthenticationTestCase):
         r = is_anvil_authenticated(self.analyst_user)
         self.assertFalse(r)
 
+    def _create_azure_social(self, user):
+        return UserSocialAuth.objects.create(
+            user=user, provider=AZURE_PROVIDER, uid=user.email, extra_data=dict(AZURE_EXTRA_DATA))
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', MULTIPLE_PROVIDERS)
+    @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL', TEST_TERRA_API_ROOT_URL)
+    def test_is_authenticated_multiple_providers(self):
+        azure_social = self._create_azure_social(self.local_user)
+
+        self.assertTrue(is_cloud_authenticated(self.analyst_user))
+        self.assertTrue(is_anvil_authenticated(self.analyst_user))
+
+        # Microsoft users are cloud authenticated but are never AnVIL users
+        self.assertTrue(is_cloud_authenticated(self.local_user))
+        self.assertFalse(is_anvil_authenticated(self.local_user))
+        self.assertFalse(is_cloud_authenticated(self.no_policy_user))
+
+        remove_token(self.local_user)
+        azure_social.refresh_from_db()
+        self.assertDictEqual(azure_social.extra_data, {'expires': 0, 'auth_time': TOKEN_AUTH_TIME, 'token_type': 'Bearer'})
+        self.assertTrue(is_cloud_authenticated(self.local_user))
+
+        # Users linked to both providers are AnVIL users through their Google account, and all tokens are removed
+        azure_social = self._create_azure_social(self.analyst_user)
+        self.assertTrue(is_anvil_authenticated(self.analyst_user))
+        remove_token(self.analyst_user)
+        self.assertFalse(is_anvil_authenticated(self.analyst_user))
+        for social in self.analyst_user.social_auth.all():
+            self.assertNotIn('access_token', social.extra_data)
+            self.assertEqual(social.extra_data['expires'], 0)
+        self.assertEqual(self.analyst_user.social_auth.count(), 2)
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [AZURE_PROVIDER])
+    @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL', TEST_TERRA_API_ROOT_URL)
+    def test_is_authenticated_azure_only(self):
+        self._create_azure_social(self.local_user)
+
+        self.assertTrue(is_cloud_authenticated(self.local_user))
+        self.assertFalse(is_anvil_authenticated(self.local_user))
+
+        # Social auths for providers that are not configured are ignored
+        self.assertFalse(is_cloud_authenticated(self.analyst_user))
+        self.assertFalse(is_anvil_authenticated(self.analyst_user))
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', MULTIPLE_PROVIDERS)
+    @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL', TEST_TERRA_API_ROOT_URL)
+    @mock.patch('seqr.views.utils.terra_api_utils.SERVICE_ACCOUNT_FOR_ANVIL', TEST_SERVICE_ACCOUNT)
+    @mock.patch('seqr.utils.redis_utils.redis.StrictRedis')
+    @responses.activate
+    def test_anvil_calls_not_anvil_user(self, mock_redis):
+        mock_redis.return_value.get.return_value = None
+        self._create_azure_social(self.local_user)
+        self.reset_logs()
+
+        # Microsoft tokens are never sent to Terra, and Microsoft users have no AnVIL access
+        self.assertListEqual(list_anvil_workspaces(self.local_user), [])
+        self.assertDictEqual(user_get_workspace_access_level(self.local_user, *WORKSPACE), {})
+        self.assertDictEqual(user_get_workspace_acl(self.local_user, *WORKSPACE), {})
+        self.assertFalse(has_service_account_access(self.local_user, *WORKSPACE))
+        self.assertListEqual(get_anvil_group_members(self.local_user, USERS_GROUP), [])
+        self.assertListEqual(user_get_anvil_groups(self.local_user), [])
+
+        with self.assertRaises(PermissionDenied) as cm:
+            add_service_account(self.local_user, *WORKSPACE)
+        self.assertEqual(
+            str(cm.exception), 'test_local_user is not signed in with Google and can not access AnVIL')
+
+        # Users with no social auth are handled in the same way
+        self.assertListEqual(user_get_anvil_groups(self.no_policy_user), [])
+
+        self.assertEqual(len(responses.calls), 0)
+        mock_redis.return_value.get.assert_not_called()
+        self.assert_no_logs()
+
 
 @mock.patch('seqr.views.utils.terra_api_utils.SERVICE_ACCOUNT_FOR_ANVIL', TEST_SERVICE_ACCOUNT)
 @mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL', TEST_TERRA_API_ROOT_URL)
-@mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+@mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
 @mock.patch('seqr.views.utils.terra_api_utils.time.time', lambda: AUTH_EXTRA_DATA['auth_time'] + 10)
 @mock.patch('seqr.utils.redis_utils.logger', mock.MagicMock())
 class TerraApiUtilsCallsCase(AuthenticationTestCase):

@@ -10,9 +10,10 @@ from django.core.exceptions import PermissionDenied
 from social_django.utils import load_strategy
 from seqr.utils.logging_utils import SeqrLogger
 from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_set_json
+from seqr.utils.social_auth_settings import GOOGLE_PROVIDER
 
 from settings import SEQR_VERSION, TERRA_API_ROOT_URL, TERRA_PERMS_CACHE_EXPIRE_SECONDS, SERVICE_ACCOUNT_CREDENTIALS, \
-    TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS, SERVICE_ACCOUNT_FOR_ANVIL, SOCIAL_AUTH_PROVIDER
+    TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS, SERVICE_ACCOUNT_FOR_ANVIL, SOCIAL_AUTH_PROVIDERS
 
 SEQR_USER_AGENT = "seqr/" + SEQR_VERSION
 OWNER_ACCESS_LEVEL = 'OWNER'
@@ -40,8 +41,12 @@ class TerraRefreshTokenFailedException(TerraAPIException):
         super(TerraRefreshTokenFailedException, self).__init__(message, 401)
 
 
+class TerraNotAnvilUserException(PermissionDenied):
+    pass
+
+
 def oauth_enabled():
-    return bool(SOCIAL_AUTH_PROVIDER)
+    return bool(SOCIAL_AUTH_PROVIDERS)
 
 
 def anvil_enabled():
@@ -49,22 +54,22 @@ def anvil_enabled():
 
 
 def is_cloud_authenticated(user):
-    return bool(_safe_get_social(user))
+    return bool(_get_socials(user))
 
 
 def remove_token(user):
-    social = _safe_get_social(user)
-    if social and social.extra_data:
-        social.extra_data.pop('access_token', None)
-        social.extra_data['expires'] = 0
-        social.save()
+    for social in _get_socials(user):
+        if social.extra_data:
+            social.extra_data.pop('access_token', None)
+            social.extra_data['expires'] = 0
+            social.save()
 
 
 def is_anvil_authenticated(user):
     if not anvil_enabled():
         return False
 
-    social = _safe_get_social(user)
+    social = _get_anvil_social(user)
     if social and social.extra_data:
         return social.extra_data.get('access_token', '') != ''
 
@@ -81,14 +86,21 @@ def _get_call_args(path, headers=None, root_url=None):
     return url, headers
 
 
-def _safe_get_social(user):
-    if not oauth_enabled() or not hasattr(user, 'social_auth'):
-        return None
-    return user.social_auth.filter(provider=SOCIAL_AUTH_PROVIDER).first()
+def _get_socials(user):
+    if not hasattr(user, 'social_auth'):
+        return []
+    return list(user.social_auth.filter(provider__in=SOCIAL_AUTH_PROVIDERS))
+
+
+def _get_anvil_social(user):
+    # Terra only accepts Google credentials, so users signed in with any other provider are never AnVIL users
+    return next((social for social in _get_socials(user) if social.provider == GOOGLE_PROVIDER), None)
 
 
 def _get_social_access_token(user):
-    social = _safe_get_social(user)
+    social = _get_anvil_social(user)
+    if not social:
+        raise TerraNotAnvilUserException(f'{user} is not signed in with Google and can not access AnVIL')
     if (social.extra_data['auth_time'] + social.extra_data['expires'] - 10) <= int(
             time.time()):  # token expired or expiring?
         strategy = load_strategy()
@@ -154,15 +166,20 @@ def anvil_call(method, path, access_token, user=None, headers=None, root_url=Non
     return data
 
 
-def _user_anvil_call(method, path, user, **kwargs):
-    access_token = _get_social_access_token(user)
+def _user_anvil_call(method, path, user, not_anvil_user_response=None, **kwargs):
+    try:
+        access_token = _get_social_access_token(user)
+    except TerraNotAnvilUserException:
+        if not_anvil_user_response is None:
+            raise
+        return not_anvil_user_response
     return anvil_call(method, path, access_token, user=user, **kwargs)
 
 
 def list_anvil_workspaces(user):
     return _user_anvil_call(
         'get', 'api/workspaces?fields=public,workspace.name,workspace.namespace',
-        user, cache_time=TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS,
+        user, not_anvil_user_response=[], cache_time=TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS,
         # remove the public workspaces which can't be the projects in seqr
         process_response=lambda r: [{'workspace': ws['workspace']} for ws in r if not ws.get('public', True)]
     )
@@ -173,7 +190,9 @@ def user_get_workspace_access_level(user, workspace_namespace, workspace_name, m
     path = "api/workspaces/{0}/{1}?fields=accessLevel,canShare{2}".format(workspace_namespace, workspace_name, fields)
 
     # Exceptions are handled to return an empty result for users who have no permission to access the workspace
-    return _user_anvil_call('get', path, user, handle_errors=True, cache_time=TERRA_PERMS_CACHE_EXPIRE_SECONDS)
+    return _user_anvil_call(
+        'get', path, user, not_anvil_user_response={}, handle_errors=True, cache_time=TERRA_PERMS_CACHE_EXPIRE_SECONDS,
+    )
 
 
 def user_get_workspace_acl(user, workspace_namespace, workspace_name):
@@ -211,7 +230,7 @@ def user_get_workspace_acl(user, workspace_namespace, workspace_name):
     """
     path = "api/workspaces/{0}/{1}/acl".format(workspace_namespace, workspace_name)
     # Exceptions are handled to return an empty result for the users who have no permission to access the acl
-    return _user_anvil_call('get', path, user, handle_errors=True).get('acl', {})
+    return _user_anvil_call('get', path, user, not_anvil_user_response={}, handle_errors=True).get('acl', {})
 
 
 def add_service_account(user, workspace_namespace, workspace_name):
@@ -250,18 +269,21 @@ def has_service_account_access(user, workspace_namespace, workspace_name):
 
 
 def get_anvil_group_members(user, group, use_sa_credentials=False):
-    access_token = _get_service_account_access_token() if use_sa_credentials else _get_social_access_token(user)
-    return anvil_call(
-        'get', f'api/groups/{group}', access_token, user, handle_errors=True,
-        cache_time=TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS, cache_key_id='SA' if use_sa_credentials else None,
-        process_response=lambda r: [
+    path = f'api/groups/{group}'
+    kwargs = {
+        'handle_errors': True,
+        'cache_time': TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS,
+        'process_response': lambda r: [
             email for email in r['adminsEmails'] + r['membersEmails'] if email != SERVICE_ACCOUNT_FOR_ANVIL
-        ]
-    )
+        ],
+    }
+    if use_sa_credentials:
+        return anvil_call('get', path, _get_service_account_access_token(), user, cache_key_id='SA', **kwargs)
+    return _user_anvil_call('get', path, user, not_anvil_user_response=[], **kwargs)
 
 
 def user_get_anvil_groups(user):
     return _user_anvil_call(
-        'get', 'api/groups', user, cache_time=TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS,
+        'get', 'api/groups', user, not_anvil_user_response=[], cache_time=TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS,
         process_response=lambda r: [group['groupName'] for group in r]
     )

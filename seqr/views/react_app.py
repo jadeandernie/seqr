@@ -13,7 +13,7 @@ from settings import (
     DEBUG,
     LOGIN_URL,
     GA_TOKEN_ID,
-    SOCIAL_AUTH_PROVIDER,
+    SOCIAL_AUTH_PROVIDERS,
     VLM_CLIENT_ID,
 )
 from seqr.models import WarningMessage
@@ -59,7 +59,7 @@ def render_app_html(request, additional_json=None, include_user=True, status=200
     initial_json = {'meta':  {
         'version': '{}-{}'.format(SEQR_VERSION, ui_version),
         'hijakEnabled': DEBUG or False,
-        'oauthLoginProvider': SOCIAL_AUTH_PROVIDER,
+        'oauthLoginProviders': SOCIAL_AUTH_PROVIDERS,
         'vlmEnabled': bool(VLM_CLIENT_ID),
         'warningMessages': [message.json() for message in WarningMessage.objects.all()],
         'lastFeatureUpdate': _get_latest_feature_update_date(),

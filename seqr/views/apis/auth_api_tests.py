@@ -6,7 +6,11 @@ from django.urls.base import reverse
 from seqr.views.apis.auth_api import login_view, logout_view, login_required_error, policies_required_error
 from django.contrib.auth.models import User
 
+from social_django.models import UserSocialAuth
+
 from seqr.views.utils.test_utils import TEST_OAUTH2_PROVIDER
+
+MULTIPLE_OAUTH_PROVIDERS = [TEST_OAUTH2_PROVIDER, 'azuread-v2-tenant-oauth2']
 
 
 class AuthAPITest(TestCase):
@@ -90,12 +94,35 @@ class AuthAPITest(TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.reason_phrase, 'Invalid credentials')
 
-    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
     def test_login_view_with_google(self):
         url = reverse(login_view)
         response = self.client.post(url)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()['error'], 'Permission Denied')
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', MULTIPLE_OAUTH_PROVIDERS)
+    def test_login_view_with_multiple_providers(self):
+        url = reverse(login_view)
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['error'], 'Permission Denied')
+
+    @mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', MULTIPLE_OAUTH_PROVIDERS)
+    def test_logout_view_with_multiple_providers(self):
+        user = User.objects.get(username='test_new_user')
+        for provider in MULTIPLE_OAUTH_PROVIDERS:
+            UserSocialAuth.objects.create(
+                user=user, provider=provider, uid=user.email, extra_data={'access_token': 'token', 'expires': 3599})  # nosec
+        self.client.force_login(user)
+
+        response = self.client.post(reverse(logout_view))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/')
+        self.assertListEqual(
+            list(user.social_auth.order_by('provider').values_list('provider', 'extra_data')),
+            [(provider, {'expires': 0}) for provider in sorted(MULTIPLE_OAUTH_PROVIDERS)],
+        )
 
     def test_logout_view(self):
         url = reverse(login_view)

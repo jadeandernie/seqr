@@ -568,10 +568,10 @@ class AnvilAuthenticationTestMixin(AuthenticationTestMixin):
         patcher = mock.patch('seqr.views.utils.terra_api_utils.TERRA_API_ROOT_URL', TEST_TERRA_API_ROOT_URL)
         patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.views.react_app.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+        patcher = mock.patch('seqr.views.react_app.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
         patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+        patcher = mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
         patcher.start()
         self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.views.utils.orm_to_json_utils.SERVICE_ACCOUNT_FOR_ANVIL', TEST_SERVICE_ACCOUNT)
@@ -643,7 +643,7 @@ class AnvilAuthenticationTestCase(DifferentDbTransactionSupportMixin, AnvilAuthe
         super().setUpTestData()
         cls.set_up_users()
 
-@mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDER', TEST_OAUTH2_PROVIDER)
+@mock.patch('seqr.views.utils.terra_api_utils.SOCIAL_AUTH_PROVIDERS', [TEST_OAUTH2_PROVIDER])
 class AirtableTest(object):
 
     def assert_expected_airtable_call(self, call_index, filter_formula, fields, additional_params=None):

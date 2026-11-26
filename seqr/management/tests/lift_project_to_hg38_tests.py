@@ -3,7 +3,6 @@ import mock
 from copy import deepcopy
 from django.core.management.base import CommandError
 from seqr.models import Family, Sample
-from pyliftover.liftover import LiftOver
 from seqr.views.utils.test_utils import VARIANTS, SINGLE_VARIANT
 
 from django.core.management import call_command
@@ -18,8 +17,6 @@ SAMPLE_METADATA = {
     'genomeVersion': GENOME_VERSION, 'sampleType': SAMPLE_TYPE, 'sourceFilePath': 'data.vcf', 'fields': {'samples': {}},
 }
 SAMPLE_IDS = ["NA19679", "NA19675_1", "NA19678", "HG00731", "HG00732", "HG00733"]
-
-liftover_to_38 = LiftOver('hg19', 'hg38')
 
 LIFT_MAP = {
     21003343353: [('chr21', 3343400)],

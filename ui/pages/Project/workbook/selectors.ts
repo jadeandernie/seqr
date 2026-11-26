@@ -5,7 +5,7 @@ import {
   STATUS_FINDINGS, STATUS_IN_PROGRESS, STATUS_NOT_REVIEWED, STATUS_NOTHING_FOUND,
 } from './constants'
 import {
-  ByGuid, NamedEntity, Option, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorkbookTarget,
+  ByGuid, GroupSummaryState, NamedEntity, Option, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorkbookTarget,
   WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
 } from './types'
 
@@ -22,11 +22,20 @@ export const getWorkbooksIsLoading = (state: WorkbookReduxState) => state.workbo
 export const getWorkbooksLoadingError = (state: WorkbookReduxState) => state.workbooksLoading.errorMessage
 export const getWorkbookDetailIsLoading = (state: WorkbookReduxState) => state.workbookDetailLoading.isLoading
 export const getWorkbookDetailLoadingError = (state: WorkbookReduxState) => state.workbookDetailLoading.errorMessage
+export const getGroupSummaryIsLoading = (state: WorkbookReduxState) => state.workbookGroupSummaryLoading.isLoading
+export const getGenesById = (state: WorkbookReduxState) => state.genesById
 const getCurrentProjectGuid = (state: WorkbookReduxState) => state.currentProjectGuid
-const getFamiliesByGuid = (state: WorkbookReduxState) => state.familiesByGuid
+export const getFamiliesByGuid = (state: WorkbookReduxState) => state.familiesByGuid
 const getAnalysisGroupsByGuid = (state: WorkbookReduxState) => state.analysisGroupsByGuid
 const getSavedSearchesByGuid = (state: WorkbookReduxState) => state.savedSearchesByGuid
 const getWorkbookGuid = (state: WorkbookReduxState, props: WorkbookProps) => props.workbookGuid
+
+const NO_GROUP_SUMMARY: GroupSummaryState = {}
+
+// Only the summary of the given cell, so that the summary of another cell is never shown
+export const getCellGroupSummary = (state: WorkbookReduxState, cellKey: string): GroupSummaryState => (
+  state.workbookGroupSummary.cellKey === cellKey ? state.workbookGroupSummary : NO_GROUP_SUMMARY
+)
 
 const sortBy = <T>(entities: T[], field: keyof T): T[] => [...entities].sort(
   (a, b) => genericComparator(a[field], b[field]),

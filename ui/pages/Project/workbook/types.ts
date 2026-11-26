@@ -52,6 +52,51 @@ export interface WorksheetQueryResult {
 
 export type ByGuid<T> = Record<string, T>
 
+export interface PhenotypeCount {
+  id: string | null
+  name: string | null
+  numFamilies: number
+  numFamiliesWithResults: number
+}
+
+export interface GeneRecurrence {
+  geneId: string
+  numFamilies: number
+  familyGuids: string[]
+  numVariants: number
+}
+
+export interface VariantRecurrence {
+  variantId: string
+  geneIds: string[]
+  numFamilies: number
+  familyGuids: string[]
+}
+
+export interface GroupSummary {
+  searchHash: string
+  numFamilies: number
+  numFamiliesWithResults: number
+  numFamiliesWithPhenotypes: number
+  totalVariants: number
+  genes: GeneRecurrence[]
+  totalGenes: number
+  recurrentVariants: VariantRecurrence[]
+  totalRecurrentVariants: number
+  phenotypeGeneId: string | null
+  phenotypeCategories: PhenotypeCount[]
+  phenotypeTerms: PhenotypeCount[]
+  totalPhenotypeTerms: number
+}
+
+// The summary of the most recently requested analysis group cell
+export interface GroupSummaryState {
+  cellKey?: string
+  summary?: GroupSummary
+  error?: string
+  resultsNotLoaded?: boolean
+}
+
 export interface LoadingState {
   isLoading: boolean
   errorMessage?: string | null
@@ -78,6 +123,9 @@ export interface WorkbookReduxState {
   savedSearchesByGuid: ByGuid<{ savedSearchGuid: string, name: string }>
   searchesByHash: ByGuid<{ totalResults?: number }>
   searchedVariantsLoading: LoadingState
+  genesById: ByGuid<{ geneSymbol?: string }>
+  workbookGroupSummary: GroupSummaryState
+  workbookGroupSummaryLoading: LoadingState
 }
 
 export interface WorkbookResponse {
@@ -91,7 +139,8 @@ export interface WorkbookResponse {
 
 export interface WorkbookAction {
   type: string
-  updatesById?: WorkbookResponse
+  updatesById?: WorkbookResponse | Record<string, unknown>
+  newValue?: GroupSummaryState
   error?: string
 }
 
@@ -115,5 +164,5 @@ export interface Option {
 
 export interface RequestError {
   message: string
-  body?: { errors?: string[], error?: string }
+  body?: { errors?: string[], error?: string, resultsNotLoaded?: boolean }
 }

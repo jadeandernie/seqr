@@ -6,7 +6,8 @@ import {
 import styled from 'styled-components'
 
 import { STATUS_NOT_REVIEWED, WORKBOOK_STATUSES } from './constants'
-import { runWorksheetQuery, updateWorksheetQueryResult } from './reducers'
+import GroupResults from './GroupResults'
+import { runGroupWorksheetQuery, runWorksheetQuery, updateWorksheetQueryResult } from './reducers'
 import SearchResultsHost from './SearchResultsHost'
 import {
   RequestError, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorksheetQuery, WorksheetQueryResult,
@@ -56,7 +57,7 @@ interface WorkPaneProps extends CellProps {
   onRun: () => Promise<void>
 }
 
-const WorkPane = ({ target, query, queryResult, totalResults, onUpdate, onRun }: WorkPaneProps) => {
+const WorkPane = ({ workbook, target, query, queryResult, totalResults, onUpdate, onRun }: WorkPaneProps) => {
   const savedNote = queryResult?.note || ''
   const [note, setNote] = useState(savedNote)
   const [errors, setErrors] = useState<string[]>(null)
@@ -133,9 +134,10 @@ const WorkPane = ({ target, query, queryResult, totalResults, onUpdate, onRun }:
       </PaneHeader>
       {errors && <Message error list={errors} />}
       {running && <Loader inline="centered" active />}
-      {!running && (searchHash ?
-        <SearchResultsHost key={searchHash} searchHash={searchHash} /> :
-        <Message content={`This query has not been run for ${target.name} yet`} />)}
+      {!running && !searchHash && <Message content={`This query has not been run for ${target.name} yet`} />}
+      {!running && searchHash && (target.isGroup ?
+        <GroupResults key={searchHash} workbook={workbook} target={target} query={query} searchHash={searchHash} onRun={run} /> :
+        <SearchResultsHost key={searchHash} searchHash={searchHash} />)}
     </div>
   )
 }
@@ -152,7 +154,7 @@ const mapDispatchToProps = (dispatch: Dispatch, { workbook, target, query }: Cel
     onUpdate: (values: { status?: WorkbookStatus, note?: string }) => dispatch(
       updateWorksheetQueryResult(...cell, values),
     ),
-    onRun: () => dispatch(runWorksheetQuery(...cell)),
+    onRun: () => dispatch((target.isGroup ? runGroupWorksheetQuery : runWorksheetQuery)(...cell)),
   }
 }
 

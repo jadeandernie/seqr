@@ -1,6 +1,6 @@
 import { STATE_WITH_2_FAMILIES } from '../fixtures'
 import {
-  Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult,
+  GroupSummary, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult,
 } from './types'
 
 export const PROJECT_GUID = 'R0237_1000_genomes_demo'
@@ -97,6 +97,63 @@ export const QUERY_RESULT: WorksheetQueryResult = {
   lastRunBy: null,
   numResults: null,
   lastModifiedDate: '2026-11-20T10:04:00Z',
+}
+
+export const GROUP_QUERY_RESULT: WorksheetQueryResult = {
+  ...QUERY_RESULT,
+  worksheetQueryResultGuid: 'WQR0000002_1_2',
+  workbookTargetGuid: GROUP_TARGET_GUID,
+  status: 'N',
+  note: null,
+  searchHash: SEARCH_HASH,
+  lastRunDate: '2026-11-22T10:00:00Z',
+  lastRunBy: 'Test User',
+  numResults: 4,
+}
+
+export const MTHFR_GENE_ID = 'ENSG00000177000'
+export const CDC7_GENE_ID = 'ENSG00000097046'
+export const UNKNOWN_GENE_ID = 'ENSG00000186092'
+
+// 4 families: F011652_1 and F000003_3 have results, 3 have HPO terms for an affected individual
+export const GROUP_SUMMARY: GroupSummary = {
+  searchHash: SEARCH_HASH,
+  numFamilies: 4,
+  numFamiliesWithResults: 2,
+  numFamiliesWithPhenotypes: 3,
+  totalVariants: 4,
+  genes: [
+    { geneId: MTHFR_GENE_ID, numFamilies: 2, familyGuids: ['F011652_1', 'F000003_3'], numVariants: 2 },
+    { geneId: CDC7_GENE_ID, numFamilies: 1, familyGuids: ['F011652_1'], numVariants: 2 },
+    { geneId: UNKNOWN_GENE_ID, numFamilies: 1, familyGuids: ['F000003_3'], numVariants: 1 },
+  ],
+  totalGenes: 3,
+  recurrentVariants: [{
+    variantId: '1-100-A-T', geneIds: [MTHFR_GENE_ID, UNKNOWN_GENE_ID], numFamilies: 2, familyGuids: ['F011652_1', 'F000003_3'],
+  }],
+  totalRecurrentVariants: 1,
+  phenotypeGeneId: null,
+  phenotypeCategories: [
+    { id: 'HP:0000707', name: null, numFamilies: 3, numFamiliesWithResults: 2 },
+    { id: null, name: null, numFamilies: 1, numFamiliesWithResults: 1 },
+    { id: 'HP:0001626', name: null, numFamilies: 1, numFamiliesWithResults: 0 },
+    { id: 'HP:9000000', name: null, numFamilies: 1, numFamiliesWithResults: 1 },
+  ],
+  phenotypeTerms: [
+    {
+      id: 'HP:0002011', name: 'Morphological abnormality of the central nervous system', numFamilies: 3, numFamiliesWithResults: 2,
+    },
+    { id: 'HP:9999999', name: null, numFamilies: 1, numFamiliesWithResults: 1 },
+  ],
+  totalPhenotypeTerms: 7,
+}
+
+export const GROUP_SUMMARY_RESPONSE = {
+  ...GROUP_SUMMARY,
+  genesById: {
+    [MTHFR_GENE_ID]: { geneId: MTHFR_GENE_ID, geneSymbol: 'MTHFR' },
+    [CDC7_GENE_ID]: { geneId: CDC7_GENE_ID, geneSymbol: 'CDC7' },
+  },
 }
 
 export const WORKBOOK_DETAIL = {

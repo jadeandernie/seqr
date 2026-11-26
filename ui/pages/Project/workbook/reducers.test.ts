@@ -1,12 +1,13 @@
 import { flushAll } from '../../../shared/utils/testHelpers'
 import {
-  DE_NOVO_WORKSHEET_GUID, FAMILY_TARGET_GUID, GROUP_TARGET, GROUP_TARGET_GUID, OTHER_WORKBOOK, PERMISSIVE_QUERY_GUID,
+  CDC7_GENE_ID, DE_NOVO_WORKSHEET_GUID, FAMILY_TARGET_GUID, GROUP_QUERY_RESULT, GROUP_SUMMARY, GROUP_SUMMARY_RESPONSE,
+  GROUP_TARGET, GROUP_TARGET_GUID, OTHER_WORKBOOK, PERMISSIVE_QUERY_GUID,
   PROJECT_GUID, QUERY_RESULT, QUERY_RESULT_GUID, RECESSIVE_QUERY_GUID, RECESSIVE_WORKSHEET_GUID,
   RESTRICTIVE_QUERY_GUID, SAVED_SEARCH_GUID, SEARCH_HASH, WORKBOOK, WORKBOOK_DETAIL, WORKBOOK_GUID,
 } from './fixtures'
 import {
-  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, loadProjectWorkbooks, loadWorkbook,
-  loadWorkbookPage, loadWorkbooksPage, runWorksheetQuery, updateWorkbook, updateWorksheet, updateWorksheetQuery,
+  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, getCellKey, loadGroupSummary,
+  loadProjectWorkbooks, loadWorkbook, loadWorkbookPage, loadWorkbooksPage, runGroupWorksheetQuery, runWorksheetQuery, updateWorkbook, updateWorksheet, updateWorksheetQuery,
   updateWorksheetQueryResult,
 } from './reducers'
 import { createTestStore, getRequests, mockApi } from './testHelpers'
@@ -287,4 +288,102 @@ test('updates and runs the result of a query for a target', async () => {
   await store.dispatch(runWorksheetQuery(WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID))
   expect(getRequests(`${path}/run`)).toEqual([{}])
   expect(store.getState().worksheetQueryResultsByGuid[QUERY_RESULT_GUID]).toEqual(ran)
+})
+
+const GROUP_CELL: [string, string, string] = [WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID]
+const GROUP_CELL_PATH = `/api/workbook/${WORKBOOK_GUID}/queries/${RESTRICTIVE_QUERY_GUID}/targets/${GROUP_TARGET_GUID}`
+const GROUP_CELL_KEY = `${RESTRICTIVE_QUERY_GUID}/${GROUP_TARGET_GUID}`
+const getUrls = () => (fetch as jest.Mock).mock.calls.map(([url]) => url)
+
+test('runs the search of an analysis group after running its query', async () => {
+  const store = createTestStore()
+  const run = {
+    json: { searchHash: SEARCH_HASH, worksheetQueryResultsByGuid: { WQR0000002_1_2: GROUP_QUERY_RESULT } },
+  }
+  const search = { search: {}, projectFamilies: [{ projectGuid: PROJECT_GUID, familyGuids: ['F011652_1'] }], totalResults: 4 }
+  mockApi({
+    [`${GROUP_CELL_PATH}/run`]: run,
+    [`/api/search/${SEARCH_HASH}`]: { json: { search, searchedVariantIds: ['SV1'], variantsById: { SV1: {} } } },
+  })
+
+  await store.dispatch(runGroupWorksheetQuery(...GROUP_CELL))
+  expect(getUrls()).toEqual([`${GROUP_CELL_PATH}/run`, `/api/search/${SEARCH_HASH}?per_page=1`])
+  expect(getRequests(`/api/search/${SEARCH_HASH}`)).toEqual([{}])
+  expect(store.getState().worksheetQueryResultsByGuid.WQR0000002_1_2).toEqual(GROUP_QUERY_RESULT)
+  expect(store.getState().searchesByHash[SEARCH_HASH]).toEqual(search)
+  expect(store.getState().searchedVariantsLoading.isLoading).toBe(false)
+
+  mockApi({
+    [`${GROUP_CELL_PATH}/run`]: run,
+    [`/api/search/${SEARCH_HASH}`]: { status: 400, json: { error: 'This search returned too many variants' } },
+  })
+  await expect(store.dispatch(runGroupWorksheetQuery(...GROUP_CELL))).rejects.toThrow(
+    'This search returned too many variants',
+  )
+
+  ;(fetch as jest.Mock).mockClear()
+  mockApi({ [`${GROUP_CELL_PATH}/run`]: { status: 403, json: { error: 'Permission Denied' } } })
+  await expect(store.dispatch(runGroupWorksheetQuery(...GROUP_CELL))).rejects.toThrow('Permission Denied')
+  expect(getUrls()).toEqual([`${GROUP_CELL_PATH}/run`])
+})
+
+test('loads the summary of an analysis group cell, optionally for a gene', async () => {
+  const store = createTestStore()
+  expect(store.getState().workbookGroupSummary).toEqual({})
+  mockApi({ [`${GROUP_CELL_PATH}/summary`]: { json: GROUP_SUMMARY_RESPONSE } })
+
+  expect(getCellKey(RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID)).toEqual(GROUP_CELL_KEY)
+  store.dispatch(loadGroupSummary(...GROUP_CELL))
+  expect(store.getState().workbookGroupSummaryLoading.isLoading).toBe(true)
+  await flushAll()
+
+  expect(store.getState().workbookGroupSummaryLoading.isLoading).toBe(false)
+  expect(store.getState().workbookGroupSummary).toEqual({ cellKey: GROUP_CELL_KEY, summary: GROUP_SUMMARY })
+  expect(store.getState().genesById[CDC7_GENE_ID]).toEqual({ geneId: CDC7_GENE_ID, geneSymbol: 'CDC7' })
+
+  await store.dispatch(loadGroupSummary(...GROUP_CELL, CDC7_GENE_ID))
+  expect(getUrls()).toEqual([`${GROUP_CELL_PATH}/summary?`, `${GROUP_CELL_PATH}/summary?geneId=${CDC7_GENE_ID}`])
+})
+
+test('records why the summary of an analysis group cell could not be loaded', async () => {
+  const store = createTestStore()
+  mockApi({
+    [`${GROUP_CELL_PATH}/summary`]: { status: 409, json: { errors: ['Run it to see patterns'], resultsNotLoaded: true } },
+  })
+  await store.dispatch(loadGroupSummary(...GROUP_CELL))
+  expect(store.getState().workbookGroupSummary).toEqual(
+    { cellKey: GROUP_CELL_KEY, error: 'Run it to see patterns', resultsNotLoaded: true },
+  )
+  expect(store.getState().workbookGroupSummaryLoading.isLoading).toBe(false)
+
+  mockApi({ [`${GROUP_CELL_PATH}/summary`]: { status: 403, json: { error: 'Permission Denied' } } })
+  await store.dispatch(loadGroupSummary(...GROUP_CELL))
+  expect(store.getState().workbookGroupSummary).toEqual(
+    { cellKey: GROUP_CELL_KEY, error: 'Permission Denied', resultsNotLoaded: false },
+  )
+})
+
+test('ignores the summary of a request that was replaced by a later request', async () => {
+  const lateResponses = [{ json: GROUP_SUMMARY_RESPONSE }, { status: 403, json: { error: 'Permission Denied' } }]
+  for (let i = 0; i < lateResponses.length; i += 1) {
+    const store = createTestStore()
+    let finish: () => void
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    mockApi({ [`${GROUP_CELL_PATH}/summary`]: { ...lateResponses[i], wait } })
+    const first = store.dispatch(loadGroupSummary(...GROUP_CELL))
+
+    const otherSummary = { ...GROUP_SUMMARY, totalVariants: 9 }
+    mockApi({ [`${GROUP_CELL_PATH}/summary`]: { json: { ...otherSummary, genesById: {} } } })
+    // eslint-disable-next-line no-await-in-loop
+    await store.dispatch(loadGroupSummary(...GROUP_CELL, CDC7_GENE_ID))
+    expect(store.getState().workbookGroupSummary).toEqual({ cellKey: GROUP_CELL_KEY, summary: otherSummary })
+
+    finish()
+    // eslint-disable-next-line no-await-in-loop
+    await first
+    expect(store.getState().workbookGroupSummary).toEqual({ cellKey: GROUP_CELL_KEY, summary: otherSummary })
+    expect(store.getState().genesById[CDC7_GENE_ID]).toBeUndefined()
+  }
 })

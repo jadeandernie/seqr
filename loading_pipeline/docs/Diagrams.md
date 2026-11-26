@@ -55,7 +55,38 @@
                      LoadClickhouseEntries
 ```
 
-ClickHouse LSM-Tree
+# SV Pipeline flow, as of October 2026
+
+```
+     WriteMetadataForSvRunTask      WriteExistingVariantsParquetTask
+               |                                  |
+               v                                  v
+        WriteCombinedSvVcf            WriteExistingVariantsVcfTask
+               |__________________________________|
+                                |                              
+                                v
+                     WriteDeduplicatedSvVcfTask
+                                |
+               _________________+_________________          
+               |                                 |          
+               v                                 v
+     WriteNewSvEntriesParquetTask        WriteNewSvVariantsParquetTask
+               |_________________________________|
+                               |
+                               v
+                     RunSvPipelineTask (all parquets ready)
+                               |
+                               v
+                     WriteSuccessFileTask
+                               |
+                               v
+                     LoadClickhouseVariants
+                               |
+                               v
+                     LoadClickhouseEntries
+```
+
+# ClickHouse LSM-Tree
 
 ```
 ┌────────────────────────────────────────────────────────────┐

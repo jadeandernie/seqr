@@ -78,14 +78,6 @@ class WriteExistingVariantsParquetTest(
         df = self._run_task(DatasetType.SV)
         self.assertEqual(
             list(df.columns),
-            ['key_', 'variant_id', 'end', 'endChrom'],
-        )
-        self.assertEqual(len(df), 0)
-
-    def test_gcnv(self):
-        df = self._run_task(DatasetType.GCNV)
-        self.assertEqual(
-            list(df.columns),
-            ['key_', 'variant_id'],
+            ['key_', 'variant_id', 'xpos', 'xpos_end', 'svType'],
         )
         self.assertEqual(len(df), 0)

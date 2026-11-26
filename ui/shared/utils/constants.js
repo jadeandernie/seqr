@@ -874,7 +874,6 @@ export const VEP_GROUP_SYNONYMOUS = 'synonymous'
 export const VEP_GROUP_OTHER = 'other'
 export const VEP_GROUP_SV = 'structural'
 export const VEP_GROUP_SV_CONSEQUENCES = 'structural_consequence'
-export const VEP_GROUP_SV_NEW = 'new_structural_variants'
 
 export const SV_TYPES = [
   {
@@ -997,14 +996,6 @@ const VEP_SV_CONSEQUENCES = [
     description: 'An SV is predicted to duplicate the transcription start site',
     text: 'Transcription Start Site Duplication',
     value: 'TSS_DUP',
-  },
-]
-
-const SV_NEW_OPTIONS = [
-  {
-    description: 'An SV with no overlap in a previous callset',
-    text: 'New Calls Only',
-    value: 'NEW',
   },
 ]
 
@@ -1225,7 +1216,7 @@ export const GROUPED_VEP_CONSEQUENCES = ORDERED_VEP_CONSEQUENCES.reduce((acc, co
   const group = consequence.group || VEP_GROUP_OTHER
   acc[group] = [...(acc[group] || []), consequence]
   return acc
-}, { [VEP_GROUP_SV_NEW]: SV_NEW_OPTIONS })
+}, {})
 
 export const VEP_CONSEQUENCE_ORDER_LOOKUP = ORDERED_VEP_CONSEQUENCES.reduce(
   (acc, consequence, i) => ({ ...acc, [consequence.value]: i }), {},
@@ -1535,6 +1526,21 @@ const REVERSE_PRED_COLOR_MAP = [...PRED_COLOR_MAP].reverse()
 export const ORDERED_PREDICTOR_FIELDS = [
   { field: 'cadd', group: CODING_IN_SILICO_GROUP, thresholds: [0.151, 22.8, 25.3, 28.1, undefined], min: 1, max: 99, fieldTitle: 'CADD', citation: CLINGEN_CITATION },
   { field: 'revel', group: MISSENSE_IN_SILICO_GROUP, thresholds: [0.0161, 0.291, 0.644, 0.773, 0.932], fieldTitle: 'REVEL', citation: CLINGEN_CITATION },
+  {
+    field: 'alphagenome',
+    group: CODING_IN_SILICO_GROUP,
+    thresholds: [undefined, 18, 23, 27, undefined],
+    max: 99,
+    fieldTitle: 'AlphaGenome',
+    getHref: ({ chrom, pos, ref, alt }) => (
+      `https://deepmind.google.com/science/alphagenome/atlas?q=chr${chrom}:${pos}:${ref}%3E${alt}&m=variant`
+    ),
+    citation: {
+      name: 'Avsec Ž, Latysheva N, Cheng J, et al. Advancing regulatory variant effect prediction with AlphaGenome. Nature. 2026;649(8099):1206-1218',
+      linkText: 'doi:10.1038/s41586-025-10014-0',
+      href: 'https://doi.org/10.1038/s41586-025-10014-0',
+    },
+  },
   { field: 'alphamissense', fieldTitle: 'AlphaMissense', group: MISSENSE_IN_SILICO_GROUP, thresholds: ALPHAMISSENSE_THRESHHOLDS, citation: { name: '2025 ClinGen SVI recommendations', pmid: '40084623' } },
   { field: 'mpc', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1.36, 1.828, undefined], max: 5, fieldTitle: 'MPC' },
   {

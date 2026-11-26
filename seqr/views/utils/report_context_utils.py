@@ -63,7 +63,7 @@ def _main_transcript(variant, annotations):
 def _gnomad_frequency(annotations):
     populations = annotations.get('populations') or {}
     return [
-        f'{label} {populations[population]["af"]:.4g}' for population, label in GNOMAD_POPULATIONS.items()
+        f'{label} {float(populations[population]["af"]):.4g}' for population, label in GNOMAD_POPULATIONS.items()
         if (populations.get(population) or {}).get('af') is not None
     ]
 

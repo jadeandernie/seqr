@@ -1,6 +1,7 @@
 import json
 import mock
 from datetime import datetime
+from decimal import Decimal
 
 from django.core.management import call_command
 from django.urls.base import reverse
@@ -35,7 +36,7 @@ CLICKHOUSE_ANNOTATIONS = [{
     'populations': {
         'seqr': {'ac': 8, 'hom': 3},
         'topmed': {'af': 0.07842, 'ac': 20757},
-        'gnomad_exomes': {'af': 0.0, 'ac': 0, 'an': 0},
+        'gnomad_exomes': {'af': Decimal('0.00288997'), 'ac': 72672, 'an': 251462},
         'gnomad_genomes': {'af': 0.03444932, 'ac': 927, 'an': 26912},
     },
     'transcripts': {
@@ -664,7 +665,7 @@ This summary describes findings from a research analysis. It has not been produc
 - How the research team has classified it (ACMG): Not recorded
 
 '''
-EXPECTED_KEY_VARIANT = '''[1-248367227-TC-T|OR4G11P, RP11|ENST00000371839.1:c.4\\_5del|ENSP00000371839.1:p.Leu2fs|HG00731: Homozygous, HG00732: Heterozygous|genomes 0.03445, exomes 0|Likely pathogenic|Not recorded|AIP, Excluded, Known gene for phenotype]
+EXPECTED_KEY_VARIANT = '''[1-248367227-TC-T|OR4G11P, RP11|ENST00000371839.1:c.4\\_5del|ENSP00000371839.1:p.Leu2fs|HG00731: Homozygous, HG00732: Heterozygous|genomes 0.03445, exomes 0.00289|Likely pathogenic|Not recorded|AIP, Excluded, Known gene for phenotype]
 '''
 EXPECTED_UNANNOTATED_KEY_VARIANT = '''[1-248367227-TC-T|OR4G11P, RP11|Not recorded|Not recorded|HG00731: Homozygous, HG00732: Heterozygous|Not recorded|Not recorded|Not recorded|AIP, Excluded, Known gene for phenotype]
 '''

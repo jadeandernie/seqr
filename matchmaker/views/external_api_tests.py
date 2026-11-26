@@ -5,6 +5,7 @@ from datetime import datetime
 from django.test import TestCase
 
 from matchmaker.models import MatchmakerIncomingQuery
+from settings import MME_DISCLAIMER
 
 TEST_ACCESS_TOKEN = 'erjhtg3558324u82'  # nosec
 TEST_MME_NODES = {TEST_ACCESS_TOKEN: {'name': 'Test Node'}}
@@ -128,6 +129,7 @@ class ExternalAPITest(TestCase):
         # Test valid request
         response = self._make_mme_request(url, 'post', content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['_disclaimer'], MME_DISCLAIMER)
         results = response.json()['results']
 
         self.assertEqual(len(results), 3)

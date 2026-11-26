@@ -152,6 +152,9 @@ export const updateSearchSort = updates => (dispatch) => {
   dispatch({ type: UPDATE_SEARCHED_VARIANT_DISPLAY, updates })
 }
 
+// Results of a search that was unloaded or replaced while it was loading must not be shown as the current search
+let currentSearchedVariantsRequest = 0
+
 export const loadSearchedVariants = (
   { searchHash }, { displayUpdates, queryParams, updateQueryParams },
 ) => (dispatch, getState) => {
@@ -161,6 +164,8 @@ export const loadSearchedVariants = (
   }
 
   dispatch({ type: REQUEST_SEARCHED_VARIANTS })
+  currentSearchedVariantsRequest += 1
+  const request = currentSearchedVariantsRequest
 
   let { sort, page } = displayUpdates || queryParams
   if (!page) {
@@ -194,15 +199,22 @@ export const loadSearchedVariants = (
   new HttpRequestHelper(url,
     (responseJson) => {
       dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: responseJson.searchedVariantIds })
       dispatch({ type: RECEIVE_SAVED_SEARCHES, updatesById: { searchesByHash: { [searchHash]: responseJson.search } } })
+      if (request === currentSearchedVariantsRequest) {
+        dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: responseJson.searchedVariantIds })
+      }
     },
     (e) => {
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, error: e.message, newValue: [] })
+      if (request === currentSearchedVariantsRequest) {
+        dispatch({ type: RECEIVE_SEARCHED_VARIANTS, error: e.message, newValue: [] })
+      }
     }).post(search)
 }
 
-export const unloadSearchResults = () => dispatch => dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: [] })
+export const unloadSearchResults = () => (dispatch) => {
+  currentSearchedVariantsRequest += 1
+  dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: [] })
+}
 
 export const loadGeneBreakdown = searchHash => (dispatch, getState) => {
   if (!getState().searchGeneBreakdown[searchHash]) {

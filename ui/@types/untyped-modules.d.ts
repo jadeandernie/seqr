@@ -1,0 +1,5 @@
+declare module 'styled-components'
+declare module 'enzyme'
+declare module '@wojtekmaj/enzyme-adapter-react-17'
+declare module 'history'
+declare module 'react-dom/test-utils'

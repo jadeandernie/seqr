@@ -26,7 +26,7 @@ GENE_LISTS = [
     {'name': 'Incidentalome', 'confidences': ['GREEN']}
 ]
 
-EXCLUDE_GENE_IDS = [
+DOMINANT_EXCLUDE_GENE_IDS = [
     'ENSG00000143631', 'ENSG00000165474', 'ENSG00000180210', 'ENSG00000198734', 'ENSG00000010704', 'ENSG00000132470',
 ]
 
@@ -491,10 +491,10 @@ class Command(BaseCommand):
             family_guid_map[guid] = db_id
             family_name_map[db_id] = family_id
 
-        exclude_genes = get_search_genes(EXCLUDE_GENE_IDS, genome_version=GENOME_VERSION_GRCh38)
+        exclude_genes = get_search_genes(DOMINANT_EXCLUDE_GENE_IDS, genome_version=GENOME_VERSION_GRCh38)
         gene_by_moi = defaultdict(dict)
         for gene_list in GENE_LISTS:
-            self._get_gene_list_genes(gene_list['name'], gene_list['confidences'], gene_by_moi, exclude_genes.keys())
+            self._get_gene_list_genes(gene_list['name'], gene_list['confidences'], gene_by_moi, exclude_gene_ids=exclude_genes.keys())
 
         updates = {update: set() for update in ['matched_families', 'new_tag_keys', 'update_tag_keys', 'skipped_tag_keys']}
         search_counts = {}
@@ -569,14 +569,13 @@ class Command(BaseCommand):
         for search_name, config_search in searches.items():
             logger.info(f'Searching for criteria: {search_name}')
             search_genes = gene_by_moi[config_search['gene_list_moi']] if config_search.get('gene_list_moi') else None
-            if search_genes:
-                exclude_intervals = None
             sample_data = cls._get_valid_family_sample_data(
                 project, sample_type, samples_by_family, config_search.get('family_filter'),
             )
             num_results = cls._execute_search(
                 {dataset_type: sample_data}, search_name, family_variant_data, family_guid_map,
-                exclude_intervals=exclude_intervals, genes=search_genes, **config_search, **ALL_SEARCHES_CRITERIA,
+                exclude_intervals=None if search_genes else exclude_intervals, genes=search_genes,
+                **config_search, **ALL_SEARCHES_CRITERIA,
             ) if sample_data['num_families'] else 0
             search_counts[search_name] = num_results
 
@@ -706,7 +705,7 @@ class Command(BaseCommand):
     @staticmethod
     def _get_gene_list_genes(name, confidences, gene_by_moi, exclude_gene_ids):
         ll = LocusList.objects.get(name=name, palocuslist__isnull=False)
-        moi_gene_ids = ll.locuslistgene_set.exclude(gene_id__in=exclude_gene_ids).annotate(
+        moi_gene_ids = ll.locuslistgene_set.annotate(
             is_dominant=Q(
                 Q(palocuslistgene__mode_of_inheritance__startswith='MONOALLELIC') &
                 ~Q(palocuslistgene__mode_of_inheritance__contains=' paternally imprinted') &
@@ -727,6 +726,7 @@ class Command(BaseCommand):
 
         gene_id_mois = {g['gene_id']: g for g in moi_gene_ids}
         genes_by_id = get_search_genes(gene_id_mois.keys(), genome_version=GENOME_VERSION_GRCh38)
-        gene_by_moi[DOMINANT_MOI].update({gene_id: gene for gene_id, gene in genes_by_id.items() if not gene_id_mois[gene_id]['is_recessive']})
         gene_by_moi[RECESSIVE_MOI].update({gene_id: gene for gene_id, gene in genes_by_id.items() if not gene_id_mois[gene_id]['is_dominant']})
-        gene_by_moi[MITO_MOI].update({gene_id: gene for gene_id, gene in genes_by_id.items() if gene_id_mois[gene_id]['is_mito']})
+        non_excluded_genes_by_id = {gene_id: gene for gene_id, gene in genes_by_id.items() if gene_id not in exclude_gene_ids}
+        gene_by_moi[DOMINANT_MOI].update({gene_id: gene for gene_id, gene in non_excluded_genes_by_id.items() if not gene_id_mois[gene_id]['is_recessive']})
+        gene_by_moi[MITO_MOI].update({gene_id: gene for gene_id, gene in non_excluded_genes_by_id.items() if gene_id_mois[gene_id]['is_mito']})

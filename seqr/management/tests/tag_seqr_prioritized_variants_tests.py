@@ -6,6 +6,7 @@ import mock
 
 from clickhouse_search.all_search_tests import ClickhouseSearchTestCase
 from clickhouse_search.test_utils import VARIANT2, VARIANT3, VARIANT4, GCNV_VARIANT3, GCNV_VARIANT4
+from seqr.management.commands.tag_seqr_prioritized_variants import Command, SEARCHES
 from seqr.models import SavedVariant, VariantTag
 
 PROJECT_GUID = 'R0001_1kg'
@@ -163,6 +164,36 @@ class CheckNewSamplesTest(ClickhouseSearchTestCase):
           ])
         mock_email.assert_not_called()
         mock_slack.assert_not_called()
+
+    @mock.patch('seqr.utils.communication_utils.EmailMultiAlternatives')
+    @mock.patch('seqr.utils.communication_utils._post_to_slack')
+    @mock.patch('seqr.management.commands.tag_seqr_prioritized_variants.DOMINANT_EXCLUDE_GENE_IDS', ['ENSG00000097046'])
+    def test_dominant_exclude_genes(self, *args):
+        with mock.patch.object(Command, '_execute_search', wraps=Command._execute_search) as mock_execute_search:
+            call_command('tag_seqr_prioritized_variants', PROJECT_GUID)
+
+        search_kwargs = {call.args[1]: call.kwargs for call in mock_execute_search.call_args_list}
+        self.assertEqual(len(search_kwargs), 31)
+        recessive_searches = {
+            name for searches in SEARCHES.values() for name, search in searches.items()
+            if search.get('gene_list_moi') == 'R'
+        }
+        recessive_searches.update(MULTI_TYPE_MATCHES.keys())
+        exclude_gene = search_kwargs['Recessive']['genes']['ENSG00000097046']
+        self.assertSetEqual({name for name, kwargs in search_kwargs.items() if not kwargs['genes']}, {
+            'De Novo/ Dominant - Confirmed', 'High Splice AI - De Novo/ Dominant Confirmed',
+            'Mitochondrial - Pathogenic', 'Mitochondrial - De Novo/ Dominant',
+        })
+        for name, kwargs in search_kwargs.items():
+            if kwargs['genes']:
+                self.assertIsNone(kwargs.get('exclude_intervals'), name)
+                self.assertEqual('ENSG00000097046' in kwargs['genes'], name in recessive_searches, name)
+            else:
+                self.assertListEqual(kwargs['exclude_intervals'], [exclude_gene], name)
+
+        comp_het_tag = VariantTag.objects.get(variant_tag_type__name='seqr Prioritized', saved_variants__key=3)
+        self.assertSetEqual(set(comp_het_tag.saved_variants.values_list('key', flat=True)), {3, 4})
+        self.assertListEqual(list(json.loads(comp_het_tag.metadata).keys()), ['Compound Heterozygous'])
 
     def _assert_expected_logs(self, num_new=0, num_unchanged=0, creation_stats=None):
         creation_stats = creation_stats or {}

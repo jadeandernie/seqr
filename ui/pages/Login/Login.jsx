@@ -3,16 +3,18 @@ import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import { Route, Switch } from 'react-router-dom'
 
-import { getOauthLoginEnabled } from 'redux/selectors'
+import { getOauthLoginProviders } from 'redux/selectors'
 import { Error404 } from 'shared/components/page/Errors'
 import Login from './components/Login'
 import LoginError from './components/LoginError'
+import { LoginProvidersPage } from './components/LoginProviders'
 import ForgotPassword from './components/ForgotPassword'
 import SetPassword from './components/SetPassword'
 
-const LoginPage = ({ match, oauthLoginEnabled }) => (
+const LoginPage = ({ match, oauthLoginProviders }) => (
   <Switch>
-    {oauthLoginEnabled ?
+    {oauthLoginProviders.length > 1 && <Route exact path={match.url} component={LoginProvidersPage} />}
+    {oauthLoginProviders.length > 0 ?
       <Route path={`${match.url}/error/:error`} component={LoginError} /> :
       [
         <Route key="login" exact path={match.url} component={Login} />,
@@ -25,11 +27,11 @@ const LoginPage = ({ match, oauthLoginEnabled }) => (
 
 LoginPage.propTypes = {
   match: PropTypes.object,
-  oauthLoginEnabled: PropTypes.bool,
+  oauthLoginProviders: PropTypes.arrayOf(PropTypes.string),
 }
 
 const mapStateToProps = state => ({
-  oauthLoginEnabled: getOauthLoginEnabled(state),
+  oauthLoginProviders: getOauthLoginProviders(state),
 })
 
 export default connect(mapStateToProps)(LoginPage)

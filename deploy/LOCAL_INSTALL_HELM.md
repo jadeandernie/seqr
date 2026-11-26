@@ -43,6 +43,39 @@ Note that user accounts must be directly associated with the Azure tenant in ord
 to the tenant will automatically have access to seqr, although they will only be able to view those projects that they 
 have been added to.
 
+#### Google and Azure OAuth2 together
+Google and Azure authentication can be enabled at the same time by setting the environment variables for both providers:
+```yaml
+  seqr:
+    environment:
+      - SOCIAL_AUTH_GOOGLE_OAUTH2_CLIENT_ID=your-google-client-id
+      - SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET=your-google-client-secret
+      - SOCIAL_AUTH_AZUREAD_V2_OAUTH2_CLIENT_ID=your-azure-client-id
+      - SOCIAL_AUTH_AZUREAD_V2_OAUTH2_SECRET=your-azure-client-secret
+      - SOCIAL_AUTH_AZUREAD_V2_OAUTH2_TENANT=your-tenant-id
+```
+When both are configured:
+- Users who are not signed in are sent to a seqr login page where they choose "Sign in with Google" or 
+"Sign in with Microsoft", instead of being redirected straight to a provider. Add both
+`https://<your-seqr-host>/complete/google-oauth2/` and `https://<your-seqr-host>/complete/azuread-v2-tenant-oauth2/` 
+as authorized redirect URIs with the respective provider.
+- Each provider keeps the same access rule that it has when configured on its own. Google users must already have a seqr
+account, which is created when their email is added to a seqr project. Any user in the Azure tenant can sign in, and a 
+seqr account is created for them the first time that they do.
+- `SOCIAL_AUTH_AZUREAD_V2_OAUTH2_TENANT` is required, and must identify a single tenant. seqr will not start if it is 
+unset or is one of the multi-tenant values `common`, `organizations` or `consumers`. Using the tenant ID (a GUID) rather 
+than a domain name is recommended, as the tenant of every sign in is then also checked against it.
+- AnVIL/ Terra integration only ever applies to users who sign in with Google. Users who sign in with Microsoft are not 
+validated against AnVIL and have no access through AnVIL workspaces or groups.
+
+**Security note:** seqr identifies a user by their email address, so a user who signs in with Microsoft is signed in to 
+the existing seqr account with the same email address, including accounts that were created through Google, and vice 
+versa. This is what allows a user to use either provider, but it means that anyone who can obtain an arbitrary email 
+address (strictly, an arbitrary user principal name) in the Azure tenant can take over the seqr account with that email. 
+Only configure both providers if the Azure tenant is a single trusted organizational directory in which users can not 
+choose or change their own user principal name, and remember that the Azure tenant administrators can effectively sign 
+in as any seqr user.
+
 ## Enabling Clingen Allele Registration
 - Turning on this feature will register your variants within the Clingen Allele Registry during VCF ingestion. The [Registry](https://reg.clinicalgenome.org/redmine/projects/registry/genboree_registry/landing) provides and maintains unique variant identifiers; enabling this feature will toggle several small features.
 - You will first need to [register](https://reg.clinicalgenome.org/cg-prof/new) and receive a login and password.

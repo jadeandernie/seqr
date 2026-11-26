@@ -8,6 +8,6 @@ import Login from './Login'
 configure({ adapter: new Adapter() })
 
 test('shallow-render without crashing', () => {
-  const store = configureStore()({ newUser: { username: 'test' }, meta: { oauthLoginProvider: '' } })
+  const store = configureStore()({ newUser: { username: 'test' }, meta: { oauthLoginProviders: [] } })
   shallow(<Login store={store} />)
 })

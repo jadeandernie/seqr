@@ -5,7 +5,7 @@ import PropTypes from 'prop-types'
 import styled from 'styled-components'
 import { Segment, Header, Grid, Button, List } from 'semantic-ui-react'
 
-import { getOauthLoginProvider } from 'redux/selectors'
+import { getLoginUrl } from 'redux/selectors'
 import { VerticalSpacer } from 'shared/components/Spacers'
 import { SeqrPaperLink } from 'shared/components/page/Footer'
 import { FAQ_PATH, LOCAL_LOGIN_URL } from 'shared/utils/constants'
@@ -50,16 +50,16 @@ SeqrAvailability.propTypes = {
   hasFootnote: PropTypes.bool,
 }
 
-const LandingPage = ({ oauthLoginProvider }) => (
+const LandingPage = ({ loginUrl }) => (
   <Segment.Group>
     <PageSegment textAlign="center" size="massive" secondary>
       <Header size="huge" content={<i>seqr</i>} />
       <VerticalSpacer height={20} />
       An open source software platform for rare disease genomics
       <VerticalSpacer height={40} />
-      {oauthLoginProvider ?
-        <Button as="a" href={`/login/${oauthLoginProvider}`} {...LOGIN_BUTTON_PROPS} /> :
-        <Button as={Link} to={LOCAL_LOGIN_URL} {...LOGIN_BUTTON_PROPS} />}
+      {loginUrl === LOCAL_LOGIN_URL ?
+        <Button as={Link} to={LOCAL_LOGIN_URL} {...LOGIN_BUTTON_PROPS} /> :
+        <Button as="a" href={loginUrl} {...LOGIN_BUTTON_PROPS} />}
       <Segment basic size="big">
         <Link to={FAQ_PATH}>Trouble accessing seqr? Read our FAQ to resolve common issues</Link>
       </Segment>
@@ -125,11 +125,11 @@ const LandingPage = ({ oauthLoginProvider }) => (
 )
 
 LandingPage.propTypes = {
-  oauthLoginProvider: PropTypes.string,
+  loginUrl: PropTypes.string,
 }
 
 const mapStateToProps = state => ({
-  oauthLoginProvider: getOauthLoginProvider(state),
+  loginUrl: getLoginUrl(state),
 })
 
 export default connect(mapStateToProps)(LandingPage)

@@ -2,6 +2,9 @@ import { createSelector } from 'reselect'
 
 import { compareObjects } from 'shared/utils/sortUtils'
 import { NOTE_TAG_NAME, MME_TAG_NAME, FAMILY_FIELD_ANALYSED_BY, CATEGORY_FAMILY_FILTERS } from 'shared/utils/constants'
+import { getLoginUrl as getProvidersLoginUrl } from 'shared/utils/loginUtils'
+
+const NO_OAUTH_PROVIDERS = []
 
 export const getProjectsIsLoading = state => state.projectsLoading.isLoading
 export const getProjectDetailsIsLoading = state => state.projectDetailsLoading.isLoading
@@ -37,8 +40,9 @@ export const getUser = state => state.user
 export const getUserOptionsByUsername = state => state.userOptionsByUsername
 export const getUserOptionsIsLoading = state => state.userOptionsLoading.isLoading
 export const getVersion = state => state.meta.version
-export const getOauthLoginEnabled = state => !!state.meta.oauthLoginProvider
-export const getOauthLoginProvider = state => state.meta.oauthLoginProvider
+export const getOauthLoginProviders = state => state.meta.oauthLoginProviders || NO_OAUTH_PROVIDERS
+export const getOauthLoginEnabled = state => getOauthLoginProviders(state).length > 0
+export const getLoginUrl = state => getProvidersLoginUrl(getOauthLoginProviders(state))
 export const getVlmEnabled = state => state.meta.vlmEnabled
 export const getHijakEnabled = state => state.meta.hijakEnabled
 export const getWarningMessages = state => state.meta.warningMessages

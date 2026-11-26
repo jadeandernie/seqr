@@ -6,6 +6,7 @@ from seqr.views.react_app import main_app, no_login_main_app
 from seqr.views.utils.terra_api_utils import TerraRefreshTokenFailedException
 from seqr.views.utils.test_utils import TEST_OAUTH2_PROVIDER, AuthenticationTestCase, AnvilAuthenticationTestCase, USER_FIELDS
 
+MULTIPLE_OAUTH_PROVIDERS = [TEST_OAUTH2_PROVIDER, 'azuread-v2-tenant-oauth2']
 MOCK_GA_TOKEN = 'mock_ga_token' # nosec
 FEATURE_UPDATE_FEED = """
 <?xml version="1.0" ?>
@@ -85,7 +86,7 @@ class AppPageTest(object):
         self.assertDictEqual(initial_json['meta'], {
             'version': mock.ANY,
             'hijakEnabled': False,
-            'oauthLoginProvider': self.OAUTH_PROVIDER,
+            'oauthLoginProviders': self.OAUTH_PROVIDERS,
             'vlmEnabled': vlm_enabled,
             'warningMessages': [{'id': 1, 'header': 'Warning!', 'message': 'A sample warning'}],
             'lastFeatureUpdate': last_feature_update,
@@ -166,15 +167,31 @@ class AppPageTest(object):
         response = self.client.get(url)
         self._check_page_html(response, 'test_user_no_policies', last_feature_update='2025-11-18T00:00:00Z')
 
+    def test_multiple_oauth_providers_login_page(self, mock_redis):
+        mock_redis.return_value.get.return_value = '"2025-11-18T00:00:00Z"'
+
+        # The login url for multiple providers is redirected to the login page, which does not require login
+        response = self.client.get('/login?next=/project/R0001_1kg/project_page')
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, '/login/?next=/project/R0001_1kg/project_page')
+
+        with mock.patch('seqr.views.react_app.SOCIAL_AUTH_PROVIDERS', MULTIPLE_OAUTH_PROVIDERS):
+            response = self.client.get(response.url)
+        self.assertEqual(response.status_code, 200)
+        initial_json = self.get_initial_page_json(response)
+        self.assertListEqual(list(initial_json.keys()), ['meta'])
+        self.assertListEqual(initial_json['meta']['oauthLoginProviders'], MULTIPLE_OAUTH_PROVIDERS)
+
+
 
 class LocalAppPageTest(AuthenticationTestCase, AppPageTest):
     fixtures = ['users']
-    OAUTH_PROVIDER = ''
+    OAUTH_PROVIDERS = []
 
 
 class AnvilAppPageTest(AnvilAuthenticationTestCase, AppPageTest):
     fixtures = ['users']
-    OAUTH_PROVIDER = TEST_OAUTH2_PROVIDER
+    OAUTH_PROVIDERS = [TEST_OAUTH2_PROVIDER]
 
     def test_react_page(self, *args, **kwargs):
         super(AnvilAppPageTest, self).test_react_page(*args, **kwargs)

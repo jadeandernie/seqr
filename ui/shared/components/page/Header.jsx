@@ -7,8 +7,8 @@ import { connect } from 'react-redux'
 import { Link } from 'react-router-dom'
 
 import { updateUser } from 'redux/rootReducer'
-import { getUser, getOauthLoginProvider, getLastFeatureUpdate } from 'redux/selectors'
-import { USER_NAME_FIELDS, LOCAL_LOGIN_URL, FEATURE_UPDATES_PATH } from 'shared/utils/constants'
+import { getUser, getLoginUrl, getLastFeatureUpdate } from 'redux/selectors'
+import { USER_NAME_FIELDS, FEATURE_UPDATES_PATH } from 'shared/utils/constants'
 import UpdateButton from '../buttons/UpdateButton'
 
 import AwesomeBar from './AwesomeBar'
@@ -37,59 +37,55 @@ const AwesomeBarMenuItem = styled(Menu.Item)`
   }
 `
 
-const PageHeader = React.memo(({ user, oauthLoginProvider, onSubmit, lastFeatureUpdate }) => {
-  const loginUrl = oauthLoginProvider ? `/login/${oauthLoginProvider}` : LOCAL_LOGIN_URL
-
-  return (
-    <HeaderMenu borderless inverted attached>
-      <Menu.Item as={Link} to="/"><Header size="medium" inverted><i>seqr</i></Header></Menu.Item>
-      {Object.keys(user).length ? [
-        <Menu.Item key="search" as={Link} to="/variant_search" content="Search" />,
-        <Menu.Item key="variant_lookup" as={Link} to="/variant_lookup" content="Variant Lookup" />,
-        <Menu.Item key="gene_lookup" as={Link} to="/variant_lookup/gene" content="Gene Lookup" />,
-        <Menu.Item key="summary_data" as={Link} to="/summary_data" content="Summary Data" />,
-        (user.isAnalyst || user.isPm) ? <Menu.Item key="report" as={Link} to="/report" content="Reports" /> : null,
-        (user.isDataManager || user.isPm) ? <Menu.Item key="data_management" as={Link} to="/data_management" content="Data Management" /> : null,
-        <AwesomeBarMenuItem key="awesomebar" fitted="vertically"><AwesomeBar newWindow inputwidth="350px" /></AwesomeBarMenuItem>,
-      ] : null }
-      <Menu.Item key="spacer" position="right" />
-      <Menu.Item key="feature_updates">
-        <Link to={FEATURE_UPDATES_PATH}>Feature Updates</Link>
-        {(lastFeatureUpdate && (new Date()).setMonth(new Date().getMonth() - 1) < new Date(lastFeatureUpdate)) &&
-          <Label color="red" pointing="left" size="tiny">New</Label>}
-      </Menu.Item>
-      {Object.keys(user).length ? [
-        <Dropdown
-          item
-          key="user"
-          trigger={
-            <span>
-              Logged in as &nbsp;
-              <b>{user.displayName || user.email}</b>
-            </span>
-          }
-        >
-          <Dropdown.Menu>
-            <UpdateButton
-              trigger={<Dropdown.Item icon="write" text="Edit User Info" />}
-              modalId="updateUser"
-              modalTitle="Edit User Info"
-              initialValues={user}
-              formFields={USER_NAME_FIELDS}
-              onSubmit={onSubmit}
-            />
-            <Dropdown.Item as="a" href="/logout" icon="sign out" text="Log out" />
-          </Dropdown.Menu>
-        </Dropdown>,
-      ] :
-      <Menu.Item as="a" href={loginUrl}>Log in</Menu.Item> }
-    </HeaderMenu>
-  )
-})
+const PageHeader = React.memo(({ user, loginUrl, onSubmit, lastFeatureUpdate }) => (
+  <HeaderMenu borderless inverted attached>
+    <Menu.Item as={Link} to="/"><Header size="medium" inverted><i>seqr</i></Header></Menu.Item>
+    {Object.keys(user).length ? [
+      <Menu.Item key="search" as={Link} to="/variant_search" content="Search" />,
+      <Menu.Item key="variant_lookup" as={Link} to="/variant_lookup" content="Variant Lookup" />,
+      <Menu.Item key="gene_lookup" as={Link} to="/variant_lookup/gene" content="Gene Lookup" />,
+      <Menu.Item key="summary_data" as={Link} to="/summary_data" content="Summary Data" />,
+      (user.isAnalyst || user.isPm) ? <Menu.Item key="report" as={Link} to="/report" content="Reports" /> : null,
+      (user.isDataManager || user.isPm) ? <Menu.Item key="data_management" as={Link} to="/data_management" content="Data Management" /> : null,
+      <AwesomeBarMenuItem key="awesomebar" fitted="vertically"><AwesomeBar newWindow inputwidth="350px" /></AwesomeBarMenuItem>,
+    ] : null }
+    <Menu.Item key="spacer" position="right" />
+    <Menu.Item key="feature_updates">
+      <Link to={FEATURE_UPDATES_PATH}>Feature Updates</Link>
+      {(lastFeatureUpdate && (new Date()).setMonth(new Date().getMonth() - 1) < new Date(lastFeatureUpdate)) &&
+        <Label color="red" pointing="left" size="tiny">New</Label>}
+    </Menu.Item>
+    {Object.keys(user).length ? [
+      <Dropdown
+        item
+        key="user"
+        trigger={
+          <span>
+            Logged in as &nbsp;
+            <b>{user.displayName || user.email}</b>
+          </span>
+        }
+      >
+        <Dropdown.Menu>
+          <UpdateButton
+            trigger={<Dropdown.Item icon="write" text="Edit User Info" />}
+            modalId="updateUser"
+            modalTitle="Edit User Info"
+            initialValues={user}
+            formFields={USER_NAME_FIELDS}
+            onSubmit={onSubmit}
+          />
+          <Dropdown.Item as="a" href="/logout" icon="sign out" text="Log out" />
+        </Dropdown.Menu>
+      </Dropdown>,
+    ] :
+    <Menu.Item as="a" href={loginUrl}>Log in</Menu.Item> }
+  </HeaderMenu>
+))
 
 PageHeader.propTypes = {
   user: PropTypes.object,
-  oauthLoginProvider: PropTypes.string,
+  loginUrl: PropTypes.string,
   onSubmit: PropTypes.func,
   lastFeatureUpdate: PropTypes.string,
 }
@@ -97,7 +93,7 @@ PageHeader.propTypes = {
 // wrap top-level component so that redux state is passed in as props
 const mapStateToProps = state => ({
   user: getUser(state),
-  oauthLoginProvider: getOauthLoginProvider(state),
+  loginUrl: getLoginUrl(state),
   lastFeatureUpdate: getLastFeatureUpdate(state),
 })
 

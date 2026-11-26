@@ -7,6 +7,9 @@ import subprocess  # nosec
 import google.auth
 import google.auth.transport.requests
 
+from seqr.utils.social_auth_settings import GOOGLE_PROVIDER, get_social_auth_providers, get_login_url, \
+    get_social_auth_pipeline_settings
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -403,15 +406,11 @@ SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL = 'seqr_loading_notifications'
 #########################################################
 #  Social auth specific settings
 #########################################################
-SOCIAL_AUTH_PROVIDER = ''
-
 #########################################################
 #  AZUREAD
 SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_KEY = os.environ.get('SOCIAL_AUTH_AZUREAD_V2_OAUTH2_CLIENT_ID')
 SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_SECRET = os.environ.get('SOCIAL_AUTH_AZUREAD_V2_OAUTH2_SECRET')
 SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_TENANT_ID = os.environ.get('SOCIAL_AUTH_AZUREAD_V2_OAUTH2_TENANT')
-if SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_KEY:
-    SOCIAL_AUTH_PROVIDER = 'azuread-v2-tenant-oauth2'
 
 #########################################################
 # GOOGLE
@@ -424,35 +423,23 @@ SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
 
 # Use Google sub ID as the user ID, safer than using email
 USE_UNIQUE_USER_ID = True
-GOOGLE_LOGIN_REQUIRED_URL = '/login/google-oauth2'
+GOOGLE_LOGIN_REQUIRED_URL = f'/login/{GOOGLE_PROVIDER}'
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.environ.get('SOCIAL_AUTH_GOOGLE_OAUTH2_CLIENT_ID')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.environ.get('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET')
-if SOCIAL_AUTH_GOOGLE_OAUTH2_KEY:
-    SOCIAL_AUTH_PROVIDER = 'google-oauth2'
 
-# Build the login URL based on the provider (if any).
-LOGIN_URL = '/'.join(filter(None, ['/login', SOCIAL_AUTH_PROVIDER]))
+SOCIAL_AUTH_PROVIDERS = get_social_auth_providers(
+    google_key=SOCIAL_AUTH_GOOGLE_OAUTH2_KEY, azure_key=SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_KEY,
+)
+# The provider with precedence, kept for installs that rely on a single provider
+SOCIAL_AUTH_PROVIDER = SOCIAL_AUTH_PROVIDERS[0] if SOCIAL_AUTH_PROVIDERS else ''
+
+# A single provider is redirected to directly, multiple providers are chosen between on the login page
+LOGIN_URL = get_login_url(SOCIAL_AUTH_PROVIDERS)
 
 SOCIAL_AUTH_JSONFIELD_ENABLED = True
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
 SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/'
 SOCIAL_AUTH_REDIRECT_IS_HTTPS = not DEBUG
-
-SOCIAL_AUTH_PIPELINE_BASE = (
-    'social_core.pipeline.social_auth.social_details',
-    'social_core.pipeline.social_auth.social_uid',
-    'social_core.pipeline.social_auth.social_user',
-    'social_core.pipeline.social_auth.associate_by_email',
-)
-SOCIAL_AUTH_PIPELINE_USER_EXIST = ('seqr.utils.social_auth_pipeline.validate_user_exist',)
-SOCIAL_AUTH_PIPELINE_ASSOCIATE_USER = ('social_core.pipeline.social_auth.associate_user',)
-SOCIAL_AUTH_PIPELINE_LOG = ('seqr.utils.social_auth_pipeline.log_signed_in',)
-SOCIAL_AUTH_PIPELINE_CLOUD_BASE = (
-    'social_core.pipeline.user.get_username',
-    'social_core.pipeline.user.create_user') + \
-    SOCIAL_AUTH_PIPELINE_ASSOCIATE_USER + \
-    ('social_core.pipeline.social_auth.load_extra_data',
-     'social_core.pipeline.user.user_details')
 
 TERRA_PERMS_CACHE_EXPIRE_SECONDS = os.environ.get('TERRA_PERMS_CACHE_EXPIRE_SECONDS', 60)
 TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS = os.environ.get('TERRA_WORKSPACE_CACHE_EXPIRE_SECONDS', 300)
@@ -481,14 +468,8 @@ if TERRA_API_ROOT_URL:
         'approval_prompt': 'auto', # required for successful token refresh
     }
 
-    SOCIAL_AUTH_PIPELINE = ('seqr.utils.social_auth_pipeline.validate_anvil_registration',) + \
-                           SOCIAL_AUTH_PIPELINE_BASE + \
-                           SOCIAL_AUTH_PIPELINE_CLOUD_BASE + \
-                           SOCIAL_AUTH_PIPELINE_LOG
-elif SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_KEY:
-    SOCIAL_AUTH_PIPELINE = SOCIAL_AUTH_PIPELINE_BASE + \
-                           SOCIAL_AUTH_PIPELINE_CLOUD_BASE + \
-                           ('seqr.utils.social_auth_pipeline.log_signed_in',)
-else:
-    SOCIAL_AUTH_PIPELINE = SOCIAL_AUTH_PIPELINE_BASE + SOCIAL_AUTH_PIPELINE_USER_EXIST + \
-                           SOCIAL_AUTH_PIPELINE_ASSOCIATE_USER + SOCIAL_AUTH_PIPELINE_LOG
+# Sets SOCIAL_AUTH_PIPELINE, and a SOCIAL_AUTH_<BACKEND>_PIPELINE per backend when multiple providers are configured
+globals().update(get_social_auth_pipeline_settings(
+    SOCIAL_AUTH_PROVIDERS, terra_enabled=bool(TERRA_API_ROOT_URL),
+    azure_tenant=SOCIAL_AUTH_AZUREAD_V2_TENANT_OAUTH2_TENANT_ID,
+))

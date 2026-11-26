@@ -2,6 +2,8 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds support for configuring Google and Azure authentication at the same time. Installs with both sets of credentials
+  already configured must set `SOCIAL_AUTH_AZUREAD_V2_OAUTH2_TENANT` to a single tenant, see the [install docs](deploy/LOCAL_INSTALL_HELM.md#google-and-azure-oauth2-together)
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

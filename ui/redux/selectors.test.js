@@ -8,6 +8,9 @@ import {
   getLocusListIntervalsByChromProject,
   getSpliceOutliersByChromFamily,
   getProjectAnalysisGroupFamilyGuidsByGuid,
+  getOauthLoginProviders,
+  getOauthLoginEnabled,
+  getLoginUrl,
 } from './selectors'
 import {DYNAMIC_ANALYSIS_GROUP_GUID, FAMILY_GUID, GENE_ID, SEARCH, SEARCH_HASH, STATE} from "../pages/Search/fixtures";
 
@@ -84,4 +87,30 @@ test('getProjectAnalysisGroupFamilyGuidsByGuid', () => {
   expect(getProjectAnalysisGroupFamilyGuidsByGuid(STATE, {})).toEqual({
     DAG0000183_test: [],
   })
+})
+
+test('oauth login selectors', () => {
+  const noMetaState = { meta: {} }
+  expect(getOauthLoginProviders(noMetaState)).toEqual([])
+  expect(getOauthLoginProviders(noMetaState)).toBe(getOauthLoginProviders(noMetaState))
+  expect(getOauthLoginEnabled(noMetaState)).toEqual(false)
+  expect(getLoginUrl(noMetaState)).toEqual('/login')
+
+  const localState = { meta: { oauthLoginProviders: [] } }
+  expect(getOauthLoginEnabled(localState)).toEqual(false)
+  expect(getLoginUrl(localState)).toEqual('/login')
+
+  const googleState = { meta: { oauthLoginProviders: ['google-oauth2'] } }
+  expect(getOauthLoginProviders(googleState)).toEqual(['google-oauth2'])
+  expect(getOauthLoginEnabled(googleState)).toEqual(true)
+  expect(getLoginUrl(googleState)).toEqual('/login/google-oauth2')
+
+  const azureState = { meta: { oauthLoginProviders: ['azuread-v2-tenant-oauth2'] } }
+  expect(getOauthLoginEnabled(azureState)).toEqual(true)
+  expect(getLoginUrl(azureState)).toEqual('/login/azuread-v2-tenant-oauth2')
+
+  const multipleState = { meta: { oauthLoginProviders: ['google-oauth2', 'azuread-v2-tenant-oauth2'] } }
+  expect(getOauthLoginProviders(multipleState)).toEqual(['google-oauth2', 'azuread-v2-tenant-oauth2'])
+  expect(getOauthLoginEnabled(multipleState)).toEqual(true)
+  expect(getLoginUrl(multipleState)).toEqual('/login')
 })

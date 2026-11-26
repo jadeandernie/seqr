@@ -14,6 +14,10 @@ The group summary of a cell is descriptive only: it counts families by gene, var
 results of the search of the cell and never runs a search. It does not read free text (notes, nonstandard features)
 and does not test for enrichment or significance.
 
+Automatic reruns are a setting of the workbook (rerun_interval_days, with an optional override per worksheet) that is
+changed like the rest of the workbook; they are run by seqr.views.utils.workbook_rerun_utils as the creator of the
+workbook.
+
 Run history and alerts are described in seqr.views.utils.workbook_utils. A cell has unreviewed results when its last
 completed run has results that were not marked as reviewed, except for variants that are tagged as excluded for the
 family: those never alert. Removed results are recorded in the history and do not alert.
@@ -30,7 +34,7 @@ from django.utils.crypto import salted_hmac
 
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import AnalysisGroup, Family, Individual, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, \
-    WorksheetQueryResult, WorksheetQueryRun
+    WorksheetQueryResult, WorksheetQueryRun, MIN_RERUN_INTERVAL_DAYS, MAX_RERUN_INTERVAL_DAYS
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.middleware import ErrorsWarningsException
 from seqr.views.apis.variant_search_api import _get_or_create_results_model, flatten_search_results, \
@@ -102,6 +106,17 @@ def _parse_optional_text(request_json, field):
     value = request_json[field]
     if not (value is None or isinstance(value, str)):
         raise _error(f'"{field}" must be text')
+    return value
+
+
+def _parse_rerun_interval(request_json):
+    value = request_json['rerunIntervalDays']
+    is_valid = isinstance(value, int) and not isinstance(value, bool) and \
+        MIN_RERUN_INTERVAL_DAYS <= value <= MAX_RERUN_INTERVAL_DAYS
+    if not (value is None or is_valid):
+        raise _error(
+            f'"rerunIntervalDays" must be empty or a number of days from {MIN_RERUN_INTERVAL_DAYS} to '
+            f'{MAX_RERUN_INTERVAL_DAYS}')
     return value
 
 
@@ -193,6 +208,9 @@ def _query_results_json(query_results, unreviewed_keys_by_cell=None):
         run.cell_id: run for run in
         _get_run_summaries().filter(cell__in=query_results).order_by('cell_id', '-id').distinct('cell_id')
     }
+    last_scheduled_run_dates = dict(WorksheetQueryRun.objects.filter(cell__in=query_results).exclude(
+        trigger=WorksheetQueryRun.TRIGGER_MANUAL,
+    ).values('cell_id').annotate(last_date=Max('created_date')).values_list('cell_id', 'last_date'))
 
     def _process_result(result, query_result):
         num_unreviewed = len(unreviewed_keys_by_cell.get(query_result.id, []))
@@ -202,6 +220,7 @@ def _query_results_json(query_results, unreviewed_keys_by_cell=None):
             'hasUnreviewed': num_unreviewed > 0,
             'numUnreviewed': num_unreviewed,
             'lastRun': _run_json(last_run) if last_run else None,
+            'lastScheduledRunDate': last_scheduled_run_dates.get(query_result.id),
         })
 
     prefetch_related_objects(query_results, 'last_run_by')
@@ -373,6 +392,12 @@ def update_workbook_handler(request, workbook_guid):
         _check_unique_name(workbook.project.workbook_set.exclude(id=workbook.id), update_json['name'], 'workbook')
     if 'description' in request_json:
         update_json['description'] = _parse_optional_text(request_json, 'description')
+    if 'rerunIntervalDays' in request_json:
+        update_json['rerun_interval_days'] = _parse_rerun_interval(request_json)
+    if 'notifyOnNewResults' in request_json:
+        if not isinstance(request_json['notifyOnNewResults'], bool):
+            raise _error('"notifyOnNewResults" must be true or false')
+        update_json['notify_on_new_results'] = request_json['notifyOnNewResults']
     update_model_from_json(workbook, update_json, request.user)
 
     return create_json_response({'workbooksByGuid': _workbooks_json([workbook], workbook.project, request.user)})
@@ -446,9 +471,15 @@ def reorder_worksheets_handler(request, workbook_guid):
 def update_worksheet_handler(request, workbook_guid, worksheet_guid):
     workbook = _get_workbook(workbook_guid, request.user, can_edit=True)
     worksheet = workbook.worksheet_set.get(guid=worksheet_guid)
-    name = _parse_name(json.loads(request.body))
-    _check_unique_name(workbook.worksheet_set.exclude(id=worksheet.id), name, 'worksheet')
-    update_model_from_json(worksheet, {'name': name}, request.user)
+    request_json = json.loads(request.body)
+
+    update_json = {}
+    if 'rerunIntervalDays' in request_json:
+        update_json['rerun_interval_days'] = _parse_rerun_interval(request_json)
+    if 'name' in request_json or not update_json:
+        update_json['name'] = _parse_name(request_json)
+        _check_unique_name(workbook.worksheet_set.exclude(id=worksheet.id), update_json['name'], 'worksheet')
+    update_model_from_json(worksheet, update_json, request.user)
     return create_json_response({'worksheetsByGuid': _worksheets_json([worksheet], workbook)})
 
 
@@ -531,19 +562,28 @@ def update_worksheet_query_result_handler(request, workbook_guid, query_guid, ta
     return create_json_response({'worksheetQueryResultsByGuid': _query_results_json([query_result])})
 
 
-@login_and_policies_required
-def run_worksheet_query_handler(request, workbook_guid, query_guid, target_guid):
-    workbook, query, target, family_guids = _get_query_and_target(workbook_guid, query_guid, target_guid, request.user)
+def run_worksheet_query(workbook_guid, query_guid, target_guid, user):
+    """
+    Starts a run of a cell as the user: checks the access of the user to the workbook and to the families of the
+    target, and links the cell to the search results that record the run when they are loaded.
+    """
+    workbook, query, target, family_guids = _get_query_and_target(workbook_guid, query_guid, target_guid, user)
     if not family_guids:
         raise _error(f'{target} has no families to search')
 
-    results_model = _get_results_model(workbook.project, query.search, family_guids, request.user)
+    results_model = _get_results_model(workbook.project, query.search, family_guids, user)
     query_result, _ = get_or_create_model_from_json(
-        WorksheetQueryResult, {'query': query, 'target': target}, None, request.user)
-    update_json = {'results': results_model, 'last_run_date': timezone.now(), 'last_run_by': request.user}
+        WorksheetQueryResult, {'query': query, 'target': target}, None, user)
+    update_json = {'results': results_model, 'last_run_date': timezone.now(), 'last_run_by': user}
     if query_result.results_id != results_model.id:
         update_json['num_results'] = None
-    update_model_from_json(query_result, update_json, request.user)
+    update_model_from_json(query_result, update_json, user)
+    return query_result, results_model
+
+
+@login_and_policies_required
+def run_worksheet_query_handler(request, workbook_guid, query_guid, target_guid):
+    query_result, results_model = run_worksheet_query(workbook_guid, query_guid, target_guid, request.user)
 
     return create_json_response({
         'searchHash': results_model.search_hash,

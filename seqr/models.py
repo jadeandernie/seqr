@@ -5,6 +5,7 @@ import random
 from django.contrib.auth.models import User, Group
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import base, options, prefetch_related_objects
 from django.utils import timezone
@@ -1131,10 +1132,19 @@ class VariantSearchResults(ModelWithGUID):
     GUID_PREFIX = 'VSR'
 
 
+MIN_RERUN_INTERVAL_DAYS = 1
+MAX_RERUN_INTERVAL_DAYS = 365
+RERUN_INTERVAL_VALIDATORS = [MinValueValidator(MIN_RERUN_INTERVAL_DAYS), MaxValueValidator(MAX_RERUN_INTERVAL_DAYS)]
+
+
 class Workbook(ModelWithGUID):
+
     project = models.ForeignKey('Project', on_delete=models.CASCADE)
     name = models.TextField()
     description = models.TextField(null=True, blank=True)
+    # The number of days after which the queries of the workbook that were run before are run again, null for never
+    rerun_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=RERUN_INTERVAL_VALIDATORS)
+    notify_on_new_results = models.BooleanField(default=False)
 
     def __unicode__(self):
         return self.name.strip()
@@ -1144,7 +1154,10 @@ class Workbook(ModelWithGUID):
     class Meta:
         unique_together = ('project', 'name')
 
-        json_fields = ['guid', 'name', 'description', 'created_date', 'created_by', 'last_modified_date']
+        json_fields = [
+            'guid', 'name', 'description', 'created_date', 'created_by', 'last_modified_date', 'rerun_interval_days',
+            'notify_on_new_results',
+        ]
 
 
 class WorkbookTarget(ModelWithGUID):
@@ -1180,6 +1193,8 @@ class Worksheet(ModelWithGUID):
     workbook = models.ForeignKey('Workbook', on_delete=models.CASCADE)
     name = models.TextField()
     order = models.IntegerField(default=0)
+    # Overrides the interval of the workbook for the queries of this worksheet, null to use the interval of the workbook
+    rerun_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=RERUN_INTERVAL_VALIDATORS)
 
     def __unicode__(self):
         return self.name.strip()
@@ -1189,7 +1204,7 @@ class Worksheet(ModelWithGUID):
     class Meta:
         unique_together = ('workbook', 'name')
 
-        json_fields = ['guid', 'name', 'order']
+        json_fields = ['guid', 'name', 'order', 'rerun_interval_days']
 
 
 class WorksheetQuery(ModelWithGUID):

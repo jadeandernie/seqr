@@ -1571,9 +1571,9 @@ export const ORDERED_PREDICTOR_FIELDS = [
   { field: 'eigen', group: CODING_IN_SILICO_GROUP, thresholds: [undefined, undefined, 1, 2, undefined], max: 99 },
   { field: 'strvctvre', group: SV_IN_SILICO_GROUP, thresholds: [undefined, undefined, 0.5, 0.75, undefined] },
   { field: 'polyphen', group: MISSENSE_IN_SILICO_GROUP, thresholds: [undefined, 0.114, 0.978, 0.999, undefined], fieldTitle: 'PolyPhen', citation: CLINGEN_CITATION },
-  { field: 'sift', reverseThresholds: true, thresholds: [undefined, 0, 0.002, 0.081, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'SIFT', citation: CLINGEN_CITATION },
+  { field: 'sift', reverseThresholds: true, thresholds: [undefined, 0.001, 0.002, 0.08, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'SIFT', citation: CLINGEN_CITATION },
   { field: 'mut_taster', group: MISSENSE_IN_SILICO_GROUP, indicatorMap: MUTTASTER_MAP, fieldTitle: 'MutTaster' },
-  { field: 'fathmm', reverseThresholds: true, thresholds: [undefined, -5.041, -4.14, 3.32, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'FATHMM', citation: CLINGEN_CITATION },
+  { field: 'fathmm', reverseThresholds: true, thresholds: [undefined, -5.039, -4.139, 3.32, undefined], group: MISSENSE_IN_SILICO_GROUP, fieldTitle: 'FATHMM', citation: CLINGEN_CITATION },
   { field: 'apogee', thresholds: [undefined, undefined, 0.5, 0.5, undefined] },
   {
     field: 'gnomad_noncoding',

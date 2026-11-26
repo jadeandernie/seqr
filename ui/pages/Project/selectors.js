@@ -14,7 +14,9 @@ import {
   TISSUE_DISPLAY,
   PRODUCT_DISPLAY,
   SIMPLIFIED_SEX_LOOKUP,
+  EXCLUDED_TAG_NAME,
 } from 'shared/utils/constants'
+import { getExclusionReasonFilterOptions } from 'shared/utils/exclusionReasons'
 import { toCamelcase, toSnakecase, snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import { compareObjects } from 'shared/utils/sortUtils'
 
@@ -366,6 +368,20 @@ export const getProjectVariantSavedByOptions = createSelector(
       ]), new Set(),
     )].map(value => ({ value })),
   ],
+)
+
+export const getProjectExclusionReasonOptions = createSelector(
+  getProjectFamiliesByGuid,
+  getVariantTagNotesByFamilyVariants,
+  (familiesByGuid, variantDetailByFamilyVariant) => getExclusionReasonFilterOptions(
+    Object.keys(familiesByGuid).reduce((acc, familyGuid) => [
+      ...acc,
+      ...Object.values(variantDetailByFamilyVariant[familyGuid] || {}).reduce((variantAcc, { tags }) => ([
+        ...variantAcc,
+        ...(tags || []).filter(({ name }) => name === EXCLUDED_TAG_NAME).map(({ metadata }) => metadata),
+      ]), []),
+    ], []),
+  ),
 )
 
 // Family table selectors

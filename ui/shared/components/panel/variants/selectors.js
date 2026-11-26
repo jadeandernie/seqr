@@ -1,6 +1,7 @@
 import { createSelector } from 'reselect'
 
 import { toSnakecase } from 'shared/utils/stringUtils'
+import { matchesExclusionReason } from 'shared/utils/exclusionReasons'
 import {
   NOTE_TAG_NAME,
   MME_TAG_NAME,
@@ -183,12 +184,20 @@ export const getPairedFilteredSavedVariants = createSelector(
   (state, props) => props.match.params,
   (savedVariants, {
     categoryFilter = SHOW_ALL, hideExcluded, hideReviewOnly, hideKnownGeneForPhenotype, taggedAfter, savedBy,
+    exclusionReason,
   }, tagsByGuid, notesByGuid, { tag, variantGuid }) => {
     if (variantGuid) {
       return savedVariants
     }
     let variantsToShow = savedVariants.map(variant => (Array.isArray(variant) ? variant : [variant]))
-    if (hideExcluded) {
+    if (exclusionReason) {
+      const hasReason = ({ name, metadata }) => (
+        name === EXCLUDED_TAG_NAME && matchesExclusionReason(metadata, exclusionReason)
+      )
+      variantsToShow = variantsToShow.filter(
+        variants => variants.some(variant => variant.tagGuids.some(t => hasReason(tagsByGuid[t]))),
+      )
+    } else if (hideExcluded) {
       variantsToShow = variantsToShow.filter(
         variants => variants.every(variant => variant.tagGuids.every(t => tagsByGuid[t].name !== EXCLUDED_TAG_NAME)),
       )

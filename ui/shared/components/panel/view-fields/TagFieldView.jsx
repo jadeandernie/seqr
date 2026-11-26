@@ -7,12 +7,14 @@ import { Popup, Form } from 'semantic-ui-react'
 import { Field } from 'react-final-form'
 
 import { getHpoTermOptionsByFamily } from 'redux/selectors'
+import { EXCLUSION_REASON_METADATA_TITLE, getExclusionReasonOptions } from 'shared/utils/exclusionReasons'
 import { HorizontalSpacer } from '../../Spacers'
 import { ColoredLabel, ColoredOutlineLabel } from '../../StyledComponents'
-import { LargeMultiselect, Multiselect } from '../../form/Inputs'
+import { AddableSelect, LargeMultiselect, Multiselect } from '../../form/Inputs'
 import OptionFieldView from './OptionFieldView'
 
 const NOTES_METADATA_TITLE = 'Notes'
+const OPTIONAL_METADATA_TITLES = [NOTES_METADATA_TITLE, EXCLUSION_REASON_METADATA_TITLE]
 
 const MODAL_STYLE = { minHeight: 'calc(90vh - 100px)' }
 
@@ -34,6 +36,25 @@ MultiselectField.propTypes = {
   input: PropTypes.object,
 }
 
+const REASON_SEARCH_INPUT = { maxLength: 50 }
+
+const ExclusionReasonField = ({ input, meta, metadataId, ...props }) => (
+  <AddableSelect
+    {...input}
+    {...props}
+    options={getExclusionReasonOptions(meta.initial, input.value)}
+    searchInput={REASON_SEARCH_INPUT}
+    additionLabel="Other reason: "
+    clearable
+  />
+)
+
+ExclusionReasonField.propTypes = {
+  input: PropTypes.object,
+  meta: PropTypes.object,
+  metadataId: PropTypes.string,
+}
+
 const mapHpoDropdownStateToProps = (state, ownProps) => ({
   options: getHpoTermOptionsByFamily(state)[ownProps.metadataId],
 })
@@ -46,7 +67,12 @@ const LIST_FORMAT_PROPS = {
 const METADATA_FIELD_PROPS = {
   [NOTES_METADATA_TITLE]: { width: 16, maxLength: 50, placeholder: 'Enter up to 50 characters' },
   Name: { width: 16, maxLength: 100, placeholder: 'Enter up to 100 characters' },
-  Reason: { width: 16, maxLength: 50, placeholder: 'Brief reason for excluding. Enter up to 50 characters' },
+  [EXCLUSION_REASON_METADATA_TITLE]: {
+    width: 16,
+    component: ExclusionReasonField,
+    placeholder: 'Optional. Select a reason for excluding or type your own (up to 50 characters)',
+    parse: val => val || null,
+  },
   'Test Type(s)': {
     width: 16,
     component: MultiselectField,
@@ -119,7 +145,7 @@ export const TagFieldDisplay = React.memo(({
 ))
 
 TagFieldDisplay.propTypes = {
-  displayFieldValues: PropTypes.arrayOf(PropTypes.oneOfType(PropTypes.object, PropTypes.string)).isRequired,
+  displayFieldValues: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.object, PropTypes.string])).isRequired,
   popup: PropTypes.func,
   tagAnnotation: PropTypes.func,
   displayAnnotationFirst: PropTypes.bool,
@@ -225,7 +251,7 @@ class TagFieldView extends React.PureComponent {
       name: field,
       key: 'test',
       isArrayField: true,
-      validate: val => ((!val || !val.metadataTitle || val.metadataTitle === NOTES_METADATA_TITLE || val.metadata) ? undefined : 'Required'),
+      validate: val => ((!val || !val.metadataTitle || OPTIONAL_METADATA_TITLES.includes(val.metadataTitle) || val.metadata) ? undefined : 'Required'),
       component: MetadataField,
       metadataId: modalId,
     }] : []

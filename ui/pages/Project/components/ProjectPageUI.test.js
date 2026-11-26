@@ -29,9 +29,12 @@ test('renders the project sections and the families table', () => {
 
   const sectionHeaders = wrapper.find('StyledComponents__SectionHeader').map(header => header.text())
   expect(sectionHeaders).toEqual([
-    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Notifications', 'Collaborators', 'Families',
+    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Report Templates', 'Overview', 'Variant Tags', 'Notifications',
+    'Collaborators', 'Families',
   ])
   expect(wrapper.find('FamilyTableRow').length).toEqual(2)
+  const manageTemplates = wrapper.find('ButtonLink').filterWhere(link => link.text().includes('Manage Report Templates'))
+  expect(manageTemplates.length).toEqual(1)
 })
 
 test('renders an analysis group page without an edit button or notifications section', () => {
@@ -49,6 +52,7 @@ test('renders an analysis group page without an edit button or notifications sec
   expect(sectionHeaders).toEqual([
     'Analysis Group', 'Gene Lists', 'Overview', 'Variant Tags', 'Collaborators', 'Families',
   ])
+  expect(wrapper.text()).not.toContain('Manage Report Templates')
   expect(wrapper.find('Link').someWhere(
     link => link.prop('to') === '/project/R0237_1000_genomes_demo/saved_variants/analysis_group/AG0000183_test_group',
   )).toBe(true)
@@ -85,4 +89,6 @@ test('does not render an edit button when the user cannot edit the project', () 
   )
 
   expect(wrapper.find('UpdateAnalysisGroupButton').length).toEqual(0)
+  expect(wrapper.text()).toContain('Research summary reports can be generated from each family page')
+  expect(wrapper.text()).not.toContain('Manage Report Templates')
 })

@@ -5,6 +5,7 @@ import configureMockStore from 'redux-mock-store'
 import thunk from 'redux-thunk'
 import { Provider } from 'react-redux'
 import { MemoryRouter, Route } from 'react-router-dom'
+import { act } from 'react-dom/test-utils'
 
 import FamilyPage, { FamilyDetail } from './FamilyPage'
 import { STATE_WITH_2_FAMILIES } from '../fixtures'
@@ -27,6 +28,43 @@ test('renders the family display name and its individuals', () => {
   )
 
   expect(wrapper.find('IndividualRow').length).toEqual(3)
+})
+
+test('opens the generate report modal for the family', async () => {
+  global.fetch = jest.fn(() => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ reportTemplatesByGuid: {}, audiences: [{ value: 'researcher', text: 'Researcher' }] }),
+  }))
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    familiesByGuid: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid,
+      F011652_1: { ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_1, discoveryGeneIds: [] },
+    },
+  }
+  const wrapper = mount(
+    <Provider store={configureStore(state)}>
+      <MemoryRouter initialEntries={INITIAL_ENTRIES}>
+        <Route path="/project/:projectGuid/family_page/:familyGuid" component={FamilyPage} />
+      </MemoryRouter>
+    </Provider>,
+  )
+
+  const generateReport = wrapper.find('ButtonLink').filterWhere(link => link.text().includes('Generate report'))
+  expect(generateReport.length).toEqual(1)
+  generateReport.simulate('click')
+  expect(wrapper.find('ModalHeader').text()).toEqual('Generate report for family 1')
+  expect(wrapper.find('GenerateReport').prop('projectGuid')).toEqual('R0237_1000_genomes_demo')
+  expect(wrapper.find('GenerateReport').prop('family').familyGuid).toEqual('F011652_1')
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  wrapper.update()
+  expect(global.fetch.mock.calls.map(call => call[0])).toContain(
+    '/api/project/R0237_1000_genomes_demo/report_templates?',
+  )
+  expect(wrapper.find('FormSelect').map(s => s.prop('label'))).toEqual(['Audience', 'Template'])
 })
 
 test('renders discovery genes and disables search when data is not loaded, with no workspace loading message', () => {
@@ -101,4 +139,5 @@ test('renders compact family detail without variant details or expanded content'
 
   expect(wrapper.find('ExpandedFamily').length).toEqual(0)
   expect(wrapper.find('VariantDetail').length).toEqual(0)
+  expect(wrapper.text()).not.toContain('Generate report')
 })

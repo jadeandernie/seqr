@@ -28,6 +28,7 @@ import IndividualRow from './FamilyTable/IndividualRow'
 import CreateVariantButtons from './CreateVariantButton'
 import VariantTagTypeBar from './VariantTagTypeBar'
 import RnaSeqResultPage from './RnaSeqResultPage'
+import GenerateReportButton from './ReportTemplates/GenerateReportButton'
 
 const SearchLink = React.memo(({ family, disabled, children }) => (
   <ButtonLink as={Link} to={`/variant_search/family/${family.familyGuid}`} disabled={disabled}>{children}</ButtonLink>
@@ -87,6 +88,8 @@ const BaseVariantDetail = (
         )}
         <VerticalSpacer height={10} />
         <CreateVariantButtons family={family} />
+        <VerticalSpacer height={10} />
+        <GenerateReportButton family={family} />
         <VerticalSpacer height={10} />
         {project.isMmeEnabled && (
           <Link to={`/project/${project.projectGuid}/family_page/${family.familyGuid}/matchmaker_exchange`}>

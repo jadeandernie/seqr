@@ -4,11 +4,13 @@ import re
 import requests
 
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import StreamingHttpResponse
 
 from seqr.models import Individual, IgvSample
 from seqr.utils.file_utils import file_iter, does_file_exist, is_google_bucket_file_path, run_command, get_google_project
 from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_set_json
+from seqr.views.utils.export_utils import export_table
 from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file
 from seqr.views.utils.json_to_orm_utils import get_or_create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
@@ -16,7 +18,7 @@ from seqr.views.utils.orm_to_json_utils import get_json_for_sample
 from seqr.views.utils.permissions_utils import check_family_view_permission, external_anvil_project_can_edit, \
     login_and_policies_required, pm_or_data_manager_required, get_project_analysis_group_guids_user_can_view, user_is_data_manager, \
     user_is_pm, get_project_and_check_edit_permission, is_internal_anvil_project, project_has_anvil, \
-    check_workspace_perm, CAN_VIEW
+    check_workspace_perm, get_project_analysis_groups_and_check_view_permission, CAN_VIEW
 
 GS_STORAGE_ACCESS_CACHE_KEY = 'gs_storage_access_cache_entry'
 GS_STORAGE_URL = 'https://storage.googleapis.com'
@@ -281,3 +283,28 @@ def _stream_file(request, path):
         resp = StreamingHttpResponse(file_iter(path, raw_content=True, user=request.user), content_type=content_type)
     resp['Accept-Ranges'] = 'bytes'
     return resp
+
+
+IGV_TRACK_EXPORT_FIELDS = {
+    'family_id': 'individual__family__family_id',
+    'individual_id': 'individual__individual_id',
+    'sample_type': 'sample_type',
+    'file_path': 'file_path',
+    'index_file_path': 'index_file_path',
+    'sample_id': 'sample_id',
+}
+
+
+@login_and_policies_required
+def project_igv_tracks_download(request, project_guid):
+    project, analysis_groups = get_project_analysis_groups_and_check_view_permission(project_guid, request.user)
+    family_q = Q(individual__family__analysisgroup__in=analysis_groups) if analysis_groups \
+        else Q(individual__family__project=project)
+    rows = IgvSample.objects.filter(family_q).order_by(
+        'individual__family__family_id', 'individual__individual_id', 'sample_type', 'file_path',
+    ).values_list(*IGV_TRACK_EXPORT_FIELDS.values()).distinct()
+
+    return export_table(
+        f'{project.name}_igv_tracks', list(IGV_TRACK_EXPORT_FIELDS.keys()), [list(row) for row in rows],
+        file_format=request.GET.get('file_format', 'tsv'),
+    )

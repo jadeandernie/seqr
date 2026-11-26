@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls.base import reverse
 from seqr.models import IgvSample
 from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, update_individual_igv_sample, \
-    receive_bulk_igv_table_handler
+    receive_bulk_igv_table_handler, project_igv_tracks_download
 from seqr.views.apis.igv_api import GS_STORAGE_ACCESS_CACHE_KEY
 from seqr.views.utils.test_utils import AnvilAuthenticationTestCase
 
@@ -357,3 +357,48 @@ class IgvAPITest(AnvilAuthenticationTestCase):
             'filePath': '/readviz/NA21987.cram',
         }))
         self.assertEqual(response.status_code, 200)
+
+    def test_project_igv_tracks_download(self, mock_subprocess):
+        url = reverse(project_igv_tracks_download, args=[PROJECT_GUID])
+        self.check_require_login(url)
+
+        expected_rows = [
+            ['family_id', 'individual_id', 'sample_type', 'file_path', 'index_file_path', 'sample_id'],
+            ['1', 'NA19675_1', 'alignment', '/readviz/NA19675.cram', '', ''],
+            ['3', 'NA20870', 'alignment', 'gs://readviz/NA20870.cram', 'gs://readviz/NA20870.cram.crai', ''],
+            ['3', 'NA20870', 'gcnv', 'gs://datasets-gcnv/NA20870.bed.gz', '', ''],
+        ]
+
+        # access through an analysis group is limited to the families in the group
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(self._parse_tsv(response), expected_rows)
+        IgvSample.objects.filter(guid=LOCAL_SAMPLE_GUID).update(individual_id=4)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(self._parse_tsv(response), [expected_rows[0], *expected_rows[2:]])
+
+        response = self.client.get(reverse(project_igv_tracks_download, args=['R0003_test']))
+        self.assertEqual(response.status_code, 403)
+
+        self.login_collaborator()
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get('content-disposition'), 'attachment; filename="1kg project nme with unide_igv_tracks.tsv"')
+        self.assertListEqual(self._parse_tsv(response), [
+            expected_rows[0], ['2', 'HG00731', 'alignment', '/readviz/NA19675.cram', '', ''], *expected_rows[2:],
+        ])
+
+        response = self.client.get(f'{url}?file_format=xls')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get('content-type'), 'application/ms-excel')
+
+        self.login_data_manager_user()
+        response = self.client.get(reverse(project_igv_tracks_download, args=['R0002_empty']))
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(self._parse_tsv(response), expected_rows[:1])
+
+    @staticmethod
+    def _parse_tsv(response):
+        return [line.split('\t') for line in response.content.decode().rstrip('\n').split('\n')]

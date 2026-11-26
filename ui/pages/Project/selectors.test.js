@@ -39,8 +39,11 @@ test('getVisibleFamiliesInSortedOrder', () => {
 test('getProjectExportUrls', () => {
   const exportUrls = getProjectExportUrls(STATE_WITH_2_FAMILIES, {})
 
-  expect(exportUrls.length).toEqual(3)
-  expect(exportUrls.map(({ name }) => name)).toEqual(['Families', 'Individuals', 'Samples'])
+  expect(exportUrls.length).toEqual(4)
+  expect(exportUrls.map(({ name }) => name)).toEqual(['Families', 'Individuals', 'Samples', 'IGV Tracks'])
+  expect(exportUrls[3]).toEqual(
+    { name: 'IGV Tracks', url: '/api/project/R0237_1000_genomes_demo/igv_tracks_download' },
+  )
 
   const exportFamilies = exportUrls[0].getRawData(STATE_WITH_2_FAMILIES)
 

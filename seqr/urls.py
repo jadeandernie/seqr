@@ -134,7 +134,7 @@ from seqr.views.apis.superuser_api import get_all_users
 from seqr.views.apis.awesomebar_api import awesomebar_autocomplete_handler
 from seqr.views.apis.auth_api import login_required_error, login_view, logout_view, policies_required_error
 from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, update_individual_igv_sample, \
-    receive_bulk_igv_table_handler
+    receive_bulk_igv_table_handler, project_igv_tracks_download
 from seqr.views.apis.analysis_group_api import update_analysis_group_handler, delete_analysis_group_handler, \
     update_dynamic_analysis_group_handler, delete_dynamic_analysis_group_handler, analysis_group_collaborators
 from seqr.views.apis.project_api import create_project_handler, update_project_handler, delete_project_handler, \
@@ -236,6 +236,7 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/upload_individuals_table': receive_individuals_table_handler,
     'project/(?P<project_guid>[^/]+)/save_individuals_table/(?P<upload_file_id>[^/]+)': save_individuals_table_handler,
     'project/(?P<project_guid>[^/]+)/upload_igv_dataset': receive_igv_table_handler,
+    'project/(?P<project_guid>[^/]+)/igv_tracks_download': project_igv_tracks_download,
     'project/(?P<project_guid>[^/]+)/update_rna_seq': update_project_rna_seq,
 
     'igv/(?P<sample_guid>[^/]+)/igv_track/(?P<igv_track_path>.+)': fetch_igv_track,

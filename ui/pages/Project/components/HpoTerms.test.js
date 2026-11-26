@@ -215,6 +215,28 @@ test('formats an empty/ missing feature list as an empty array', () => {
   expect(formatFeatures(undefined)).toEqual([])
 })
 
+test('formats a non-array feature value as an empty array', () => {
+  expect(formatFeatures('[]')).toEqual([])
+  expect(formatAbsent({})).toEqual([])
+  expect(formatNonstandard('[]')).toEqual([])
+  expect(formatNonstandard(null)).toEqual([])
+  expect(formatAbsentNonstandard('[]')).toEqual([])
+})
+
+test('renders the nonstandard editor without crashing when the stored value is not an array', () => {
+  const wrapper = mount(
+    <NonstandardHpoTermsEditor
+      name="nonstandardFeatures"
+      value={formatNonstandard('[]')}
+      onChange={jest.fn()}
+      header={{ content: 'Present', color: 'green' }}
+    />,
+  )
+
+  expect(wrapper.find('Header[content="Present"]').exists()).toBe(true)
+  expect(wrapper.find('Icon[name="remove"]').length).toEqual(0)
+})
+
 test('parses qualifiers back into a lookup keyed by type', () => {
   const wrapper = mount(
     <FinalForm

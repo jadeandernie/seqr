@@ -1,5 +1,5 @@
 import React from 'react'
-import { shallow, configure } from 'enzyme'
+import { shallow, mount, configure } from 'enzyme'
 import Adapter from '@wojtekmaj/enzyme-adapter-react-17'
 import HpoPanel, { getHpoTermsForCategory } from './HpoPanel'
 
@@ -92,3 +92,23 @@ test('getHpoTermsForCategory treats a non-array as empty', () => {
   ])
 })
 
+test('renders without crashing when a term field is not an array', () => {
+  const individual = {
+    features: [{ category: 'HP:0001507', id: 'HP:0004325', label: 'Decreased body weight' }],
+    absentFeatures: null,
+    nonstandardFeatures: '[]',
+    absentNonstandardFeatures: '[]',
+  }
+  const wrapper = mount(<div><HpoPanel individual={individual} /></div>)
+
+  expect(wrapper.text()).toContain('Present')
+  expect(wrapper.text()).toContain('Growth Abnormality: Decreased body weight')
+  expect(wrapper.text()).not.toContain('Not Present')
+})
+
+test('renders nothing when no term field is an array', () => {
+  const individual = { features: '[]', absentFeatures: {}, nonstandardFeatures: '[]', absentNonstandardFeatures: 'x' }
+  const wrapper = mount(<div><HpoPanel individual={individual} /></div>)
+
+  expect(wrapper.text()).toEqual('')
+})

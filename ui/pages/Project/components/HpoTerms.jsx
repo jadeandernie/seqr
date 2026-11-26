@@ -7,7 +7,7 @@ import { Form, Header, Accordion, Icon, Tab } from 'semantic-ui-react'
 
 import { RadioGroup } from 'shared/components/form/Inputs'
 import { AwesomeBarFormInput } from 'shared/components/page/AwesomeBar'
-import { getHpoTermsForCategory, CATEGORY_NAMES } from 'shared/components/panel/HpoPanel'
+import { getHpoTermsForCategory, asTermList, CATEGORY_NAMES } from 'shared/components/panel/HpoPanel'
 import DataLoader from 'shared/components/DataLoader'
 import { ButtonLink } from 'shared/components/StyledComponents'
 import { VerticalSpacer } from 'shared/components/Spacers'
@@ -27,8 +27,8 @@ const ScrollingTab = styled(Tab).attrs({ menu: { attached: true } })`
 `
 
 const getFlattenedHpoTermsByCategory = (features, nonstandardFeatures) => Object.values(getHpoTermsForCategory(
-  (features || []).map((term, index) => ({ ...term, index })),
-  nonstandardFeatures && nonstandardFeatures.map((term, index) => ({ ...term, index })),
+  asTermList(features).map((term, index) => ({ ...term, index })),
+  asTermList(nonstandardFeatures).map((term, index) => ({ ...term, index })),
 )).reduce((acc, { categoryName, terms }) => [...acc, { ...terms[0], categoryName }, ...terms.slice(1)], [])
 
 const HPO_QUALIFIERS = [

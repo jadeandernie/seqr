@@ -41,7 +41,8 @@ export const CATEGORY_NAMES = {
   'HP:0033127': 'Musculoskeletal',
 }
 
-const asTermList = value => (Array.isArray(value) ? value : [])
+// HPO term fields are expected to be a list of terms or null. Anything else is displayed as having no terms
+export const asTermList = value => (Array.isArray(value) ? value : [])
 
 export const getHpoTermsForCategory = (features, nonstandardFeatures) => {
   const hpoTermsByCategory = asTermList(features).reduce((acc, hpoTerm) => {

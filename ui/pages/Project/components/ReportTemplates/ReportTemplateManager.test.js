@@ -14,9 +14,6 @@ configure({ adapter: new Adapter() })
 
 const configureStore = configureMockStore([thunk])
 
-type Wrapper = ReturnType<typeof mount>
-type Routes = Parameters<typeof mockFetch>[0]
-
 const TEMPLATES_URL = '/api/project/R0237_1000_genomes_demo/report_templates'
 const CREATE_URL = `${TEMPLATES_URL}/create`
 const PREVIEW_URL = '/api/family/F011652_1/report_template_preview'
@@ -30,7 +27,7 @@ const NEW_TEMPLATE = {
   body: 'Hello {{family.displayName}}',
 }
 
-const openManager = async (routes: Routes) => {
+const openManager = async (routes) => {
   const fetchMock = mockFetch(routes)
   const wrapper = mount(
     <Provider store={configureStore(STATE_WITH_2_FAMILIES)}>
@@ -43,26 +40,26 @@ const openManager = async (routes: Routes) => {
   return { wrapper, fetchMock }
 }
 
-const getRows = (wrapper: Wrapper) => wrapper.find('TableBody').first().find('TableRow').map(
+const getRows = wrapper => wrapper.find('TableBody').first().find('TableRow').map(
   row => row.find('TableCell').map(cell => cell.text()),
 )
 
-const getButton = (wrapper: Wrapper, text: string) => wrapper.find('Button').filterWhere(b => b.text() === text)
+const getButton = (wrapper, text) => wrapper.find('Button').filterWhere(b => b.text() === text)
 
 const FIELD_COMPONENTS = ['FormInput', 'FormSelect', 'FormTextArea', 'FormCheckbox']
 
-const getField = (wrapper: Wrapper, name: string) => wrapper.findWhere(
+const getField = (wrapper, name) => wrapper.findWhere(
   field => FIELD_COMPONENTS.includes(field.name()) && field.prop('name') === name,
 )
 
-const setField = (wrapper: Wrapper, name: string, data: Record<string, unknown>) => {
+const setField = (wrapper, name, data) => {
   act(() => {
     getField(wrapper, name).prop('onChange')(null, { name, ...data })
   })
   wrapper.update()
 }
 
-const waitForPreview = async (wrapper: Wrapper) => {
+const waitForPreview = async (wrapper) => {
   act(() => {
     jest.advanceTimersByTime(PREVIEW_DELAY)
   })
@@ -121,7 +118,7 @@ test('shows an error when templates can not be loaded', async () => {
 })
 
 test('creates a template with a live preview and inline validation errors', async () => {
-  const routes: Routes = {
+  const routes = {
     [TEMPLATES_URL]: { body: TEMPLATES_RESPONSE },
     [PREVIEW_URL]: { status: 400, body: { errors: ['Line 1: Unknown placeholder {{family.name}}'] } },
     '/api/family/F011652_2/report_template_preview': { body: { ...REPORT, markdown: 'Preview for family 2' } },
@@ -211,11 +208,11 @@ test('ignores a preview response which arrives after a newer one', async () => {
   const { wrapper } = await openManager({ [TEMPLATES_URL]: { body: TEMPLATES_RESPONSE } })
   getButton(wrapper, 'New template').simulate('click')
 
-  const resolvers: ((response: unknown) => void)[] = []
-  const response = (status: number, body: unknown) => ({ ok: status === 200, status, statusText: '', json: () => Promise.resolve(body) })
+  const resolvers = []
+  const response = (status, body) => ({ ok: status === 200, status, statusText: '', json: () => Promise.resolve(body) })
   global.fetch = jest.fn(() => new Promise((resolve) => {
     resolvers.push(resolve)
-  })) as unknown as typeof fetch
+  }))
 
   setField(wrapper, 'body', { value: 'First' })
   await waitForPreview(wrapper)
@@ -244,7 +241,7 @@ test('ignores a preview response which arrives after a newer one', async () => {
 })
 
 test('edits, cancels and deletes an existing template', async () => {
-  const routes: Routes = {
+  const routes = {
     [TEMPLATES_URL]: { body: TEMPLATES_RESPONSE },
     [PREVIEW_URL]: { body: REPORT },
     '/api/report_template/RT0000003_candidates/update': {
@@ -303,8 +300,8 @@ test('edits, cancels and deletes an existing template', async () => {
 })
 
 test('data managers can create and edit global templates', async () => {
-  const globalTemplate = { ...NEW_TEMPLATE, projectGuid: null as null }
-  const routes: Routes = {
+  const globalTemplate = { ...NEW_TEMPLATE, projectGuid: null }
+  const routes = {
     [TEMPLATES_URL]: { body: DATA_MANAGER_RESPONSE },
     [PREVIEW_URL]: { body: REPORT },
     '/api/report_template/create': {

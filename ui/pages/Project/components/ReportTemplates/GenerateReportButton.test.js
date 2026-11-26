@@ -18,7 +18,7 @@ const FAMILY = STATE_WITH_2_FAMILIES.familiesByGuid.F011652_1
 const TEMPLATES_URL = '/api/project/R0237_1000_genomes_demo/report_templates'
 const REPORT_URL = '/api/family/F011652_1/report'
 
-const openModal = async (routes: Parameters<typeof mockFetch>[0]) => {
+const openModal = async (routes) => {
   const fetchMock = mockFetch(routes)
   const wrapper = mount(
     <Provider store={configureStore(STATE_WITH_2_FAMILIES)}>
@@ -32,18 +32,18 @@ const openModal = async (routes: Parameters<typeof mockFetch>[0]) => {
   return { wrapper, fetchMock }
 }
 
-const select = async (wrapper: ReturnType<typeof mount>, name: string, value: string) => {
+const select = async (wrapper, name, value) => {
   act(() => {
     wrapper.find('FormSelect').filterWhere(s => s.prop('name') === name).prop('onChange')(null, { value })
   })
   await flush(wrapper)
 }
 
-const getSelect = (wrapper: ReturnType<typeof mount>, name: string) => (
+const getSelect = (wrapper, name) => (
   wrapper.find('FormSelect').filterWhere(s => s.prop('name') === name)
 )
 
-const getButton = (wrapper: ReturnType<typeof mount>, text: string) => (
+const getButton = (wrapper, text) => (
   wrapper.find('Button').filterWhere(b => b.text().includes(text))
 )
 
@@ -91,9 +91,9 @@ test('generates a report from a chosen audience and template, then prints and do
   getButton(wrapper, 'Print / Save as PDF').simulate('click')
   expect(print).toHaveBeenCalledTimes(1)
 
-  const downloads: { download: string, blob: Blob }[] = []
-  let blob: Blob
-  URL.createObjectURL = jest.fn((b: Blob) => {
+  const downloads = []
+  let blob
+  URL.createObjectURL = jest.fn((b) => {
     blob = b
     return 'blob:report'
   })
@@ -124,7 +124,7 @@ test('generates a report from a chosen audience and template, then prints and do
 test('shows report warnings and generation errors', async () => {
   const routes = {
     [TEMPLATES_URL]: { body: TEMPLATES_RESPONSE },
-    [REPORT_URL]: { body: { ...REPORT, warnings: ['Only the first 100 of 120 variants are included'] } } as { status?: number, body: unknown },
+    [REPORT_URL]: { body: { ...REPORT, warnings: ['Only the first 100 of 120 variants are included'] } },
   }
   const { wrapper } = await openModal(routes)
 

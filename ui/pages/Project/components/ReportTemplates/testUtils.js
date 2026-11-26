@@ -1,8 +1,6 @@
 import { act } from 'react-dom/test-utils'
 
-import { TemplatesResponse } from './reportTemplateApi'
-
-export const TEMPLATES_RESPONSE: TemplatesResponse = {
+export const TEMPLATES_RESPONSE = {
   reportTemplatesByGuid: {
     RT0000001_family_analysis_summ: {
       reportTemplateGuid: 'RT0000001_family_analysis_summ',
@@ -44,27 +42,23 @@ export const REPORT = {
   familyGuid: 'F011652_1',
   markdown: '> **Research use only — not a clinical report**\n\n# 1\n\n> **Research use only — not a clinical report**\n',
   usedData: ['family.displayName'],
-  warnings: [] as string[],
+  warnings: [],
 }
 
-type Route = { status?: number, body: unknown }
-
 // Routes are matched by the longest url prefix, so a specific route takes priority over a general one
-export const mockFetch = (routes: Record<string, Route>) => {
-  const fetchMock = jest.fn((url: string) => {
+export const mockFetch = (routes) => {
+  const fetchMock = jest.fn((url) => {
     const path = Object.keys(routes).filter(route => url.startsWith(route)).sort((a, b) => b.length - a.length)[0]
     const { status = 200, body } = routes[path]
     return Promise.resolve({
       ok: status === 200, status, statusText: 'Bad Request', json: () => Promise.resolve(body),
     })
   })
-  global.fetch = fetchMock as unknown as typeof fetch
+  global.fetch = fetchMock
   return fetchMock
 }
 
-type Wrapper = { update: () => unknown }
-
-export const flush = async (wrapper: Wrapper) => {
+export const flush = async (wrapper) => {
   await act(async () => {
     for (let i = 0; i < 50; i += 1) {
       // eslint-disable-next-line no-await-in-loop
@@ -74,7 +68,7 @@ export const flush = async (wrapper: Wrapper) => {
   wrapper.update()
 }
 
-export const postedBody = (fetchMock: jest.Mock, url: string) => {
+export const postedBody = (fetchMock, url) => {
   const call = fetchMock.mock.calls.filter(([callUrl]) => callUrl === url).pop()
-  return call ? JSON.parse(call[1].body) : undefined
+  return JSON.parse(call[1].body)
 }

@@ -108,7 +108,7 @@ class PaLocusListAPITest(ReferenceDataCommandTestCase, BaseLocusListAPITest):
         response_json = response.json()
         self.assertSetEqual(set(response_json['genesById'].keys()), {'ENSG00000106991', 'ENSG00000139567'})
 
-        # and list 3069 contains only one gene because the other one was skipped during import
+        # and list 3069 contains only the gene resolved from its latest Ensembl release, the others were skipped
         url3069 = reverse(locus_list_info, args=['LL00008_hereditary_neuropathy_'])
         response = self.client.get(url3069)
         self.assertEqual(response.status_code, 200)
@@ -147,6 +147,7 @@ class PaLocusListAPITest(ReferenceDataCommandTestCase, BaseLocusListAPITest):
                 'updateType': 'update',
                 'updateFields': ['disease_group', 'status', 'version', 'version_created'],
             }}),
+            ("Genes found in panel 3069 with no GRCh38 Ensembl ID, ignoring genes ['GARS1']", {'severity': 'WARNING'}),
             ("Genes found in panel 3069 but not in reference data, ignoring genes ['ENSG00000104728']", {'severity': 'WARNING'}),
             ('Bulk updating genes for list Hereditary Neuropathy_CMT - isolated', None),
             ('update 2 LocusLists', {'dbUpdate': {

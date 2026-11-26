@@ -13,9 +13,10 @@ from seqr.views.utils.file_utils import save_uploaded_file, load_uploaded_file
 from seqr.views.utils.json_to_orm_utils import get_or_create_model_from_json
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import get_json_for_sample
-from seqr.views.utils.permissions_utils import get_project_and_check_permissions, external_anvil_project_can_edit, \
-    login_and_policies_required, pm_or_data_manager_required, get_project_guids_user_can_view, user_is_data_manager, \
-    user_is_pm
+from seqr.views.utils.permissions_utils import check_family_view_permission, external_anvil_project_can_edit, \
+    login_and_policies_required, pm_or_data_manager_required, get_project_analysis_group_guids_user_can_view, user_is_data_manager, \
+    user_is_pm, get_project_and_check_edit_permission, is_internal_anvil_project, project_has_anvil, \
+    check_workspace_perm, CAN_VIEW
 
 GS_STORAGE_ACCESS_CACHE_KEY = 'gs_storage_access_cache_entry'
 GS_STORAGE_URL = 'https://storage.googleapis.com'
@@ -92,7 +93,7 @@ def _process_igv_table_handler(parse_uploaded_file, get_valid_matched_individual
 
 @pm_or_data_manager_required
 def receive_igv_table_handler(request, project_guid):
-    project = get_project_and_check_permissions(project_guid, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     def _get_valid_matched_individuals(individual_dataset_mapping):
         matched_individuals = Individual.objects.filter(
@@ -120,8 +121,9 @@ def receive_bulk_igv_table_handler(request):
         return uploaded_file_id, None, records
 
     def _get_valid_matched_individuals(individual_dataset_mapping):
+        project_guids, _ = get_project_analysis_group_guids_user_can_view(request.user, limit_data_manager=False)
         individuals = Individual.objects.filter(
-            family__project__guid__in=get_project_guids_user_can_view(request.user, limit_data_manager=False),
+            family__project__guid__in=project_guids,
             family__project__name__in={k[0] for k in individual_dataset_mapping.keys()},
             individual_id__in={k[1] for k in individual_dataset_mapping.keys()},
         ).select_related('family__project')
@@ -183,9 +185,29 @@ def update_individual_igv_sample(request, individual_guid):
 
 
 @login_and_policies_required
-def fetch_igv_track(request, project_guid, igv_track_path):
+def fetch_igv_track(request, sample_guid, igv_track_path):
+    igv_sample = IgvSample.objects.get(guid=sample_guid)
+    check_family_view_permission(igv_sample.individual.family, request.user)
 
-    get_project_and_check_permissions(project_guid, request.user)
+    sample_track_path = next(
+        (path for path in [igv_sample.file_path, igv_sample.index_file_path] if igv_track_path.startswith(path or '')), None,
+    )
+    if not sample_track_path:
+        raise PermissionDenied('Invalid sample track path')
+
+    project = igv_sample.individual.family.project
+    if project_has_anvil(project) and not is_internal_anvil_project(project):
+        workspace_meta = check_workspace_perm(
+            request.user, CAN_VIEW, project.workspace_namespace, project.workspace_name, meta_fields=['workspace.bucketName'],
+        )
+        bucket_name = workspace_meta['workspace']['bucketName']
+        if not sample_track_path.startswith(f'gs://{bucket_name}'):
+            raise PermissionDenied('Invalid sample track path')
+
+    extension_match = re.match(r'^[^.]*\.([A-Za-z.]+)$', igv_track_path)
+    if not extension_match:
+        raise PermissionDenied('Invalid sample track path')
+    igv_track_path = f"{sample_track_path.split('.', 1)[0]}.{extension_match.group(1)}"
 
     if igv_track_path.endswith('.bam.bai') and not does_file_exist(igv_track_path, user=request.user):
         igv_track_path = igv_track_path.replace('.bam.bai', '.bai')

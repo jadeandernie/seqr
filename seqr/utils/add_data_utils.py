@@ -63,7 +63,7 @@ def update_airtable_loading_tracking_status(project, status, additional_update=N
         update={'Status': status, **(additional_update or {})},
     )
 
-def trigger_delete_families_search(project, family_guids, user=None):
+def trigger_delete_families_search(project, family_guids, user=None, dataset_types=None):
     num_updated = 0
     updated_families = set()
     for dataset in Dataset.objects.filter(active_individuals__family__guid__in=family_guids).distinct():
@@ -80,6 +80,8 @@ def trigger_delete_families_search(project, family_guids, user=None):
         logger.info(message, user)
 
     variables = {'project_guid': project.guid, 'family_guids': family_guids}
+    if dataset_types:
+        variables['dataset_types'] = dataset_types
     _enqueue_pipeline_request('delete_families', variables, user)
     info.append('Triggered delete family data')
     return info
@@ -90,20 +92,21 @@ def trigger_rebuild_gt_stats(project, user):
 
 def trigger_data_loading(projects: list[Project], individual_ids: list[int], sample_type: str, dataset_type: str,
                          genome_version: str, data_path: str, user: User, raise_error: bool = False, skip_expect_tdr_metrics: bool = True,
-                         skip_check_sex_and_relatedness: bool = True, vcf_sample_id_map=None,
+                         skip_check_sex_and_relatedness: bool = True, validations_to_skip: list[str] = None, vcf_sample_id_map=None,
                          success_message: str = None,  error_message: str = None, success_slack_channel: str = SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL):
     variables = {
         'projects_to_run': sorted([p.guid for p in projects]) if projects else None,
-        'dataset_type': _loading_dataset_type(sample_type, dataset_type),
+        'dataset_type': dataset_type,
         'reference_genome': GENOME_VERSION_LOOKUP[genome_version],
         'callset_path': data_path,
         'sample_type': sample_type,
     }
-    bool_variables = {
+    conditional_variables = {
         'skip_check_sex_and_relatedness': skip_check_sex_and_relatedness,
         'skip_expect_tdr_metrics': skip_expect_tdr_metrics,
+        'validations_to_skip': _valid_validation_to_skip(validations_to_skip, user),
     }
-    variables.update({k: v for k, v in bool_variables.items() if v})
+    variables.update({k: v for k, v in conditional_variables.items() if v})
     file_path = _get_pedigree_path(genome_version, sample_type, dataset_type)
     _upload_data_loading_files(individual_ids, vcf_sample_id_map or {}, user, file_path, raise_error)
     _write_gene_id_file(user)
@@ -126,6 +129,16 @@ def trigger_data_loading(projects: list[Project], individual_ids: list[int], sam
     return success
 
 
+def _valid_validation_to_skip(validations_to_skip: list[str], user: User) -> list[str]:
+    invalid_validations = [validation for validation in (validations_to_skip or []) if validation not in {
+        'validate_expected_contig_frequency', 'validate_sample_type', 'validate_no_duplicate_variants',
+    }]
+    if invalid_validations:
+        validations_to_skip = [validation for validation in validations_to_skip if validation not in invalid_validations]
+        logger.error(f'Omitted invalid skip validations from loading request: {", ".join(invalid_validations)}', user)
+    return validations_to_skip
+
+
 def _enqueue_pipeline_request(name: str, variables: dict, user: User, raise_error: bool = True, log_error: bool = True):
     response = None
     error = None
@@ -144,11 +157,6 @@ def _enqueue_pipeline_request(name: str, variables: dict, user: User, raise_erro
             log_func = logger.error if log_error else logger.warning
             log_func(f'Error Triggering {_to_title_case(name)}: {error}', user, detail=variables)
     return error
-
-
-def _loading_dataset_type(sample_type: str, dataset_type: str):
-    return 'GCNV' if dataset_type == Dataset.DATASET_TYPE_SV_CALLS and sample_type == Dataset.SAMPLE_TYPE_WES \
-        else dataset_type
 
 
 def _upload_data_loading_files(individual_ids: list[int], vcf_sample_id_map: dict, user: User, file_path: str, raise_error: bool):
@@ -185,7 +193,7 @@ def _upload_data_loading_files(individual_ids: list[int], vcf_sample_id_map: dic
 
 def _write_gene_id_file(user):
     file_name = 'db_id_to_gene_id'
-    if does_file_exist(f'{LOADING_DATASETS_DIR}/{file_name}.csv.gz'):
+    if does_file_exist(f'{LOADING_DATASETS_DIR}/{file_name}.csv.gz', user):
         return
 
     gene_data_loaded = (GeneInfo.objects.filter(gencode_release=int(GeneInfo.CURRENT_VERSION)).exists() and
@@ -201,8 +209,7 @@ def _write_gene_id_file(user):
 
 
 def _get_pedigree_path(genome_version: str, sample_type: str, dataset_type: str):
-    loading_dataset_type = _loading_dataset_type(sample_type, dataset_type)
-    return f'{LOADING_DATASETS_DIR}/{GENOME_VERSION_LOOKUP[genome_version]}/{loading_dataset_type}/pedigrees/{sample_type}'
+    return f'{LOADING_DATASETS_DIR}/{GENOME_VERSION_LOOKUP[genome_version]}/{dataset_type}/pedigrees/{sample_type}'
 
 
 def get_missing_family_samples(expected_sample_set, record_family_ids, previous_loaded_individuals):

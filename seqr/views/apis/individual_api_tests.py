@@ -105,21 +105,28 @@ class IndividualAPITest(object):
 
     def test_update_individual_handler(self):
         edit_individuals_url = reverse(update_individual_handler, args=[INDIVIDUAL_UPDATE_GUID])
-        self.check_collaborator_login(edit_individuals_url)
+
+        note_only_edit_response = {
+            INDIVIDUAL_UPDATE_GUID: {
+                **{k: mock.ANY for k in INDIVIDUAL_CORE_FIELDS},
+                'displayName': 'NA20870',
+                'notes': 'A note',
+                'birthYear': None,
+                'affected': 'A',
+            }
+        }
+        self.check_partial_access_login(
+            edit_individuals_url, note_only_edit_response, request_data=INDIVIDUAL_UPDATE_DATA,
+        )
 
         response = self.client.post(edit_individuals_url, content_type='application/json',
                                     data=json.dumps(INDIVIDUAL_UPDATE_DATA))
 
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
-        self.assertListEqual(list(response_json.keys()), [INDIVIDUAL_UPDATE_GUID])
-        self.assertSetEqual(set(response_json[INDIVIDUAL_UPDATE_GUID].keys()), INDIVIDUAL_CORE_FIELDS)
+        self.assertDictEqual(response_json, note_only_edit_response)
         individual = Individual.objects.get(guid=INDIVIDUAL_UPDATE_GUID)
-        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['displayName'], 'NA20870')
         self.assertEqual(individual.display_name, '')
-        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['notes'], 'A note')
-        self.assertIsNone(response_json[INDIVIDUAL_UPDATE_GUID]['birthYear'])
-        self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['affected'], 'A')
         self.assertFalse('features' in response_json[INDIVIDUAL_UPDATE_GUID])
         self.assertIsNone(individual.features)
 
@@ -150,6 +157,7 @@ class IndividualAPITest(object):
         edit_individuals_url = reverse(update_individual_hpo_terms, args=[INDIVIDUAL_UPDATE_GUID])
         self.check_manager_login(edit_individuals_url)
 
+        self.reset_logs()
         response = self.client.post(edit_individuals_url, content_type='application/json',
                                     data=json.dumps(INDIVIDUAL_UPDATE_DATA))
 
@@ -174,6 +182,11 @@ class IndividualAPITest(object):
         self.assertListEqual(Individual.objects.get(guid=INDIVIDUAL_UPDATE_GUID).features, [
             {'id': 'HP:0002011', 'qualifiers': [{'type': 'onset', 'label': 'congenital'}]},
             {'id': 'HP:0011675', 'notes': 'A new term'},
+        ])
+
+        self.assert_json_logs(self.manager_user, [
+            ('update Individual I000007_na20870', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
         ])
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP')
@@ -378,6 +391,7 @@ class IndividualAPITest(object):
             dataset.active_individuals.set(set())
 
         # send valid requests
+        self.reset_logs()
         response = self.client.post(individuals_url, content_type='application/json', data=json.dumps({
             'individuals': [INDIVIDUAL_IDS_UPDATE_DATA]
         }))
@@ -392,6 +406,14 @@ class IndividualAPITest(object):
         self.assertFalse('I000002_na19678' in response_json['familiesByGuid']['F000001_1']['individualGuids'])
         self.assertIsNone(response_json['familiesByGuid']['F000001_1']['pedigreeImage'])
         self.assertFalse(Dataset.objects.filter(guid='S000130_na19678').exists())
+        self.assert_json_logs(self.manager_user, [
+            ('delete Dataset S000130_na19678', {'dbUpdate': mock.ANY}),
+            ('delete 1 Individuals', {'dbUpdate': mock.ANY}),
+            ('update 1 Familys', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_affected_status_dict', None),
+            ('Reloading dictionary seqrdb_sex_dict', None),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ])
 
         # Test PM permission
         pm_required_delete_individuals_url = reverse(delete_individuals_handler, args=[PM_REQUIRED_PROJECT_GUID])
@@ -577,6 +599,7 @@ class IndividualAPITest(object):
 
         url = reverse(save_individuals_table_handler, args=[PROJECT_GUID, response_json['uploadedFileId']])
 
+        self.reset_logs()
         response = self.client.post(url)
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -611,6 +634,35 @@ class IndividualAPITest(object):
         self.assertEqual(response_json['individualsByGuid']['I000008_na20872']['individualId'], 'NA20872_update')
 
         self._assert_expected_reload_calls(PROJECT_GUID)
+        read_tmp_table_logs = self._read_tmp_table_logs('ffa788c23360f0908f3de16dca799fe1')
+        self.assert_json_logs(None, read_tmp_table_logs)
+        self.assert_json_logs(self.manager_user, [
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Family', 'entityId': mock.ANY, 'updateFields': ['family_id', 'project'], 'updateType': 'create',
+            }}),
+            ('update Individual I000001_na19675', {'dbUpdate': mock.ANY}),
+            ('update Individual I000002_na19678', {'dbUpdate': mock.ANY}),
+            ('update Individual I000008_na20872', {'dbUpdate': mock.ANY}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Individual', 'entityId': mock.ANY, 'updateType': 'create', 'updateFields': [
+                    'affected', 'case_review_status', 'family', 'individual_id',
+                ],
+            }}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'FamilyNote', 'entityId': mock.ANY, 'updateType': 'create', 'updateFields': [
+                    'family', 'note', 'note_type',
+                ],
+            }}),
+            (mock.ANY, {'dbUpdate': {
+                'dbEntity': 'Individual', 'entityId': mock.ANY, 'updateType': 'update', 'updateFields': ['sex'],
+            }}),
+            ('update 3 Familys', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_affected_status_dict', None),
+            ('Triggering rebuild_gt_stats for R0001_1kg', None),
+            ('Triggered Rebuild Gt Stats', {'detail': {'project_guids': ['R0001_1kg']}}),
+            ('Reloading dictionary seqrdb_sex_dict', None),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ], offset=len(read_tmp_table_logs))
 
         # Test PM permission
         receive_url = reverse(receive_individuals_table_handler, args=[PM_REQUIRED_PROJECT_GUID])
@@ -632,6 +684,10 @@ class IndividualAPITest(object):
     def _assert_expected_reload_calls(self, project_guid):
         self.assertEqual(len(responses.calls), 1)
         self.assertDictEqual(json.loads(responses.calls[0].request.body), {'project_guids': [project_guid]})
+
+    @staticmethod
+    def _read_tmp_table_logs(file_name):
+        return []
 
     @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
     @mock.patch('seqr.views.utils.pedigree_info_utils.NO_VALIDATE_MANIFEST_PROJECT_CATEGORIES')
@@ -1011,7 +1067,7 @@ class IndividualAPITest(object):
 
     def test_individuals_metadata_table_handler(self):
         url = reverse(receive_individuals_metadata_handler, args=['R0001_1kg'])
-        self.check_collaborator_login(url)
+        self.check_manager_login(url)
 
         # Send invalid requests
         header = 'family_id,indiv_id,hpo_term_yes,hpo_term_no'
@@ -1044,6 +1100,7 @@ class IndividualAPITest(object):
             ]})
 
         # send valid request
+        self.reset_logs()
         header = f'family_id,{header}'
         rows[0] = '1,NA19678,,,,,false,,,,,'
         rows[1] = f'1,{rows[1]}'
@@ -1053,9 +1110,18 @@ class IndividualAPITest(object):
         response = self.client.post(url, data={'f': f})
         self._is_expected_individuals_metadata_upload(response, expected_families=True, has_non_hpo_update=True)
 
+        read_tmp_table_logs = self._read_tmp_table_logs('6aea3d1f1bfc295340aa504370102fd5')
+        offset = 2 if read_tmp_table_logs else 1
+        self.assert_json_logs(None, read_tmp_table_logs, offset=offset)
+        self.assert_json_logs(self.manager_user, [
+            ('update Individual I000002_na19678', {'dbUpdate': mock.ANY}),
+            ('update Individual I000001_na19675', {'dbUpdate': mock.ANY}),
+            ('Reloading dictionary seqrdb_individual_metadata_dict', None),
+        ], offset=offset+len(read_tmp_table_logs))
+
     def test_individuals_metadata_hpo_term_number_table_handler(self):
         url = reverse(receive_individuals_metadata_handler, args=['R0001_1kg'])
-        self.check_collaborator_login(url)
+        self.check_manager_login(url)
 
         header = 'family_id,individual_id,affected,hpo_number,hpo_number,sex,birth,other affected relatives,onset,expected inheritance,maternal ancestry,candidate genes'
         rows = [
@@ -1356,7 +1422,7 @@ class IndividualAPITest(object):
 
     def test_get_individual_rna_seq_data(self):
         url = reverse(get_individual_rna_seq_data, args=[INDIVIDUAL_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url)
 
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
@@ -1400,7 +1466,7 @@ class IndividualAPITest(object):
 
     def test_get_individual_rna_seq_data_is_significant(self):
         url = reverse(get_individual_rna_seq_data, args=[INDIVIDUAL_GUID])
-        self.check_collaborator_login(url)
+        self.check_partial_access_login(url)
 
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
@@ -1468,3 +1534,10 @@ class AnvilIndividualAPITest(AnvilAuthenticationTestCase, IndividualAPITest):
         else:
             self.mock_subprocess.stdout.__iter__.return_value = self.gs_files[file_name]
         return self.mock_subprocess
+
+    @staticmethod
+    def _read_tmp_table_logs(file_name):
+        return [
+            (f'==> gsutil ls gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz', None),
+            (f'==> gsutil cat gs://seqr-scratch-temp/temp_upload_{file_name}.json.gz | gunzip -c -q - ', None),
+        ]

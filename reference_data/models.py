@@ -12,6 +12,7 @@ from tqdm import tqdm
 from reference_data.utils.dbnsfp_utils import DBNSFP_FIELD_MAP, DBNSFP_EXCLUDE_FIELDS
 from reference_data.utils.download_utils import download_file
 from reference_data.utils.gencode_utils import parse_gencode_record, GENCODE_URL_TEMPLATE, GENCODE_FILE_HEADER
+from seqr.utils.constants import GENOME_VERSION_GRCh37, GENOME_VERSION_GRCh38
 from seqr.views.utils.export_utils import write_multiple_files
 
 #  Allow adding the custom json_fields and internal_json_fields to the model Meta
@@ -19,9 +20,6 @@ from seqr.views.utils.export_utils import write_multiple_files
 models.options.DEFAULT_NAMES = models.options.DEFAULT_NAMES + ('json_fields',)
 
 logger = logging.getLogger(__name__)
-
-GENOME_VERSION_GRCh37 = "37"
-GENOME_VERSION_GRCh38 = "38"
 
 GENOME_VERSION_CHOICES = [
     (GENOME_VERSION_GRCh37, "GRCh37"),
@@ -188,7 +186,7 @@ class HumanPhenotypeOntology(LoadableModel):
                     'is_category': False,
                 }
             elif line.startswith('is_a: '):
-                is_a = value.split(' ! ')[0]
+                is_a = value.split(' ')[0]
                 if is_a == 'HP:0000118':
                     record['is_category'] = True
                 record['parent_id'] = is_a

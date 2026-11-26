@@ -8,6 +8,7 @@ from datetime import datetime
 from django.contrib.auth.models import User
 from django.db.models import prefetch_related_objects
 
+from clickhouse_search.models.postgres_dicts import IndividualMetadataDict, SexDict, AffectedDict
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import Individual, Family, CAN_VIEW
 from seqr.utils.file_utils import file_iter
@@ -23,9 +24,9 @@ from seqr.views.utils.orm_to_json_utils import _get_json_for_model, _get_json_fo
     GREGOR_FINDING_TAG_TYPE
 from seqr.views.utils.pedigree_info_utils import parse_pedigree_table, validate_fam_file_records, parse_hpo_terms, \
     get_valid_hpo_terms, JsonConstants, ErrorsWarningsException
-from seqr.views.utils.permissions_utils import get_project_and_check_permissions, check_project_permissions, \
-    get_project_and_check_pm_permissions, login_and_policies_required, has_project_permissions, external_anvil_project_can_edit, \
-    pm_or_data_manager_required, check_workspace_perm
+from seqr.views.utils.permissions_utils import get_project_and_check_edit_permission, check_project_edit_permission, \
+    get_project_and_check_pm_permissions, login_and_policies_required, has_project_edit_permission, external_anvil_project_can_edit, \
+    pm_or_data_manager_required, check_workspace_perm, check_family_view_permission
 from seqr.views.utils.project_context_utils import add_project_tag_type_counts
 from seqr.views.utils.individual_utils import delete_individuals, add_or_update_individuals_and_families
 from seqr.views.utils.variant_utils import bulk_create_tagged_variants, get_saved_variant_annotations
@@ -56,10 +57,10 @@ def update_individual_handler(request, individual_guid):
 
     individual = Individual.objects.get(guid=individual_guid)
 
-    project = individual.family.project
+    family = individual.family
 
-    check_project_permissions(project, request.user)
-    can_edit = has_project_permissions(project, request.user, can_edit=True)
+    check_family_view_permission(family, request.user)
+    can_edit = has_project_edit_permission(family.project, request.user)
 
     request_json = json.loads(request.body)
     update_json = request_json if can_edit else {k: v for k, v in request_json.items() if k in {'notes'}}
@@ -83,7 +84,7 @@ def update_individual_hpo_terms(request, individual_guid):
 
     project = individual.family.project
 
-    check_project_permissions(project, request.user, can_edit=True)
+    check_project_edit_permission(project, request.user)
 
     request_json = json.loads(request.body)
 
@@ -93,6 +94,7 @@ def update_individual_hpo_terms(request, individual_guid):
         for key in feature_fields
     }
     update_individual_from_json(individual, update_json, user=request.user, allow_features_update=True)
+    IndividualMetadataDict.reload(request.user)
 
     individual_json = {k: getattr(individual, _to_snake_case(k)) for k in feature_fields}
     add_individual_hpo_details([individual_json])
@@ -218,6 +220,9 @@ def delete_individuals_handler(request, project_guid):
 
     # delete the individuals
     families_with_deleted_individuals = delete_individuals(project, individual_guids_to_delete, request.user)
+    AffectedDict.reload(request.user)
+    SexDict.reload(request.user)
+    IndividualMetadataDict.reload(request.user)
 
     deleted_individuals_by_guid = {
         individual_guid: None for individual_guid in individual_guids_to_delete
@@ -417,7 +422,7 @@ def receive_individuals_metadata_handler(request, project_guid):
         project_guid (string): project GUID
     """
 
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     def process_records(json_records, filename=''):
         records, errors, warnings = _process_hpo_records(json_records, filename, project, request.user)
@@ -522,7 +527,7 @@ def _parse_individual_hpo_terms(json_records, project, user):
     if any(record.get(ASSIGNED_ANALYST_COL) for record in json_records):
         allowed_assigned_analysts = {
             u['email'] for u in get_project_collaborators_by_username(
-                user, project, fields=['email'], expand_user_groups=True,
+                user, project, expand_user_groups=True,
             ).values()
         }
 
@@ -646,7 +651,7 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
     """
     Handler for 'save' requests to apply HPO terms tables previously uploaded through receive_individuals_metadata_handler
     """
-    project = get_project_and_check_permissions(project_guid, request.user)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
 
     json_records, _ = load_uploaded_file(upload_file_id)
 
@@ -664,6 +669,9 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
             individual, {k: record[k] for k in INDIVIDUAL_METADATA_FIELDS.keys() if k in record}, user=request.user, allow_features_update=True)
         if record.get(ASSIGNED_ANALYST_COL):
             family_assigned_analysts[record[ASSIGNED_ANALYST_COL]].append(individual.family.id)
+
+    if any(FEATURES_COL in record for record in json_records):
+        IndividualMetadataDict.reload(request.user)
 
     response = {
         'individualsByGuid': {
@@ -690,7 +698,7 @@ def save_individuals_metadata_table_handler(request, project_guid, upload_file_i
 def import_gregor_metadata(request, project_guid):
     request_json = json.loads(request.body)
     sample_type = request_json.get('sampleType', 'genome')
-    project = get_project_and_check_permissions(project_guid, request.user, can_edit=True)
+    project = get_project_and_check_edit_permission(project_guid, request.user)
     workspace_meta = check_workspace_perm(
         request.user, CAN_VIEW, request_json['workspaceNamespace'], request_json['workspaceName'],
         meta_fields=['workspace.bucketName']
@@ -875,8 +883,8 @@ def _parse_participant_val(column, value, participant_sample_lookup):
 @login_and_policies_required
 def get_individual_rna_seq_data(request, individual_guid):
     individual = Individual.objects.get(guid=individual_guid)
-    project = individual.family.project
-    check_project_permissions(project, request.user)
+    family = individual.family
+    check_family_view_permission(family, request.user)
 
     filters = {'sample__individual': individual}
     outlier_data = get_json_for_rna_seq_outliers(filters, significant_only=False, individual_guid=individual_guid)
@@ -884,7 +892,7 @@ def get_individual_rna_seq_data(request, individual_guid):
     genes_to_show = get_genes({
         gene_id for rna_data in outlier_data.get(individual_guid, {}).values() for gene_id, data in rna_data.items()
         if any([d['isSignificant'] for d in (data if isinstance(data, list) else [data])])
-    }, genome_version=project.genome_version)
+    }, genome_version=family.project.genome_version)
 
     return create_json_response({
         'rnaSeqData': outlier_data,

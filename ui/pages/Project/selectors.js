@@ -551,7 +551,8 @@ export const getProjectExportUrls = createSelector(
   state => getCurrentProject(state).name,
   (state, ownProps) => (ownProps || {}).tableName,
   getAnalysisGroupGuid,
-  (projectName, tableName, analysisGroupGuid) => {
+  getProjectGuid,
+  (projectName, tableName, analysisGroupGuid, projectGuid) => {
     const ownProps = { tableName, analysisGroupGuid }
     const isCaseReview = tableName === CASE_REVIEW_TABLE_NAME
     return [
@@ -580,6 +581,7 @@ export const getProjectExportUrls = createSelector(
         getRawData: state => getSamplesExportData(state, ownProps),
         ...getEntityExportConfig({ projectName, tableName, fileName: 'samples', fields: SAMPLE_EXPORT_DATA }),
       },
+      { name: 'IGV Tracks', url: `/api/project/${projectGuid}/igv_tracks_download` },
     ]
   },
 )

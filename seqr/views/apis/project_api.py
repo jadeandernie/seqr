@@ -338,7 +338,9 @@ def project_notifications(request, project_guid, read_status):
     if not is_subscriber:
         max_loaded = _project_notifications(
             project, request.user.notifications).aggregate(max_loaded=Max('timestamp'))['max_loaded']
-        to_create = _project_notifications(project, Notification.objects).distinct('verb', 'timestamp')
+        # Notifications that are not public are only for their recipients
+        to_create = _project_notifications(project, Notification.objects).filter(public=True).distinct(
+            'verb', 'timestamp')
         if max_loaded:
             to_create = to_create.filter(timestamp__gt=max_loaded)
         for notification in to_create:

@@ -1145,6 +1145,8 @@ class Workbook(ModelWithGUID):
     # The number of days after which the queries of the workbook that were run before are run again, null for never
     rerun_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=RERUN_INTERVAL_VALIDATORS)
     notify_on_new_results = models.BooleanField(default=False)
+    # Users who can change the workbook like its creator. This does not give them access to the project
+    editors = models.ManyToManyField(User, related_name='+', blank=True)
 
     def __unicode__(self):
         return self.name.strip()
@@ -1195,6 +1197,8 @@ class Worksheet(ModelWithGUID):
     order = models.IntegerField(default=0)
     # Overrides the interval of the workbook for the queries of this worksheet, null to use the interval of the workbook
     rerun_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=RERUN_INTERVAL_VALIDATORS)
+    # The guid of the WorksheetTemplate the queries were copied from. Not a link: the template can change or be deleted
+    template_guid = models.CharField(max_length=ModelWithGUID.MAX_GUID_SIZE, null=True, blank=True)
 
     def __unicode__(self):
         return self.name.strip()
@@ -1204,7 +1208,26 @@ class Worksheet(ModelWithGUID):
     class Meta:
         unique_together = ('workbook', 'name')
 
-        json_fields = ['guid', 'name', 'order', 'rerun_interval_days']
+        json_fields = ['guid', 'name', 'order', 'rerun_interval_days', 'template_guid']
+
+
+class WorksheetTemplate(ModelWithGUID):
+    name = models.TextField()
+    description = models.TextField(null=True, blank=True)
+    # A list of {name, search}, with search in the same format as WorksheetQuery.search
+    queries = models.JSONField(default=list)
+    is_public = models.BooleanField(default=False)
+    projects = models.ManyToManyField('Project', blank=True)
+
+    def __unicode__(self):
+        return self.name.strip()
+
+    GUID_PREFIX = 'WST'
+
+    class Meta:
+        json_fields = [
+            'guid', 'name', 'description', 'queries', 'is_public', 'created_date', 'created_by', 'last_modified_date',
+        ]
 
 
 class WorksheetQuery(ModelWithGUID):

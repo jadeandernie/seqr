@@ -1,0 +1,758 @@
+[
+    {
+        "model": "seqr.worksheettemplate",
+        "pk": 9000001,
+        "fields": {
+            "guid": "WST9000001_de_novo_dominant",
+            "created_date": "2026-11-26T00:00:00Z",
+            "created_by": null,
+            "last_modified_date": "2026-11-26T00:00:00Z",
+            "name": "De Novo / Dominant",
+            "description": "De novo and dominant variants, with the filters of the default \"De Novo/Dominant\" saved searches",
+            "queries": [
+                {
+                    "name": "De Novo/Dominant Restrictive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 1000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.001
+                            },
+                            "sv_callset": {
+                                "ac": 10
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.001
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.001
+                            }
+                        },
+                        "annotations": {
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.2",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "other": [
+                                "non_coding_transcript_exon_variant__canonical"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP",
+                                "COPY_GAIN"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "de_novo",
+                            "filter": {
+                                "A": "has_alt",
+                                "N": "ref_ref"
+                            }
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 20,
+                            "min_gq": 30,
+                            "min_qs": 50,
+                            "min_gq_sv": 5,
+                            "vcf_filter": "pass"
+                        }
+                    }
+                },
+                {
+                    "name": "De Novo/Dominant Permissive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 1000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.001
+                            },
+                            "sv_callset": {
+                                "ac": 10
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.001
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.001
+                            }
+                        },
+                        "annotations": {
+                            "other": [
+                                "transcript_ablation",
+                                "5_prime_UTR_variant",
+                                "3_prime_UTR_variant"
+                            ],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.1",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [
+                                "gCNV_DEL",
+                                "gCNV_DUP"
+                            ],
+                            "synonymous": [
+                                "synonymous_variant",
+                                "stop_retained_variant"
+                            ],
+                            "extended_splice_site": [
+                                "splice_region_variant"
+                            ],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "COPY_GAIN",
+                                "DUP_PARTIAL",
+                                "INTRONIC",
+                                "INV_SPAN",
+                                "UTR",
+                                "INTRAGENIC_EXON_DUP",
+                                "PARTIAL_EXON_DUP",
+                                "BREAKEND_EXONIC",
+                                "PROMOTER"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "de_novo",
+                            "filter": {
+                                "A": "has_alt",
+                                "N": "ref_ref"
+                            }
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp",
+                                "conflicting_no_p",
+                                "vus",
+                                "vus_or_conflicting"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 10,
+                            "min_gq": 30,
+                            "min_qs": 20,
+                            "vcf_filter": null
+                        }
+                    }
+                }
+            ],
+            "is_public": true,
+            "projects": []
+        }
+    },
+    {
+        "model": "seqr.worksheettemplate",
+        "pk": 9000002,
+        "fields": {
+            "guid": "WST9000002_recessive",
+            "created_date": "2026-11-26T00:00:00Z",
+            "created_by": null,
+            "last_modified_date": "2026-11-26T00:00:00Z",
+            "name": "Recessive",
+            "description": "Homozygous recessive, compound heterozygous and X-linked recessive variants, with the filters of the default \"Recessive\" saved searches",
+            "queries": [
+                {
+                    "name": "Recessive Restrictive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 3000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.01
+                            },
+                            "sv_callset": {
+                                "ac": 100
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            }
+                        },
+                        "annotations": {
+                            "other": [],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.2",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [],
+                            "synonymous": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "recessive",
+                            "filter": {
+                                "A": null,
+                                "N": null
+                            },
+                            "annotationSecondary": true
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 20,
+                            "min_gq": 30,
+                            "min_qs": 50,
+                            "min_gq_sv": 5,
+                            "vcf_filter": "pass"
+                        },
+                        "annotations_secondary": {
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Recessive Permissive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 3000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.01
+                            },
+                            "sv_callset": {
+                                "ac": 100
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            }
+                        },
+                        "annotations": {
+                            "other": [],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.1",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [
+                                "gCNV_DUP",
+                                "gCNV_DEL"
+                            ],
+                            "synonymous": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP",
+                                "INV_SPAN",
+                                "BREAKEND_EXONIC",
+                                "PARTIAL_EXON_DUP"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "recessive",
+                            "filter": {
+                                "A": null,
+                                "N": null
+                            },
+                            "annotationSecondary": true
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp",
+                                "conflicting_no_p",
+                                "vus",
+                                "vus_or_conflicting"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 10,
+                            "min_gq": 30,
+                            "min_qs": 50
+                        },
+                        "annotations_secondary": {
+                            "other": [
+                                "transcript_ablation",
+                                "5_prime_UTR_variant",
+                                "3_prime_UTR_variant",
+                                "non_coding_transcript_exon_variant__canonical"
+                            ],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [
+                                "gCNV_DEL",
+                                "gCNV_DUP"
+                            ],
+                            "synonymous": [
+                                "synonymous_variant",
+                                "stop_retained_variant"
+                            ],
+                            "extended_splice_site": [
+                                "splice_region_variant"
+                            ],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRONIC",
+                                "UTR",
+                                "PROMOTER",
+                                "INTRAGENIC_EXON_DUP",
+                                "INV_SPAN",
+                                "BREAKEND_EXONIC",
+                                "PARTIAL_EXON_DUP"
+                            ]
+                        }
+                    }
+                }
+            ],
+            "is_public": true,
+            "projects": []
+        }
+    },
+    {
+        "model": "seqr.worksheettemplate",
+        "pk": 9000003,
+        "fields": {
+            "guid": "WST9000003_x_linked",
+            "created_date": "2026-11-26T00:00:00Z",
+            "created_by": null,
+            "last_modified_date": "2026-11-26T00:00:00Z",
+            "name": "X-Linked",
+            "description": "X-linked recessive variants only, with the filters of the default \"Recessive\" saved searches",
+            "queries": [
+                {
+                    "name": "X-Linked Recessive Restrictive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 3000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.01
+                            },
+                            "sv_callset": {
+                                "ac": 100
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            }
+                        },
+                        "annotations": {
+                            "other": [],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.2",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [],
+                            "synonymous": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "x_linked_recessive",
+                            "filter": {
+                                "A": null,
+                                "N": null
+                            },
+                            "annotationSecondary": true
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 20,
+                            "min_gq": 30,
+                            "min_qs": 50,
+                            "min_gq_sv": 5,
+                            "vcf_filter": "pass"
+                        },
+                        "annotations_secondary": {
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "X-Linked Recessive Permissive",
+                    "search": {
+                        "freqs": {
+                            "topmed": {
+                                "ac": null,
+                                "af": 1
+                            },
+                            "callset": {
+                                "ac": 3000
+                            },
+                            "gnomad_svs": {
+                                "ac": null,
+                                "af": 0.01
+                            },
+                            "sv_callset": {
+                                "ac": 100
+                            },
+                            "gnomad_exomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            },
+                            "gnomad_genomes": {
+                                "ac": null,
+                                "af": 0.01,
+                                "hh": 5
+                            }
+                        },
+                        "annotations": {
+                            "other": [],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "splice_ai": "0.1",
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [
+                                "gCNV_DUP",
+                                "gCNV_DEL"
+                            ],
+                            "synonymous": [],
+                            "extended_splice_site": [],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRAGENIC_EXON_DUP",
+                                "INV_SPAN",
+                                "BREAKEND_EXONIC",
+                                "PARTIAL_EXON_DUP"
+                            ]
+                        },
+                        "inheritance": {
+                            "mode": "x_linked_recessive",
+                            "filter": {
+                                "A": null,
+                                "N": null
+                            },
+                            "annotationSecondary": true
+                        },
+                        "pathogenicity": {
+                            "hgmd": [
+                                "disease_causing"
+                            ],
+                            "clinvar": [
+                                "pathogenic",
+                                "likely_pathogenic",
+                                "conflicting_p_lp",
+                                "conflicting_no_p",
+                                "vus",
+                                "vus_or_conflicting"
+                            ]
+                        },
+                        "qualityFilter": {
+                            "min_ab": 10,
+                            "min_gq": 30,
+                            "min_qs": 50
+                        },
+                        "annotations_secondary": {
+                            "other": [
+                                "transcript_ablation",
+                                "5_prime_UTR_variant",
+                                "3_prime_UTR_variant",
+                                "non_coding_transcript_exon_variant__canonical"
+                            ],
+                            "in_frame": [
+                                "inframe_insertion",
+                                "inframe_deletion"
+                            ],
+                            "missense": [
+                                "stop_lost",
+                                "start_lost",
+                                "protein_altering_variant",
+                                "missense_variant"
+                            ],
+                            "nonsense": [
+                                "stop_gained"
+                            ],
+                            "frameshift": [
+                                "frameshift_variant"
+                            ],
+                            "structural": [
+                                "gCNV_DEL",
+                                "gCNV_DUP"
+                            ],
+                            "synonymous": [
+                                "synonymous_variant",
+                                "stop_retained_variant"
+                            ],
+                            "extended_splice_site": [
+                                "splice_region_variant"
+                            ],
+                            "essential_splice_site": [
+                                "splice_donor_variant",
+                                "splice_acceptor_variant"
+                            ],
+                            "structural_consequence": [
+                                "LOF",
+                                "INTRONIC",
+                                "UTR",
+                                "PROMOTER",
+                                "INTRAGENIC_EXON_DUP",
+                                "INV_SPAN",
+                                "BREAKEND_EXONIC",
+                                "PARTIAL_EXON_DUP"
+                            ]
+                        }
+                    }
+                }
+            ],
+            "is_public": true,
+            "projects": []
+        }
+    }
+]

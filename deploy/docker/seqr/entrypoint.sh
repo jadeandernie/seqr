@@ -49,6 +49,7 @@ python -u manage.py migrate
 python -u manage.py migrate --database=reference_data
 python -u manage.py loaddata variant_searches
 python -u manage.py loaddata variant_tag_types
+python -u manage.py loaddata worksheet_templates
 
 if [ -n "${CLICKHOUSE_SERVICE_HOSTNAME:-}" ]; then
     python -u manage.py migrate --database=clickhouse_write

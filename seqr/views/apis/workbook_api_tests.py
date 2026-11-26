@@ -56,9 +56,11 @@ RECESSIVE_SEARCH = {'inheritance': {'mode': 'recessive'}}
 WORKBOOK_JSON = {
     'workbookGuid': WORKBOOK_GUID, 'projectGuid': PROJECT_GUID, 'name': 'Trio analysis',
     'description': 'De novo and recessive review', 'createdDate': '2026-11-20T10:00:00Z', 'createdBy': MANAGER_NAME,
-    'lastModifiedDate': '2026-11-20T10:00:00Z', 'canEdit': False, 'rerunIntervalDays': None,
+    'lastModifiedDate': '2026-11-20T10:00:00Z', 'canEdit': False, 'rerunIntervalDays': None, 'editors': [],
+    'canManageEditors': False,
     'notifyOnNewResults': False,
 }
+CAN_EDIT_JSON = {'canEdit': True, 'canManageEditors': True}
 FAMILY_TARGET_JSON = {
     'workbookTargetGuid': FAMILY_TARGET_GUID, 'workbookGuid': WORKBOOK_GUID, 'order': 0, 'familyGuid': 'F000001_1',
     'analysisGroupGuid': None, 'familyGuids': ['F000001_1'],
@@ -69,11 +71,11 @@ GROUP_TARGET_JSON = {
 }
 DE_NOVO_WORKSHEET_JSON = {
     'worksheetGuid': DE_NOVO_WORKSHEET_GUID, 'workbookGuid': WORKBOOK_GUID, 'name': 'De Novo', 'order': 0,
-    'rerunIntervalDays': None,
+    'rerunIntervalDays': None, 'templateGuid': None,
 }
 RECESSIVE_WORKSHEET_JSON = {
     'worksheetGuid': RECESSIVE_WORKSHEET_GUID, 'workbookGuid': WORKBOOK_GUID, 'name': 'Recessive', 'order': 1,
-    'rerunIntervalDays': None,
+    'rerunIntervalDays': None, 'templateGuid': None,
 }
 RESTRICTIVE_QUERY_JSON = {
     'worksheetQueryGuid': RESTRICTIVE_QUERY_GUID, 'worksheetGuid': DE_NOVO_WORKSHEET_GUID, 'name': 'De novo restrictive',
@@ -291,7 +293,7 @@ class WorkbookAPITest(object):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {
-            **WORKBOOK_DETAIL_JSON, 'workbooksByGuid': {WORKBOOK_GUID: {**WORKBOOK_JSON, 'canEdit': True}},
+            **WORKBOOK_DETAIL_JSON, 'workbooksByGuid': {WORKBOOK_GUID: {**WORKBOOK_JSON, **CAN_EDIT_JSON}},
         })
 
         response = self.client.get(reverse(workbook_detail_handler, args=[NO_ACCESS_WORKBOOK_GUID]))
@@ -333,7 +335,7 @@ class WorkbookAPITest(object):
             'workbooksByGuid': {workbook_guid: {
                 'workbookGuid': workbook_guid, 'projectGuid': PROJECT_GUID, 'name': 'New workbook', 'description': None,
                 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'lastModifiedDate': mock.ANY, 'canEdit': True,
-                'rerunIntervalDays': None, 'notifyOnNewResults': False,
+                'rerunIntervalDays': None, 'notifyOnNewResults': False, 'canManageEditors': True, 'editors': [],
             }},
             'workbookTargetsByGuid': {}, 'worksheetsByGuid': {}, 'worksheetQueriesByGuid': {},
             'worksheetQueryResultsByGuid': {},
@@ -382,7 +384,7 @@ class WorkbookAPITest(object):
             self._post(url, {'name': 'Collaborator workbook'}), 'A workbook named "Collaborator workbook" already exists')
         self._assert_error(self._post(url, {'description': ['invalid']}), '"description" must be text')
 
-        manager_workbook_json = {**WORKBOOK_JSON, 'canEdit': True}
+        manager_workbook_json = {**WORKBOOK_JSON, **CAN_EDIT_JSON}
         response = self._post(url)
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {'workbooksByGuid': {WORKBOOK_GUID: manager_workbook_json}})
@@ -443,6 +445,7 @@ class WorkbookAPITest(object):
             'workbookGuid': collaborator_workbook.guid, 'projectGuid': PROJECT_GUID, 'name': 'Renamed workbook',
             'description': 'Edited by a manager', 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME,
             'lastModifiedDate': mock.ANY, 'canEdit': True, 'rerunIntervalDays': None, 'notifyOnNewResults': False,
+            'canManageEditors': True, 'editors': [],
         })
         self.assertEqual(self._post(url, {'name': 'Not allowed'}).status_code, 403)
         self.assertEqual(self._post(url, {'rerunIntervalDays': 1, 'notifyOnNewResults': False}).status_code, 403)
@@ -500,6 +503,7 @@ class WorkbookAPITest(object):
             'workbookGuid': workbook_guid, 'projectGuid': PROJECT_GUID, 'name': 'Copied workbook',
             'description': 'De novo and recessive review', 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME,
             'lastModifiedDate': mock.ANY, 'canEdit': True, 'rerunIntervalDays': None, 'notifyOnNewResults': False,
+            'canManageEditors': True, 'editors': [],
         }})
 
         # Targets and query results are not copied
@@ -515,9 +519,9 @@ class WorkbookAPITest(object):
         worksheets = sorted(response_json['worksheetsByGuid'].values(), key=lambda worksheet: worksheet['order'])
         self.assertListEqual(worksheets, [
             {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'De Novo', 'order': 0,
-             'rerunIntervalDays': None},
+             'rerunIntervalDays': None, 'templateGuid': None},
             {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'Recessive', 'order': 1,
-             'rerunIntervalDays': None},
+             'rerunIntervalDays': None, 'templateGuid': None},
         ])
         de_novo_guid, recessive_guid = [worksheet['worksheetGuid'] for worksheet in worksheets]
         self.assertFalse({de_novo_guid, recessive_guid} & {DE_NOVO_WORKSHEET_GUID, RECESSIVE_WORKSHEET_GUID})
@@ -690,7 +694,7 @@ class WorkbookAPITest(object):
         self._assert_workbook_counts()
         response = self.client.get(reverse(workbook_detail_handler, args=[WORKBOOK_GUID]))
         self.assertDictEqual(response.json(), {
-            **WORKBOOK_DETAIL_JSON, 'workbooksByGuid': {WORKBOOK_GUID: {**WORKBOOK_JSON, 'canEdit': True}},
+            **WORKBOOK_DETAIL_JSON, 'workbooksByGuid': {WORKBOOK_GUID: {**WORKBOOK_JSON, **CAN_EDIT_JSON}},
         })
 
     def test_worksheets(self):
@@ -707,7 +711,7 @@ class WorkbookAPITest(object):
         worksheet_guid = next(iter(response_json['worksheetsByGuid']))
         dominant_worksheet_json = {
             'worksheetGuid': worksheet_guid, 'workbookGuid': WORKBOOK_GUID, 'name': 'Dominant', 'order': 2,
-            'rerunIntervalDays': None,
+            'rerunIntervalDays': None, 'templateGuid': None,
         }
         self.assertDictEqual(response_json['worksheetsByGuid'], {worksheet_guid: dominant_worksheet_json})
         worksheet = Worksheet.objects.get(guid=worksheet_guid)
@@ -772,7 +776,7 @@ class WorkbookAPITest(object):
             RECESSIVE_WORKSHEET_GUID: {**RECESSIVE_WORKSHEET_JSON, 'order': 1},
             other_worksheet_guid: {
                 'worksheetGuid': other_worksheet_guid, 'workbookGuid': WORKBOOK_GUID, 'name': 'Other', 'order': 2,
-                'rerunIntervalDays': None,
+                'rerunIntervalDays': None, 'templateGuid': None,
             },
             DE_NOVO_WORKSHEET_GUID: {**DE_NOVO_WORKSHEET_JSON, 'order': 3},
         }})

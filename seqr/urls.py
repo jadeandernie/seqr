@@ -137,8 +137,11 @@ from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, 
     receive_bulk_igv_table_handler
 from seqr.views.apis.analysis_group_api import update_analysis_group_handler, delete_analysis_group_handler, \
     update_dynamic_analysis_group_handler, delete_dynamic_analysis_group_handler, analysis_group_collaborators
+from seqr.views.apis.worksheet_template_api import worksheet_templates_handler, create_worksheet_template_handler, \
+    update_worksheet_template_handler, delete_worksheet_template_handler, attach_project_worksheet_template_handler, \
+    detach_project_worksheet_template_handler, create_worksheet_from_template_handler
 from seqr.views.apis.workbook_api import project_workbooks_handler, create_workbook_handler, workbook_detail_handler, \
-    update_workbook_handler, delete_workbook_handler, duplicate_workbook_handler, add_workbook_targets_handler, \
+    update_workbook_handler, delete_workbook_handler, update_workbook_editors_handler, duplicate_workbook_handler, add_workbook_targets_handler, \
     reorder_workbook_targets_handler, delete_workbook_target_handler, create_worksheet_handler, \
     reorder_worksheets_handler, update_worksheet_handler, delete_worksheet_handler, create_worksheet_query_handler, \
     reorder_worksheet_queries_handler, update_worksheet_query_handler, delete_worksheet_query_handler, \
@@ -258,17 +261,25 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/dynamic_analysis_groups/(?P<analysis_group_guid>[^/]+)/delete': delete_dynamic_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/add_workspace_data': add_workspace_data,
 
+    'worksheet_templates': worksheet_templates_handler,
+    'worksheet_templates/create': create_worksheet_template_handler,
+    'worksheet_templates/(?P<template_guid>[^/]+)/update': update_worksheet_template_handler,
+    'worksheet_templates/(?P<template_guid>[^/]+)/delete': delete_worksheet_template_handler,
+    'project/(?P<project_guid>[^/]+)/worksheet_templates/(?P<template_guid>[^/]+)/attach': attach_project_worksheet_template_handler,
+    'project/(?P<project_guid>[^/]+)/worksheet_templates/(?P<template_guid>[^/]+)/detach': detach_project_worksheet_template_handler,
     'project/(?P<project_guid>[^/]+)/workbooks': project_workbooks_handler,
     'project/(?P<project_guid>[^/]+)/workbooks/create': create_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)': workbook_detail_handler,
     'workbook/(?P<workbook_guid>[^/]+)/update': update_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)/delete': delete_workbook_handler,
+    'workbook/(?P<workbook_guid>[^/]+)/editors/update': update_workbook_editors_handler,
     'workbook/(?P<workbook_guid>[^/]+)/duplicate': duplicate_workbook_handler,
     'workbook/(?P<workbook_guid>[^/]+)/targets/add': add_workbook_targets_handler,
     'workbook/(?P<workbook_guid>[^/]+)/targets/reorder': reorder_workbook_targets_handler,
     'workbook/(?P<workbook_guid>[^/]+)/targets/(?P<target_guid>[^/]+)/delete': delete_workbook_target_handler,
     'workbook/(?P<workbook_guid>[^/]+)/worksheets/create': create_worksheet_handler,
     'workbook/(?P<workbook_guid>[^/]+)/worksheets/reorder': reorder_worksheets_handler,
+    'workbook/(?P<workbook_guid>[^/]+)/worksheets/create_from_template': create_worksheet_from_template_handler,
     'workbook/(?P<workbook_guid>[^/]+)/worksheets/(?P<worksheet_guid>[^/]+)/update': update_worksheet_handler,
     'workbook/(?P<workbook_guid>[^/]+)/worksheets/(?P<worksheet_guid>[^/]+)/delete': delete_worksheet_handler,
     'workbook/(?P<workbook_guid>[^/]+)/worksheets/(?P<worksheet_guid>[^/]+)/queries/create': create_worksheet_query_handler,

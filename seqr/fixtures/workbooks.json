@@ -1,0 +1,195 @@
+[
+{
+    "model": "seqr.workbook",
+    "pk": 1,
+    "fields": {
+        "guid": "WB0000001_trio_analysis",
+        "created_date": "2026-11-20T10:00:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:00:00Z",
+        "project": 1,
+        "name": "Trio analysis",
+        "description": "De novo and recessive review"
+    }
+},
+{
+    "model": "seqr.workbook",
+    "pk": 2,
+    "fields": {
+        "guid": "WB0000002_non_analyst_workbook",
+        "created_date": "2026-11-20T10:00:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:00:00Z",
+        "project": 4,
+        "name": "Non-analyst workbook",
+        "description": null
+    }
+},
+{
+    "model": "seqr.workbooktarget",
+    "pk": 1,
+    "fields": {
+        "guid": "WBT0000001_1",
+        "created_date": "2026-11-20T10:01:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:01:00Z",
+        "workbook": 1,
+        "family": 1,
+        "analysis_group": null,
+        "order": 0
+    }
+},
+{
+    "model": "seqr.workbooktarget",
+    "pk": 2,
+    "fields": {
+        "guid": "WBT0000002_test_group_1",
+        "created_date": "2026-11-20T10:01:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:01:00Z",
+        "workbook": 1,
+        "family": null,
+        "analysis_group": 1,
+        "order": 1
+    }
+},
+{
+    "model": "seqr.workbooktarget",
+    "pk": 3,
+    "fields": {
+        "guid": "WBT0000003_fam14",
+        "created_date": "2026-11-20T10:01:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:01:00Z",
+        "workbook": 2,
+        "family": 14,
+        "analysis_group": null,
+        "order": 0
+    }
+},
+{
+    "model": "seqr.worksheet",
+    "pk": 1,
+    "fields": {
+        "guid": "WS0000001_de_novo",
+        "created_date": "2026-11-20T10:02:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:02:00Z",
+        "workbook": 1,
+        "name": "De Novo",
+        "order": 0
+    }
+},
+{
+    "model": "seqr.worksheet",
+    "pk": 2,
+    "fields": {
+        "guid": "WS0000002_recessive",
+        "created_date": "2026-11-20T10:02:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:02:00Z",
+        "workbook": 1,
+        "name": "Recessive",
+        "order": 1
+    }
+},
+{
+    "model": "seqr.worksheet",
+    "pk": 3,
+    "fields": {
+        "guid": "WS0000003_other",
+        "created_date": "2026-11-20T10:02:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:02:00Z",
+        "workbook": 2,
+        "name": "Other",
+        "order": 0
+    }
+},
+{
+    "model": "seqr.worksheetquery",
+    "pk": 1,
+    "fields": {
+        "guid": "WSQ0000001_de_novo_restrictive",
+        "created_date": "2026-11-20T10:03:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:03:00Z",
+        "worksheet": 1,
+        "name": "De novo restrictive",
+        "order": 0,
+        "search": {
+            "inheritance": {"mode": "de_novo"},
+            "freqs": {"gnomad_genomes": {"af": 0.001}}
+        }
+    }
+},
+{
+    "model": "seqr.worksheetquery",
+    "pk": 2,
+    "fields": {
+        "guid": "WSQ0000002_de_novo_permissive",
+        "created_date": "2026-11-20T10:03:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:03:00Z",
+        "worksheet": 1,
+        "name": "De novo permissive",
+        "order": 1,
+        "search": {
+            "inheritance": {"mode": "de_novo"},
+            "freqs": {"gnomad_genomes": {"af": 0.01}}
+        }
+    }
+},
+{
+    "model": "seqr.worksheetquery",
+    "pk": 3,
+    "fields": {
+        "guid": "WSQ0000003_recessive",
+        "created_date": "2026-11-20T10:03:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:03:00Z",
+        "worksheet": 2,
+        "name": "Recessive",
+        "order": 0,
+        "search": {
+            "inheritance": {"mode": "recessive"}
+        }
+    }
+},
+{
+    "model": "seqr.worksheetquery",
+    "pk": 4,
+    "fields": {
+        "guid": "WSQ0000004_other",
+        "created_date": "2026-11-20T10:03:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:03:00Z",
+        "worksheet": 3,
+        "name": "Other",
+        "order": 0,
+        "search": {
+            "inheritance": {"mode": "de_novo"}
+        }
+    }
+},
+{
+    "model": "seqr.worksheetqueryresult",
+    "pk": 1,
+    "fields": {
+        "guid": "WQR0000001_1_1",
+        "created_date": "2026-11-20T10:04:00Z",
+        "created_by": 11,
+        "last_modified_date": "2026-11-20T10:04:00Z",
+        "query": 1,
+        "target": 1,
+        "status": "I",
+        "status_last_modified_date": "2026-11-20T10:04:00Z",
+        "status_last_modified_by": 11,
+        "note": "Reviewing candidates",
+        "results": null,
+        "last_run_date": null,
+        "last_run_by": null,
+        "num_results": null
+    }
+}
+]

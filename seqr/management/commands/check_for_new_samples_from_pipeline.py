@@ -19,6 +19,7 @@ from seqr.views.utils.export_utils import write_multiple_files
 from seqr.views.utils.json_to_orm_utils import create_model_from_json
 from seqr.views.utils.permissions_utils import is_internal_anvil_project, project_has_anvil
 from seqr.views.utils.variant_utils import reset_cached_search_results
+from seqr.views.utils.workbook_rerun_utils import DATA_LOAD_MAX_CELLS, rerun_due_cells
 from settings import SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL, PIPELINE_DATA_DIR, ANVIL_UI_URL, IS_ANVIL_LOADING_DELAY, \
     SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL
 
@@ -98,15 +99,29 @@ class Command(BaseCommand):
             return
 
         logger.info(f'Loading new samples from {len(new_runs)} run(s)')
+        loaded_family_guids = set()
         for run_dir, run_details in new_runs.items():
             try:
                 metadata_path = os.path.join(run_dir, 'metadata.json')
-                self._load_new_samples(metadata_path, **run_details)
+                loaded_family_guids.update(self._load_new_samples(metadata_path, **run_details))
             except Exception as e:
                 logger.error(f'Error loading {run_details["run_version"]}: {e}')
 
         # Reset cached results for all projects, as seqr AFs will have changed for all projects when new data is added
         reset_cached_search_results(project=None)
+
+        self._rerun_workbook_queries(loaded_family_guids)
+
+    @staticmethod
+    def _rerun_workbook_queries(family_guids):
+        # The rest of the due queries are run by the scheduled rerun_workbook_queries command
+        try:
+            summary = rerun_due_cells(
+                max_cells=DATA_LOAD_MAX_CELLS, family_guids=sorted(family_guids), data_loaded_only=True)
+            if summary['cells']:
+                logger.info(f'Reran {len(summary["cells"])} workbook queries for the loaded families')
+        except Exception as e:
+            logger.error(f'Error in rerun of workbook queries for the loaded families: {e}')
 
     @classmethod
     def _get_runs(cls, **kwargs):
@@ -279,6 +294,8 @@ class Command(BaseCommand):
         for project, family_guids in families_by_project.items():
             updated_saved_variants = cls._update_project_saved_variant_genotypes(project, family_guids, clickhouse_dataset_type)
             logger.info(f'Updated {len(updated_saved_variants)} variants in {len(family_guids)} families for project {project.name}')
+
+        return set(family_project_map)
 
     @classmethod
     def _is_internal_project(cls, project):

@@ -21,7 +21,8 @@ from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSea
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.logging_utils import SeqrLogger
-from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_get_wildcard_json, safe_redis_set_json
+from seqr.utils.redis_utils import safe_redis_delete_wildcard, safe_redis_get_json, safe_redis_get_wildcard_json, \
+    safe_redis_set_json
 from seqr.utils.xpos_utils import parse_variant_id
 from seqr.views.utils.json_utils import create_json_response, _to_snake_case
 from seqr.views.utils.json_to_orm_utils import update_model_from_json, get_or_create_model_from_json, \
@@ -52,11 +53,7 @@ def query_variants_handler(request, search_hash):
     except Exception as e:
         return create_json_response({'error': str(e)}, status=400, reason=str(e))
 
-    _check_results_permission(results_model, request.user)
-
-    all_variants = get_results_and_record_worksheet_query_runs(results_model, request.user, lambda: _get_variants_with_cache(
-        _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
-    ))
+    all_variants = load_search_results(results_model, request.user, sort=sort)
     variants = all_variants[(page-1)*per_page:page*per_page]
 
     response = _process_variants(variants or [], results_model.families.all(), request,
@@ -65,6 +62,20 @@ def query_variants_handler(request, search_hash):
     response['search']['totalResults'] = len(all_variants)
 
     return create_json_response(response)
+
+
+def load_search_results(results_model, user, sort=XPOS_SORT_KEY, refresh=False, **record_kwargs):
+    """
+    Loads all results of a search for a user with access to its families, and records the run of workbook cells linked
+    to it. With refresh, the results cached for every sort are removed first, so that the search is run again and
+    no user is shown the replaced results.
+    """
+    _check_results_permission(results_model, user)
+    if refresh:
+        safe_redis_delete_wildcard(_get_search_cache_key(results_model, user, sort='*'))
+    return get_results_and_record_worksheet_query_runs(results_model, user, lambda: _get_variants_with_cache(
+        _get_search_cache_key, _query_variants, results_model, user, sort=sort,
+    ), **record_kwargs)
 
 
 def _get_variants_with_cache(get_cache_key, get_variants, *args, **kwargs):

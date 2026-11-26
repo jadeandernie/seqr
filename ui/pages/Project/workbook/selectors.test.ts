@@ -4,7 +4,8 @@ import {
   RESTRICTIVE_QUERY, RESTRICTIVE_QUERY_GUID, SAVED_SEARCH_GUID, STATE as FIXTURE_STATE, WORKBOOK, WORKBOOK_GUID,
 } from './fixtures'
 import {
-  getCellGroupSummary, getFamiliesByGuid, getGenesById, getGroupSummaryIsLoading,
+  getCellGroupSummary, getCellHistory, getExcludedReasonsByFamilyVariant, getFamiliesByGuid, getGenesById,
+  getGroupSummaryIsLoading, getNumUnreviewed, getNumUnreviewedByTarget, splitExcludedVariants,
   getProjectAnalysisGroupOptions, getProjectFamilyOptions, getProjectWorkbooks, getQueryResultsByQueryTarget,
   getQueryStatus, getRollUpStatus, getSavedSearchOptions, getTargetName, getWorkbook, getWorkbookDetailIsLoading,
   getWorkbookDetailLoadingError, getWorkbookPath, getWorkbookSelection, getWorkbooksIsLoading,
@@ -203,4 +204,105 @@ test('group summary selectors only return the summary of the given cell', () => 
   expect(getGroupSummaryIsLoading(state)).toBe(true)
   expect(getGenesById(state)).toBe(state.genesById)
   expect(getFamiliesByGuid(state)).toBe(state.familiesByGuid)
+})
+
+test('getCellHistory only returns the history of the given cell', () => {
+  const workbookCellHistory = { cellKey: 'WSQ1/WBT2', history: { runs: [] as object[], totalRuns: 0 } }
+  const state = { ...STATE, workbookCellHistory } as unknown as WorkbookReduxState
+
+  expect(getCellHistory(state, 'WSQ1/WBT2')).toBe(workbookCellHistory)
+  expect(getCellHistory(state, 'WSQ1/WBT3')).toEqual({})
+  expect(getCellHistory(state, 'WSQ1/WBT3')).toBe(getCellHistory(state, 'WSQ2/WBT2'))
+})
+
+test('counts the unreviewed results of queries for a target, and of all cells by target', () => {
+  const cell = (worksheetQueryGuid: string, workbookTargetGuid: string, numUnreviewed?: number) => ({
+    ...QUERY_RESULT,
+    worksheetQueryResultGuid: `${worksheetQueryGuid}/${workbookTargetGuid}`,
+    worksheetQueryGuid,
+    workbookTargetGuid,
+    numUnreviewed,
+  })
+  const cells = [
+    cell(RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID, 2),
+    cell(PERMISSIVE_QUERY_GUID, FAMILY_TARGET_GUID),
+    cell(RECESSIVE_QUERY_GUID, FAMILY_TARGET_GUID, 3),
+    cell(RESTRICTIVE_QUERY_GUID, GROUP_TARGET_GUID, 4),
+    cell(PERMISSIVE_QUERY_GUID, 'WBT_reviewed', 0),
+  ]
+  const state = {
+    ...STATE,
+    worksheetQueryResultsByGuid: cells.reduce((acc, result) => ({ ...acc, [result.worksheetQueryResultGuid]: result }), {}),
+  } as unknown as WorkbookReduxState
+  const resultsByQueryTarget = getQueryResultsByQueryTarget(state)
+
+  expect(getNumUnreviewed(resultsByQueryTarget, [RESTRICTIVE_QUERY], FAMILY_TARGET_GUID)).toEqual(2)
+  expect(getNumUnreviewed(resultsByQueryTarget, [RESTRICTIVE_QUERY, PERMISSIVE_QUERY], FAMILY_TARGET_GUID)).toEqual(2)
+  expect(getNumUnreviewed(resultsByQueryTarget, [RESTRICTIVE_QUERY, PERMISSIVE_QUERY, RECESSIVE_QUERY], FAMILY_TARGET_GUID)).toEqual(5)
+  expect(getNumUnreviewed(resultsByQueryTarget, [RECESSIVE_QUERY], GROUP_TARGET_GUID)).toEqual(0)
+  expect(getNumUnreviewed(resultsByQueryTarget, [RESTRICTIVE_QUERY], undefined)).toEqual(0)
+  expect(getNumUnreviewed(resultsByQueryTarget, [], FAMILY_TARGET_GUID)).toEqual(0)
+  expect(getNumUnreviewedByTarget(state)).toEqual({ [FAMILY_TARGET_GUID]: 5, [GROUP_TARGET_GUID]: 4, WBT_reviewed: 0 })
+})
+
+test('identifies excluded variants by family like the saved variants page and groups them by reason', () => {
+  const savedVariant = (variantId: string, tagGuids: string[], familyGuids = ['F1']) => (
+    { variantGuid: `SV_${variantId}_${familyGuids.join()}`, variantId, familyGuids, tagGuids }
+  )
+  const savedVariants = [
+    savedVariant('1-1-A-T', ['VT_benign']),
+    savedVariant('1-2-A-T', ['VT_review', 'VT_no_reason', 'VT_artifact']),
+    savedVariant('1-3-A-T', ['VT_no_reason', 'VT_empty_reason']),
+    savedVariant('1-4-A-T', ['VT_review']),
+    savedVariant('1-5-A-T', []),
+    savedVariant('1-6-A-T', ['VT_artifact'], ['F2', 'F3']),
+    savedVariant('1-7-A-T', ['VT_missing']),
+  ]
+  const state = {
+    ...STATE,
+    savedVariantsByGuid: savedVariants.reduce((acc, variant) => ({ ...acc, [variant.variantGuid]: variant }), {}),
+    variantTagsByGuid: {
+      VT_benign: { name: 'Excluded', metadata: 'Benign' },
+      VT_artifact: { name: 'Excluded', metadata: 'Artifact' },
+      VT_no_reason: { name: 'Excluded', metadata: null as string },
+      VT_empty_reason: { name: 'Excluded', metadata: '' },
+      VT_review: { name: 'Review', metadata: 'Benign' },
+    },
+  } as unknown as WorkbookReduxState
+
+  const excludedReasons = getExcludedReasonsByFamilyVariant(state)
+  expect(excludedReasons).toEqual({
+    'F1/1-1-A-T': 'Benign',
+    'F1/1-2-A-T': 'Artifact',
+    'F1/1-3-A-T': 'No reason given',
+    'F2/1-6-A-T': 'Artifact',
+    'F3/1-6-A-T': 'Artifact',
+  })
+
+  const variant = (variantId: string, familyGuids?: string[]) => ({ variantId, familyGuids })
+  const benign = variant('1-1-A-T', ['F1'])
+  const artifact = variant('1-2-A-T', ['F1'])
+  const noReason = variant('1-3-A-T', ['F1'])
+  const review = variant('1-4-A-T', ['F1'])
+  const otherFamily = variant('1-1-A-T', ['F2'])
+  const noFamilies = variant('1-1-A-T')
+  const multiFamily = variant('1-6-A-T', ['F1', 'F3'])
+  const excludedPair = [review, artifact]
+  const pair = [review, variant('1-5-A-T', ['F1'])]
+
+  expect(splitExcludedVariants([], excludedReasons)).toEqual({ included: [], excludedGroups: [], numExcluded: 0 })
+  expect(splitExcludedVariants(
+    [benign, review, excludedPair, otherFamily, noReason, pair, noFamilies, multiFamily, artifact], excludedReasons,
+  )).toEqual({
+    included: [review, otherFamily, pair, noFamilies],
+    excludedGroups: [
+      { reason: 'Artifact', variants: [excludedPair, multiFamily, artifact] },
+      { reason: 'Benign', variants: [benign] },
+      { reason: 'No reason given', variants: [noReason] },
+    ],
+    numExcluded: 5,
+  })
+  expect(splitExcludedVariants([benign, pair], {})).toEqual(
+    { included: [benign, pair], excludedGroups: [], numExcluded: 0 },
+  )
 })

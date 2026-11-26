@@ -6,7 +6,8 @@ import {
   RESTRICTIVE_QUERY_GUID, SAVED_SEARCH_GUID, SEARCH_HASH, WORKBOOK, WORKBOOK_DETAIL, WORKBOOK_GUID,
 } from './fixtures'
 import {
-  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, getCellKey, loadGroupSummary,
+  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, getCellKey, loadCellHistory,
+  loadGroupSummary, markWorksheetQueryResultReviewed,
   loadProjectWorkbooks, loadWorkbook, loadWorkbookPage, loadWorkbooksPage, runGroupWorksheetQuery, runWorksheetQuery, updateWorkbook, updateWorksheet, updateWorksheetQuery,
   updateWorksheetQueryResult,
 } from './reducers'
@@ -386,4 +387,104 @@ test('ignores the summary of a request that was replaced by a later request', as
     expect(store.getState().workbookGroupSummary).toEqual({ cellKey: GROUP_CELL_KEY, summary: otherSummary })
     expect(store.getState().genesById[CDC7_GENE_ID]).toBeUndefined()
   }
+})
+
+const CELL_HISTORY = {
+  runs: [{
+    runId: 1, createdDate: '2026-11-25T10:00:00Z', createdBy: 'Test User', trigger: 'M', status: 'C', error: null as string,
+    numResults: 4, numNew: 1, numRemoved: 0, isUnchanged: false,
+  }],
+  totalRuns: 1,
+  unreviewedResults: [{ familyGuid: 'F011652_1', variantIds: ['1-100-A-T'], geneIds: [CDC7_GENE_ID] }],
+  totalUnreviewedResults: 1,
+}
+const UNREVIEWED_CELL = { ...GROUP_QUERY_RESULT, hasUnreviewed: true, numUnreviewed: 1 }
+const CELL_HISTORY_RESPONSE = {
+  ...CELL_HISTORY,
+  worksheetQueryResultsByGuid: { [GROUP_QUERY_RESULT.worksheetQueryResultGuid]: UNREVIEWED_CELL },
+  genesById: { [CDC7_GENE_ID]: { geneId: CDC7_GENE_ID, geneSymbol: 'CDC7' } },
+}
+
+test('loads the run history of a cell with its alert and the genes of its unreviewed results', async () => {
+  const store = createTestStore()
+  mockApi({ [`${GROUP_CELL_PATH}/history`]: { json: CELL_HISTORY_RESPONSE } })
+
+  store.dispatch(loadCellHistory(...GROUP_CELL))
+  expect(store.getState().workbookCellHistoryLoading.isLoading).toBe(true)
+  await flushAll()
+
+  expect(store.getState().workbookCellHistoryLoading.isLoading).toBe(false)
+  expect(store.getState().workbookCellHistory).toEqual({ cellKey: GROUP_CELL_KEY, history: CELL_HISTORY })
+  expect(store.getState().worksheetQueryResultsByGuid[GROUP_QUERY_RESULT.worksheetQueryResultGuid]).toEqual(UNREVIEWED_CELL)
+  expect(store.getState().genesById[CDC7_GENE_ID]).toEqual({ geneId: CDC7_GENE_ID, geneSymbol: 'CDC7' })
+
+  // A cell that was never run has no cell or genes in the response
+  mockApi({ [`${GROUP_CELL_PATH}/history`]: { json: { runs: [], totalRuns: 0 } } })
+  await store.dispatch(loadCellHistory(...GROUP_CELL))
+  expect(store.getState().workbookCellHistory).toEqual({ cellKey: GROUP_CELL_KEY, history: { runs: [], totalRuns: 0 } })
+  expect(store.getState().worksheetQueryResultsByGuid[GROUP_QUERY_RESULT.worksheetQueryResultGuid]).toEqual(UNREVIEWED_CELL)
+})
+
+test('records why the run history of a cell could not be loaded', async () => {
+  const store = createTestStore()
+  mockApi({ [`${GROUP_CELL_PATH}/history`]: { status: 400, json: { errors: ['Invalid cell'] } } })
+  await store.dispatch(loadCellHistory(...GROUP_CELL))
+  expect(store.getState().workbookCellHistory).toEqual({ cellKey: GROUP_CELL_KEY, error: 'Invalid cell' })
+  expect(store.getState().workbookCellHistoryLoading.isLoading).toBe(false)
+
+  mockApi({ [`${GROUP_CELL_PATH}/history`]: { status: 403, json: { error: 'Permission Denied' } } })
+  await store.dispatch(loadCellHistory(...GROUP_CELL))
+  expect(store.getState().workbookCellHistory).toEqual({ cellKey: GROUP_CELL_KEY, error: 'Permission Denied' })
+})
+
+test('ignores the run history of a request that was replaced by a later request, but stores its cell', async () => {
+  const lateResponses = [{ json: CELL_HISTORY_RESPONSE }, { status: 403, json: { error: 'Permission Denied' } }]
+  const expectedCells = [UNREVIEWED_CELL, undefined]
+  for (let i = 0; i < lateResponses.length; i += 1) {
+    const store = createTestStore()
+    let finish: () => void
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    mockApi({ [`${GROUP_CELL_PATH}/history`]: { ...lateResponses[i], wait } })
+    const first = store.dispatch(loadCellHistory(...GROUP_CELL))
+
+    const otherPath = `/api/workbook/${WORKBOOK_GUID}/queries/${RECESSIVE_QUERY_GUID}/targets/${GROUP_TARGET_GUID}/history`
+    mockApi({ [otherPath]: { json: { runs: [], totalRuns: 0 } } })
+    // eslint-disable-next-line no-await-in-loop
+    await store.dispatch(loadCellHistory(WORKBOOK_GUID, RECESSIVE_QUERY_GUID, GROUP_TARGET_GUID))
+    const otherHistory = { cellKey: getCellKey(RECESSIVE_QUERY_GUID, GROUP_TARGET_GUID), history: { runs: [] as object[], totalRuns: 0 } }
+    expect(store.getState().workbookCellHistory).toEqual(otherHistory)
+
+    finish()
+    // eslint-disable-next-line no-await-in-loop
+    await first
+    expect(store.getState().workbookCellHistory).toEqual(otherHistory)
+    expect(store.getState().worksheetQueryResultsByGuid[GROUP_QUERY_RESULT.worksheetQueryResultGuid]).toEqual(expectedCells[i])
+  }
+})
+
+test('marks the results of a cell as reviewed and reloads its run history', async () => {
+  const store = createTestStore({
+    worksheetQueryResultsByGuid: { [GROUP_QUERY_RESULT.worksheetQueryResultGuid]: UNREVIEWED_CELL },
+  })
+  const reviewedCell = { ...UNREVIEWED_CELL, hasUnreviewed: false, numUnreviewed: 0 }
+  const reviewedResponse = { worksheetQueryResultsByGuid: { [GROUP_QUERY_RESULT.worksheetQueryResultGuid]: reviewedCell } }
+  mockApi({
+    [`${GROUP_CELL_PATH}/mark_reviewed`]: { json: reviewedResponse },
+    [`${GROUP_CELL_PATH}/history`]: { json: { ...reviewedResponse, runs: CELL_HISTORY.runs, totalRuns: 1 } },
+  })
+
+  await store.dispatch(markWorksheetQueryResultReviewed(...GROUP_CELL))
+
+  expect(getRequests(`${GROUP_CELL_PATH}/mark_reviewed`)).toEqual([{}])
+  expect(getRequests(`${GROUP_CELL_PATH}/history`)).toEqual([null])
+  expect(store.getState().worksheetQueryResultsByGuid[GROUP_QUERY_RESULT.worksheetQueryResultGuid]).toEqual(reviewedCell)
+  expect(store.getState().workbookCellHistory).toEqual(
+    { cellKey: GROUP_CELL_KEY, history: { runs: CELL_HISTORY.runs, totalRuns: 1 } },
+  )
+
+  mockApi({ [`${GROUP_CELL_PATH}/mark_reviewed`]: { status: 403, json: { error: 'Permission Denied' } } })
+  await expect(store.dispatch(markWorksheetQueryResultReviewed(...GROUP_CELL))).rejects.toThrow('Permission Denied')
+  expect(getRequests(`${GROUP_CELL_PATH}/history`)).toHaveLength(1)
 })

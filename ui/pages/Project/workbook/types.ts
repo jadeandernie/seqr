@@ -48,7 +48,61 @@ export interface WorksheetQueryResult {
   lastRunBy: string | null
   numResults: number | null
   lastModifiedDate: string
+  hasUnreviewed?: boolean
+  numUnreviewed?: number
+  lastRun?: WorksheetQueryRun | null
 }
+
+export interface WorksheetQueryRun {
+  runId: number
+  createdDate: string
+  createdBy: string | null
+  trigger: 'M' | 'S' | 'D'
+  status: 'C' | 'T' | 'E'
+  error: string | null
+  numResults: number | null
+  numNew: number
+  numRemoved: number
+  isUnchanged: boolean
+}
+
+export interface UnreviewedResult {
+  familyGuid: string
+  variantIds: string[]
+  geneIds: string[]
+}
+
+export interface CellHistory {
+  runs?: WorksheetQueryRun[]
+  totalRuns?: number
+  unreviewedResults?: UnreviewedResult[]
+  totalUnreviewedResults?: number
+}
+
+// The run history of the most recently requested cell
+export interface CellHistoryState {
+  cellKey?: string
+  history?: CellHistory
+  error?: string
+}
+
+export interface SavedVariant {
+  variantId: string
+  familyGuids: string[]
+  tagGuids: string[]
+}
+
+export interface VariantTag {
+  name: string
+  metadata?: string | null
+}
+
+export interface SearchedVariant {
+  variantId: string
+  familyGuids?: string[]
+}
+
+export type DisplayVariant = SearchedVariant | SearchedVariant[]
 
 export type ByGuid<T> = Record<string, T>
 
@@ -126,6 +180,10 @@ export interface WorkbookReduxState {
   genesById: ByGuid<{ geneSymbol?: string }>
   workbookGroupSummary: GroupSummaryState
   workbookGroupSummaryLoading: LoadingState
+  workbookCellHistory: CellHistoryState
+  workbookCellHistoryLoading: LoadingState
+  savedVariantsByGuid: ByGuid<SavedVariant>
+  variantTagsByGuid: ByGuid<VariantTag>
 }
 
 export interface WorkbookResponse {
@@ -140,7 +198,7 @@ export interface WorkbookResponse {
 export interface WorkbookAction {
   type: string
   updatesById?: WorkbookResponse | Record<string, unknown>
-  newValue?: GroupSummaryState
+  newValue?: GroupSummaryState | CellHistoryState
   error?: string
 }
 

@@ -5,9 +5,13 @@ import {
 } from 'semantic-ui-react'
 import styled from 'styled-components'
 
+import CellReview from './CellReview'
 import { STATUS_NOT_REVIEWED, WORKBOOK_STATUSES } from './constants'
 import GroupResults from './GroupResults'
-import { runGroupWorksheetQuery, runWorksheetQuery, updateWorksheetQueryResult } from './reducers'
+import {
+  loadCellHistory, markWorksheetQueryResultReviewed, runGroupWorksheetQuery, runWorksheetQuery,
+  updateWorksheetQueryResult,
+} from './reducers'
 import SearchResultsHost from './SearchResultsHost'
 import {
   RequestError, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorksheetQuery, WorksheetQueryResult,
@@ -53,11 +57,16 @@ interface CellProps {
 
 interface WorkPaneProps extends CellProps {
   totalResults?: number
+  searchLoading: boolean
   onUpdate: (values: { status?: WorkbookStatus, note?: string }) => Promise<void>
   onRun: () => Promise<void>
+  onLoadHistory: () => Promise<void>
+  onMarkReviewed: () => Promise<void>
 }
 
-const WorkPane = ({ workbook, target, query, queryResult, totalResults, onUpdate, onRun }: WorkPaneProps) => {
+const WorkPane = ({
+  workbook, target, query, queryResult, totalResults, searchLoading, onUpdate, onRun, onLoadHistory, onMarkReviewed,
+}: WorkPaneProps) => {
   const savedNote = queryResult?.note || ''
   const [note, setNote] = useState(savedNote)
   const [errors, setErrors] = useState<string[]>(null)
@@ -86,10 +95,23 @@ const WorkPane = ({ workbook, target, query, queryResult, totalResults, onUpdate
     setRunning(true)
     handleRequest(onRun()).then(() => mounted.current && setRunning(false))
   }, [handleRequest, onRun])
+  const markReviewed = useCallback(() => {
+    handleRequest(onMarkReviewed())
+  }, [handleRequest, onMarkReviewed])
   const saveNoteButton = useMemo(() => ({ content: 'Save Note', disabled: note === savedNote }), [note, savedNote])
 
   const numResults = totalResults ?? queryResult?.numResults
   const searchHash = queryResult?.searchHash
+
+  // A run is recorded when the results are loaded, so the alert and history of the cell are loaded after that
+  const loadHistory = useRef(onLoadHistory)
+  loadHistory.current = onLoadHistory
+  useEffect(() => {
+    if (searchHash && !running && !searchLoading) {
+      loadHistory.current()
+    }
+  }, [searchHash, running, searchLoading])
+
   return (
     <div>
       <PaneHeader>
@@ -133,17 +155,21 @@ const WorkPane = ({ workbook, target, query, queryResult, totalResults, onUpdate
         </RunInfo>
       </PaneHeader>
       {errors && <Message error list={errors} />}
+      {queryResult?.lastRun && (
+        <CellReview target={target} query={query} queryResult={queryResult} onMarkReviewed={markReviewed} />
+      )}
       {running && <Loader inline="centered" active />}
       {!running && !searchHash && <Message content={`This query has not been run for ${target.name} yet`} />}
       {!running && searchHash && (target.isGroup ?
         <GroupResults key={searchHash} workbook={workbook} target={target} query={query} searchHash={searchHash} onRun={run} /> :
-        <SearchResultsHost key={searchHash} searchHash={searchHash} />)}
+        <SearchResultsHost key={searchHash} searchHash={searchHash} collapseExcluded />)}
     </div>
   )
 }
 
 const mapStateToProps = (state: WorkbookReduxState, { queryResult }: CellProps) => ({
   totalResults: state.searchesByHash[queryResult?.searchHash]?.totalResults,
+  searchLoading: state.searchedVariantsLoading.isLoading,
 })
 
 type Dispatch = (thunk: ReturnType<typeof runWorksheetQuery>) => Promise<void>
@@ -155,6 +181,8 @@ const mapDispatchToProps = (dispatch: Dispatch, { workbook, target, query }: Cel
       updateWorksheetQueryResult(...cell, values),
     ),
     onRun: () => dispatch((target.isGroup ? runGroupWorksheetQuery : runWorksheetQuery)(...cell)),
+    onLoadHistory: () => dispatch(loadCellHistory(...cell)),
+    onMarkReviewed: () => dispatch(markWorksheetQueryResultReviewed(...cell)),
   }
 }
 

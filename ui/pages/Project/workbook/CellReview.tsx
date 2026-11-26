@@ -3,6 +3,7 @@ import { connect } from 'react-redux'
 import { Button, Message, Table } from 'semantic-ui-react'
 import styled from 'styled-components'
 
+import { RUN_TRIGGER_LABELS } from './constants'
 import { getCellKey } from './reducers'
 import { getCellHistory, getFamiliesByGuid, getGenesById } from './selectors'
 import {
@@ -102,7 +103,7 @@ const RunTable = ({ runs, total }: { runs: WorksheetQueryRun[], total: number })
     <Table compact="very" basic="very" aria-label="Run history">
       <Table.Header>
         <Table.Row>
-          {['Date', 'Run by', 'Results', 'Change'].map(header => <Table.HeaderCell key={header} content={header} />)}
+          {['Date', 'Run by', 'Trigger', 'Results', 'Change'].map(header => <Table.HeaderCell key={header} content={header} />)}
         </Table.Row>
       </Table.Header>
       <Table.Body>
@@ -110,6 +111,7 @@ const RunTable = ({ runs, total }: { runs: WorksheetQueryRun[], total: number })
           <Table.Row key={run.runId}>
             <Table.Cell content={formatDate(run.createdDate)} />
             <Table.Cell content={run.createdBy || 'unknown user'} />
+            <Table.Cell content={RUN_TRIGGER_LABELS[run.trigger]} />
             <Table.Cell content={run.numResults ?? ''} />
             <Table.Cell content={getRunChange(run)} />
           </Table.Row>

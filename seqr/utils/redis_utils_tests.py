@@ -1,7 +1,7 @@
 import json
 import mock
 from unittest import TestCase
-from seqr.utils.redis_utils import safe_redis_set_json, safe_redis_get_json
+from seqr.utils.redis_utils import safe_redis_delete_wildcard, safe_redis_set_json, safe_redis_get_json
 
 
 @mock.patch('seqr.utils.redis_utils.logger')
@@ -55,3 +55,22 @@ class RedisUtilsTest(TestCase):
         mock_redis.side_effect = Exception('invalid redis')
         safe_redis_set_json('test_key', {'a': 1})
         mock_logger.error.assert_called_with('Unable to write to redis host localhost: invalid redis')
+
+    def test_safe_redis_delete_wildcard(self, mock_redis, mock_logger):
+        mock_redis.return_value.keys.return_value = ['test_key__a', 'test_key__b']
+        safe_redis_delete_wildcard('test_key__*')
+        mock_redis.return_value.keys.assert_called_with(pattern='test_key__*')
+        mock_redis.return_value.delete.assert_called_with('test_key__a', 'test_key__b')
+        mock_logger.error.assert_not_called()
+
+        # test with no matching keys
+        mock_redis.reset_mock()
+        mock_redis.return_value.keys.return_value = []
+        safe_redis_delete_wildcard('test_key__*')
+        mock_redis.return_value.delete.assert_not_called()
+        mock_logger.error.assert_not_called()
+
+        # test with redis connection error
+        mock_redis.side_effect = Exception('invalid redis')
+        safe_redis_delete_wildcard('test_key__*')
+        mock_logger.error.assert_called_with('Unable to delete "test_key__*" from redis host localhost: invalid redis')

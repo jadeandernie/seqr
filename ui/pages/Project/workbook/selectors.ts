@@ -7,7 +7,7 @@ import {
 } from './constants'
 import {
   ByGuid, CellHistoryState, DisplayVariant, GroupSummaryState, NamedEntity, Option, TargetDisplay, Workbook,
-  WorkbookReduxState, WorkbookStatus, WorkbookTarget, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
+  WorkbookReduxState, WorkbookStatus, WorkbookTarget, Worksheet, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
 } from './types'
 
 interface WorkbookProps {
@@ -266,4 +266,22 @@ export const splitExcludedVariants = (
     ),
     numExcluded: displayVariants.length - included.length,
   }
+}
+
+// A worksheet without its own interval uses the interval of its workbook, without either its queries are not rerun
+export const getEffectiveRerunIntervalDays = (workbook: Workbook, worksheet?: Worksheet): number | null => (
+  worksheet?.rerunIntervalDays || workbook.rerunIntervalDays || null
+)
+
+const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
+
+// Only cells that were run are rerun
+export const getNextRerunDate = (
+  workbook: Workbook, worksheet?: Worksheet, queryResult?: WorksheetQueryResult,
+): Date | null => {
+  const intervalDays = getEffectiveRerunIntervalDays(workbook, worksheet)
+  if (!intervalDays || !queryResult?.lastRunDate) {
+    return null
+  }
+  return new Date(new Date(queryResult.lastRunDate).getTime() + (intervalDays * DAY_MILLISECONDS))
 }

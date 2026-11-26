@@ -49,10 +49,10 @@ const RUNS: WorksheetQueryRun[] = [
     ...RUN, runId: 4, createdDate: '2026-11-24T10:00:00Z', status: 'E', error: 'Invalid search', numResults: null, numNew: 0, numRemoved: 0,
   },
   {
-    ...RUN, runId: 3, createdDate: '2026-11-23T10:00:00Z', status: 'T', error: 'This search returned too many results', numResults: null, numNew: 0, numRemoved: 0,
+    ...RUN, runId: 3, createdDate: '2026-11-23T10:00:00Z', trigger: 'D', status: 'T', error: 'This search returned too many results', numResults: null, numNew: 0, numRemoved: 0,
   },
   {
-    ...RUN, runId: 2, createdDate: '2026-11-22T10:00:00Z', createdBy: null, numResults: 6, numNew: 0, numRemoved: 0, isUnchanged: true,
+    ...RUN, runId: 2, createdDate: '2026-11-22T10:00:00Z', trigger: 'S', createdBy: null, numResults: 6, numNew: 0, numRemoved: 0, isUnchanged: true,
   },
   {
     ...RUN, runId: 1, createdDate: '2026-11-21T10:00:00Z', numResults: 6, numNew: 0, numRemoved: 0,
@@ -313,13 +313,15 @@ test('lists the runs of a cell in the history', async () => {
 
   expect(getDisclosure(wrapper, 'History').prop('aria-expanded')).toBe(true)
   const table = getPane(wrapper).find('table[aria-label="Run history"]')
-  expect(table.find('th').map((header: Wrapper) => header.text())).toEqual(['Date', 'Run by', 'Results', 'Change'])
+  expect(table.find('th').map((header: Wrapper) => header.text())).toEqual(
+    ['Date', 'Run by', 'Trigger', 'Results', 'Change'],
+  )
   expect(table.find('tbody tr').map((row: Wrapper) => row.find('td').map((cell: Wrapper) => cell.text()))).toEqual([
-    ['11/25/2026', 'Test User', '7', '+2 new / −1 removed'],
-    ['11/24/2026', 'Test User', '', 'Failed: Invalid search'],
-    ['11/23/2026', 'Test User', '', 'Not completed: the search returned too many results'],
-    ['11/22/2026', 'unknown user', '6', 'No change'],
-    ['11/21/2026', 'Test User', '6', 'First results'],
+    ['11/25/2026', 'Test User', 'Manual', '7', '+2 new / −1 removed'],
+    ['11/24/2026', 'Test User', 'Manual', '', 'Failed: Invalid search'],
+    ['11/23/2026', 'Test User', 'After data load', '', 'Not completed: the search returned too many results'],
+    ['11/22/2026', 'unknown user', 'Scheduled', '6', 'No change'],
+    ['11/21/2026', 'Test User', 'Manual', '6', 'First results'],
   ])
   expect(getPane(wrapper).text()).toContain('Showing the last 5 of 60 runs')
   expect(getPane(wrapper).find('.warning.message').exists()).toBe(false)

@@ -177,11 +177,13 @@ test('shows the controls to edit the structure of a workbook the user can edit',
   const { wrapper } = await renderWorkbook()
 
   expect(getButtonLabels(wrapper)).toEqual([
+    'Automatic reruns of workbook Trio analysis',
     'Remove 1',
     'Remove Test Group',
     'Add families or analysis groups',
     'Add a query to worksheet De Novo',
     'Rename worksheet De Novo',
+    'Automatic reruns of worksheet De Novo',
     'Delete worksheet De Novo',
     'Rename query De novo restrictive',
     'Delete query De novo restrictive',
@@ -189,6 +191,7 @@ test('shows the controls to edit the structure of a workbook the user can edit',
     'Delete query De novo permissive',
     'Add a query to worksheet Recessive',
     'Rename worksheet Recessive',
+    'Automatic reruns of worksheet Recessive',
     'Delete worksheet Recessive',
     'Rename query Recessive',
     'Delete query Recessive',
@@ -531,7 +534,9 @@ test('prompts for targets and queries when the workbook has none', async () => {
   expect(getPaneText(empty.wrapper)).toEqual('Add a family or analysis group to this workbook to review it')
   expect(empty.wrapper.find('div[role="tabpanel"]').prop('aria-labelledby')).toBeUndefined()
   expect(empty.wrapper.find('nav[aria-label="Worksheets"]').text()).toContain('No worksheets')
-  expect(getButtonLabels(empty.wrapper)).toEqual(['Add families or analysis groups', 'Add Worksheet'])
+  expect(getButtonLabels(empty.wrapper)).toEqual([
+    'Automatic reruns of workbook Trio analysis', 'Add families or analysis groups', 'Add Worksheet',
+  ])
 
   const noQueries = await renderWorkbook(withDetail({ worksheetQueriesByGuid: {}, worksheetQueryResultsByGuid: {} }))
   expect(noQueries.history.location.pathname).toEqual(`${PATH}/${FAMILY_TARGET_GUID}`)

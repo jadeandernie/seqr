@@ -45,3 +45,13 @@ def safe_redis_set_json(cache_key, value, expire=None):
             redis_client.expire(cache_key, expire)
     except Exception as e:
         logger.error('Unable to write to redis host {}: {}'.format(REDIS_SERVICE_HOSTNAME, str(e)))
+
+
+def safe_redis_delete_wildcard(cache_key):
+    try:
+        redis_client = redis.StrictRedis(host=REDIS_SERVICE_HOSTNAME, port=REDIS_SERVICE_PORT, socket_connect_timeout=3)
+        keys = redis_client.keys(pattern=cache_key)
+        if keys:
+            redis_client.delete(*keys)
+    except Exception as e:
+        logger.error('Unable to delete "{}" from redis host {}: {}'.format(cache_key, REDIS_SERVICE_HOSTNAME, str(e)))

@@ -25,6 +25,8 @@ export const WORKBOOK: Workbook = {
   createdBy: 'Test Manager User',
   lastModifiedDate: '2026-11-21T10:00:00Z',
   canEdit: true,
+  rerunIntervalDays: null,
+  notifyOnNewResults: false,
 }
 
 export const OTHER_WORKBOOK: Workbook = {
@@ -50,11 +52,11 @@ export const GROUP_TARGET: WorkbookTarget = {
 }
 
 export const DE_NOVO_WORKSHEET: Worksheet = {
-  worksheetGuid: DE_NOVO_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'De Novo', order: 0,
+  worksheetGuid: DE_NOVO_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'De Novo', order: 0, rerunIntervalDays: null,
 }
 
 export const RECESSIVE_WORKSHEET: Worksheet = {
-  worksheetGuid: RECESSIVE_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'Recessive', order: 1,
+  worksheetGuid: RECESSIVE_WORKSHEET_GUID, workbookGuid: WORKBOOK_GUID, name: 'Recessive', order: 1, rerunIntervalDays: null,
 }
 
 const QUERY = { createdDate: '2026-11-20T10:03:00Z', createdBy: 'Test Manager User' }
@@ -97,6 +99,7 @@ export const QUERY_RESULT: WorksheetQueryResult = {
   lastRunBy: null,
   numResults: null,
   lastModifiedDate: '2026-11-20T10:04:00Z',
+  lastScheduledRunDate: null,
 }
 
 export const GROUP_QUERY_RESULT: WorksheetQueryResult = {

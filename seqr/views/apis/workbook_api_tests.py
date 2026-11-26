@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
 import mock
 
@@ -55,7 +56,8 @@ RECESSIVE_SEARCH = {'inheritance': {'mode': 'recessive'}}
 WORKBOOK_JSON = {
     'workbookGuid': WORKBOOK_GUID, 'projectGuid': PROJECT_GUID, 'name': 'Trio analysis',
     'description': 'De novo and recessive review', 'createdDate': '2026-11-20T10:00:00Z', 'createdBy': MANAGER_NAME,
-    'lastModifiedDate': '2026-11-20T10:00:00Z', 'canEdit': False,
+    'lastModifiedDate': '2026-11-20T10:00:00Z', 'canEdit': False, 'rerunIntervalDays': None,
+    'notifyOnNewResults': False,
 }
 FAMILY_TARGET_JSON = {
     'workbookTargetGuid': FAMILY_TARGET_GUID, 'workbookGuid': WORKBOOK_GUID, 'order': 0, 'familyGuid': 'F000001_1',
@@ -67,9 +69,11 @@ GROUP_TARGET_JSON = {
 }
 DE_NOVO_WORKSHEET_JSON = {
     'worksheetGuid': DE_NOVO_WORKSHEET_GUID, 'workbookGuid': WORKBOOK_GUID, 'name': 'De Novo', 'order': 0,
+    'rerunIntervalDays': None,
 }
 RECESSIVE_WORKSHEET_JSON = {
     'worksheetGuid': RECESSIVE_WORKSHEET_GUID, 'workbookGuid': WORKBOOK_GUID, 'name': 'Recessive', 'order': 1,
+    'rerunIntervalDays': None,
 }
 RESTRICTIVE_QUERY_JSON = {
     'worksheetQueryGuid': RESTRICTIVE_QUERY_GUID, 'worksheetGuid': DE_NOVO_WORKSHEET_GUID, 'name': 'De novo restrictive',
@@ -88,7 +92,7 @@ QUERY_RESULT_JSON = {
     'workbookTargetGuid': FAMILY_TARGET_GUID, 'status': 'I', 'statusLastModifiedDate': '2026-11-20T10:04:00Z',
     'statusLastModifiedBy': MANAGER_NAME, 'note': 'Reviewing candidates', 'searchHash': None, 'lastRunDate': None,
     'lastRunBy': None, 'numResults': None, 'lastModifiedDate': '2026-11-20T10:04:00Z', 'hasUnreviewed': False,
-    'numUnreviewed': 0, 'lastRun': None,
+    'numUnreviewed': 0, 'lastRun': None, 'lastScheduledRunDate': None,
 }
 WORKBOOK_DETAIL_JSON = {
     'workbooksByGuid': {WORKBOOK_GUID: WORKBOOK_JSON},
@@ -102,6 +106,8 @@ WORKBOOK_DETAIL_JSON = {
     },
     'worksheetQueryResultsByGuid': {QUERY_RESULT_GUID: QUERY_RESULT_JSON},
 }
+
+RERUN_INTERVAL_ERROR = '"rerunIntervalDays" must be empty or a number of days from 1 to 365'
 
 SEARCH_HASH_REGEX = '^WB[0-9a-f]{48}$'
 
@@ -327,6 +333,7 @@ class WorkbookAPITest(object):
             'workbooksByGuid': {workbook_guid: {
                 'workbookGuid': workbook_guid, 'projectGuid': PROJECT_GUID, 'name': 'New workbook', 'description': None,
                 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME, 'lastModifiedDate': mock.ANY, 'canEdit': True,
+                'rerunIntervalDays': None, 'notifyOnNewResults': False,
             }},
             'workbookTargetsByGuid': {}, 'worksheetsByGuid': {}, 'worksheetQueriesByGuid': {},
             'worksheetQueryResultsByGuid': {},
@@ -398,6 +405,31 @@ class WorkbookAPITest(object):
         self.assertEqual(workbook.description, 'Updated description')
         self.assertEqual(workbook.project.guid, PROJECT_GUID)
 
+        # Automatic reruns are off unless an interval of whole days is set
+        for invalid_interval in [0, -1, 366, '7', 1.5, True, [7]]:
+            self._assert_error(self._post(url, {'rerunIntervalDays': invalid_interval}), RERUN_INTERVAL_ERROR)
+        for invalid_notify in [None, 1, 'true']:
+            self._assert_error(
+                self._post(url, {'notifyOnNewResults': invalid_notify}), '"notifyOnNewResults" must be true or false')
+        workbook.refresh_from_db()
+        self.assertIsNone(workbook.rerun_interval_days)
+        self.assertFalse(workbook.notify_on_new_results)
+        response = self._post(url, {'rerunIntervalDays': 7, 'notifyOnNewResults': True})
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'workbooksByGuid': {WORKBOOK_GUID: {
+            **manager_workbook_json, 'name': 'Updated workbook', 'description': 'Updated description',
+            'lastModifiedDate': mock.ANY, 'rerunIntervalDays': 7, 'notifyOnNewResults': True,
+        }}})
+        workbook.refresh_from_db()
+        self.assertEqual(workbook.rerun_interval_days, 7)
+        self.assertTrue(workbook.notify_on_new_results)
+        self.assertEqual(workbook.name, 'Updated workbook')
+        for valid_interval in [1, 365, None]:
+            response = self._post(url, {'rerunIntervalDays': valid_interval})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['workbooksByGuid'][WORKBOOK_GUID]['rerunIntervalDays'], valid_interval)
+        self.assertTrue(response.json()['workbooksByGuid'][WORKBOOK_GUID]['notifyOnNewResults'])
+
         # Users with edit access to the project can edit workbooks created by other users
         response = self._post(collaborator_url, {'description': 'Edited by a manager'})
         self.assertEqual(response.status_code, 200)
@@ -410,9 +442,11 @@ class WorkbookAPITest(object):
         self.assertDictEqual(response.json()['workbooksByGuid'][collaborator_workbook.guid], {
             'workbookGuid': collaborator_workbook.guid, 'projectGuid': PROJECT_GUID, 'name': 'Renamed workbook',
             'description': 'Edited by a manager', 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME,
-            'lastModifiedDate': mock.ANY, 'canEdit': True,
+            'lastModifiedDate': mock.ANY, 'canEdit': True, 'rerunIntervalDays': None, 'notifyOnNewResults': False,
         })
         self.assertEqual(self._post(url, {'name': 'Not allowed'}).status_code, 403)
+        self.assertEqual(self._post(url, {'rerunIntervalDays': 1, 'notifyOnNewResults': False}).status_code, 403)
+        self.assertTrue(Workbook.objects.get(guid=WORKBOOK_GUID).notify_on_new_results)
         self.assertEqual(self._post(reverse(update_workbook_handler, args=[NO_ACCESS_WORKBOOK_GUID])).status_code, 403)
         self.assertEqual(Workbook.objects.get(guid=WORKBOOK_GUID).name, 'Updated workbook')
 
@@ -465,7 +499,7 @@ class WorkbookAPITest(object):
         self.assertDictEqual(response_json['workbooksByGuid'], {workbook_guid: {
             'workbookGuid': workbook_guid, 'projectGuid': PROJECT_GUID, 'name': 'Copied workbook',
             'description': 'De novo and recessive review', 'createdDate': mock.ANY, 'createdBy': COLLABORATOR_NAME,
-            'lastModifiedDate': mock.ANY, 'canEdit': True,
+            'lastModifiedDate': mock.ANY, 'canEdit': True, 'rerunIntervalDays': None, 'notifyOnNewResults': False,
         }})
 
         # Targets and query results are not copied
@@ -480,8 +514,10 @@ class WorkbookAPITest(object):
 
         worksheets = sorted(response_json['worksheetsByGuid'].values(), key=lambda worksheet: worksheet['order'])
         self.assertListEqual(worksheets, [
-            {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'De Novo', 'order': 0},
-            {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'Recessive', 'order': 1},
+            {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'De Novo', 'order': 0,
+             'rerunIntervalDays': None},
+            {'worksheetGuid': mock.ANY, 'workbookGuid': workbook_guid, 'name': 'Recessive', 'order': 1,
+             'rerunIntervalDays': None},
         ])
         de_novo_guid, recessive_guid = [worksheet['worksheetGuid'] for worksheet in worksheets]
         self.assertFalse({de_novo_guid, recessive_guid} & {DE_NOVO_WORKSHEET_GUID, RECESSIVE_WORKSHEET_GUID})
@@ -671,6 +707,7 @@ class WorkbookAPITest(object):
         worksheet_guid = next(iter(response_json['worksheetsByGuid']))
         dominant_worksheet_json = {
             'worksheetGuid': worksheet_guid, 'workbookGuid': WORKBOOK_GUID, 'name': 'Dominant', 'order': 2,
+            'rerunIntervalDays': None,
         }
         self.assertDictEqual(response_json['worksheetsByGuid'], {worksheet_guid: dominant_worksheet_json})
         worksheet = Worksheet.objects.get(guid=worksheet_guid)
@@ -699,6 +736,26 @@ class WorkbookAPITest(object):
             reverse(update_worksheet_handler, args=[WORKBOOK_GUID, NO_ACCESS_WORKSHEET_GUID]), {'name': 'A'},
         ).status_code, 404)
 
+        # The rerun interval of a worksheet can be changed without its name, and with it
+        for invalid_interval in [0, 366, '7', 1.5, True]:
+            self._assert_error(self._post(update_url, {'rerunIntervalDays': invalid_interval}), RERUN_INTERVAL_ERROR)
+        response = self._post(update_url, {'rerunIntervalDays': 14})
+        self.assertEqual(response.status_code, 200)
+        dominant_worksheet_json['rerunIntervalDays'] = 14
+        self.assertDictEqual(response.json(), {'worksheetsByGuid': {worksheet_guid: dominant_worksheet_json}})
+        self.assertEqual(Worksheet.objects.get(guid=worksheet_guid).rerun_interval_days, 14)
+        self._assert_error(
+            self._post(update_url, {'rerunIntervalDays': 7, 'name': 'Recessive'}),
+            'A worksheet named "Recessive" already exists')
+        self._assert_error(self._post(update_url, {'rerunIntervalDays': 7, 'name': ''}), '"Name" is required')
+        self.assertEqual(Worksheet.objects.get(guid=worksheet_guid).rerun_interval_days, 14)
+        response = self._post(update_url, {'rerunIntervalDays': None, 'name': 'Dominant'})
+        self.assertEqual(response.status_code, 200)
+        dominant_worksheet_json.update({'rerunIntervalDays': None, 'name': 'Dominant'})
+        self.assertDictEqual(response.json(), {'worksheetsByGuid': {worksheet_guid: dominant_worksheet_json}})
+        self.assertEqual(self._post(update_url, {'rerunIntervalDays': 1}).status_code, 200)
+        dominant_worksheet_json['rerunIntervalDays'] = 1
+
         reorder_url = reverse(reorder_worksheets_handler, args=[WORKBOOK_GUID])
         self._check_manager_login(reorder_url)
         reorder_error = 'The guid of every item is required exactly once'
@@ -715,6 +772,7 @@ class WorkbookAPITest(object):
             RECESSIVE_WORKSHEET_GUID: {**RECESSIVE_WORKSHEET_JSON, 'order': 1},
             other_worksheet_guid: {
                 'worksheetGuid': other_worksheet_guid, 'workbookGuid': WORKBOOK_GUID, 'name': 'Other', 'order': 2,
+                'rerunIntervalDays': None,
             },
             DE_NOVO_WORKSHEET_GUID: {**DE_NOVO_WORKSHEET_JSON, 'order': 3},
         }})
@@ -741,6 +799,8 @@ class WorkbookAPITest(object):
         self.login_collaborator()
         self.assertEqual(self._post(create_url, {'name': 'Not allowed'}).status_code, 403)
         self.assertEqual(self._post(update_url, {'name': 'Not allowed'}).status_code, 403)
+        self.assertEqual(self._post(update_url, {'rerunIntervalDays': 30}).status_code, 403)
+        self.assertEqual(Worksheet.objects.get(guid=worksheet_guid).rerun_interval_days, 1)
         self.assertEqual(self._post(reorder_url, {'worksheetGuids': []}).status_code, 403)
         self.assertEqual(self._post(reverse(delete_worksheet_handler, args=[WORKBOOK_GUID, RECESSIVE_WORKSHEET_GUID])).status_code, 403)
         no_access_urls = [
@@ -948,7 +1008,7 @@ class WorkbookAPITest(object):
             'workbookTargetGuid': GROUP_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': 'A note', 'searchHash': None, 'lastRunDate': None, 'lastRunBy': None,
             'numResults': None, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False, 'numUnreviewed': 0,
-            'lastRun': None,
+            'lastRun': None, 'lastScheduledRunDate': None,
         }})
         self.assertEqual(WorksheetQueryResult.objects.get(guid=query_result_guid).created_by, self.collaborator_user)
         self._assert_workbook_counts(query_results=2)
@@ -1054,7 +1114,7 @@ class WorkbookAPITest(object):
             'workbookTargetGuid': GROUP_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': None, 'searchHash': group_search_hash, 'lastRunDate': mock.ANY,
             'lastRunBy': MANAGER_NAME, 'numResults': None, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False,
-            'numUnreviewed': 0, 'lastRun': None,
+            'numUnreviewed': 0, 'lastRun': None, 'lastScheduledRunDate': None,
         }
         self.assertDictEqual(response_json['worksheetQueryResultsByGuid'], {query_result_guid: group_query_result_json})
         self.assertIsNotNone(response_json['worksheetQueryResultsByGuid'][query_result_guid]['lastRunDate'])
@@ -1295,7 +1355,7 @@ class WorkbookAPITest(object):
             'workbookTargetGuid': FAMILY_TARGET_GUID, 'status': 'N', 'statusLastModifiedDate': None,
             'statusLastModifiedBy': None, 'note': None, 'searchHash': None, 'lastRunDate': last_run_date,
             'lastRunBy': MANAGER_NAME, 'numResults': 4, 'lastModifiedDate': mock.ANY, 'hasUnreviewed': False,
-            'numUnreviewed': 0, 'lastRun': None,
+            'numUnreviewed': 0, 'lastRun': None, 'lastScheduledRunDate': None,
         })
 
         response = self._post(url)
@@ -1618,6 +1678,39 @@ class WorkbookAPITest(object):
             self.login_collaborator()
             response = self._post(reverse(handler, args=[NO_ACCESS_WORKBOOK_GUID, NO_ACCESS_QUERY_GUID, NO_ACCESS_TARGET_GUID]))
             self.assertEqual(response.status_code, 403)
+
+    def test_last_scheduled_run_date(self):
+        url = reverse(workbook_detail_handler, args=[WORKBOOK_GUID])
+        self.check_collaborator_login(url)
+        cell = WorksheetQueryResult.objects.get(guid=QUERY_RESULT_GUID)
+
+        def _create_run(trigger, day):
+            return WorksheetQueryRun.objects.create(
+                cell=cell, trigger=trigger, num_results=0, created_date=datetime(2026, 11, day, tzinfo=timezone.utc))
+
+        def _get_cell_json():
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            return response.json()['worksheetQueryResultsByGuid'][QUERY_RESULT_GUID]
+
+        _create_run('M', 21)
+        self.assertIsNone(_get_cell_json()['lastScheduledRunDate'])
+        _create_run('S', 22)
+        _create_run('D', 24)
+        _create_run('S', 23)
+        _create_run('M', 25)
+        cell_json = _get_cell_json()
+        self.assertEqual(cell_json['lastScheduledRunDate'], '2026-11-24T00:00:00Z')
+        self.assertEqual(cell_json['lastRun']['trigger'], 'M')
+
+        history_url = reverse(
+            worksheet_query_result_history_handler, args=[WORKBOOK_GUID, RESTRICTIVE_QUERY_GUID, FAMILY_TARGET_GUID])
+        response = self.client.get(history_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual([run['trigger'] for run in response.json()['runs']], ['M', 'S', 'D', 'S', 'M'])
+        self.assertEqual(
+            response.json()['worksheetQueryResultsByGuid'][QUERY_RESULT_GUID]['lastScheduledRunDate'],
+            '2026-11-24T00:00:00Z')
 
     def test_search_without_workbook_cells(self):
         self.login_collaborator()

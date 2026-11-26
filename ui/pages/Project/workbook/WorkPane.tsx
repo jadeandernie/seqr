@@ -6,15 +6,17 @@ import {
 import styled from 'styled-components'
 
 import CellReview from './CellReview'
-import { STATUS_NOT_REVIEWED, WORKBOOK_STATUSES } from './constants'
+import { isAutomatedTrigger, RUN_TRIGGER_LABELS, STATUS_NOT_REVIEWED, WORKBOOK_STATUSES } from './constants'
 import GroupResults from './GroupResults'
 import {
   loadCellHistory, markWorksheetQueryResultReviewed, runGroupWorksheetQuery, runWorksheetQuery,
   updateWorksheetQueryResult,
 } from './reducers'
 import SearchResultsHost from './SearchResultsHost'
+import { getNextRerunDate } from './selectors'
 import {
-  RequestError, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, WorksheetQuery, WorksheetQueryResult,
+  RequestError, TargetDisplay, Workbook, WorkbookReduxState, WorkbookStatus, Worksheet, WorksheetQuery,
+  WorksheetQueryResult,
 } from './types'
 
 const PaneHeader = styled.div`
@@ -46,6 +48,10 @@ const STATUS_OPTIONS = WORKBOOK_STATUSES.map(({ value, text, icon, color }) => (
   value, text, icon: icon && { name: icon, color },
 }))
 
+const formatDate = (date: string | Date) => new Date(date).toLocaleDateString()
+
+const NEXT_RERUN_TITLE = 'The query is rerun at the first scheduled check after this date, or sooner after new data is loaded'
+
 const getErrors = (e: RequestError) => e.body?.errors || [e.message]
 
 interface CellProps {
@@ -56,6 +62,7 @@ interface CellProps {
 }
 
 interface WorkPaneProps extends CellProps {
+  worksheet?: Worksheet
   totalResults?: number
   searchLoading: boolean
   onUpdate: (values: { status?: WorkbookStatus, note?: string }) => Promise<void>
@@ -65,7 +72,8 @@ interface WorkPaneProps extends CellProps {
 }
 
 const WorkPane = ({
-  workbook, target, query, queryResult, totalResults, searchLoading, onUpdate, onRun, onLoadHistory, onMarkReviewed,
+  workbook, worksheet, target, query, queryResult, totalResults, searchLoading, onUpdate, onRun, onLoadHistory,
+  onMarkReviewed,
 }: WorkPaneProps) => {
   const savedNote = queryResult?.note || ''
   const [note, setNote] = useState(savedNote)
@@ -102,6 +110,8 @@ const WorkPane = ({
 
   const numResults = totalResults ?? queryResult?.numResults
   const searchHash = queryResult?.searchHash
+  const lastRunTrigger = queryResult?.lastRun?.trigger
+  const nextRerunDate = getNextRerunDate(workbook, worksheet, queryResult)
 
   // A run is recorded when the results are loaded, so the alert and history of the cell are loaded after that
   const loadHistory = useRef(onLoadHistory)
@@ -139,7 +149,16 @@ const WorkPane = ({
         <RunInfo>
           {queryResult?.lastRunDate && (
             <div>
-              {`Last run ${new Date(queryResult.lastRunDate).toLocaleDateString()} by ${queryResult.lastRunBy || 'unknown user'}`}
+              {`Last run ${formatDate(queryResult.lastRunDate)} by ${queryResult.lastRunBy || 'unknown user'}`}
+              {lastRunTrigger && isAutomatedTrigger(lastRunTrigger) && ` (${RUN_TRIGGER_LABELS[lastRunTrigger].toLowerCase()})`}
+            </div>
+          )}
+          {queryResult?.lastScheduledRunDate && (
+            <div>{`Last scheduled run ${formatDate(queryResult.lastScheduledRunDate)}`}</div>
+          )}
+          {nextRerunDate && (
+            <div title={NEXT_RERUN_TITLE}>
+              {`Next rerun due at the first scheduled check after ${formatDate(nextRerunDate)}`}
             </div>
           )}
           {numResults != null && <div>{`${numResults} results`}</div>}
@@ -167,7 +186,8 @@ const WorkPane = ({
   )
 }
 
-const mapStateToProps = (state: WorkbookReduxState, { queryResult }: CellProps) => ({
+const mapStateToProps = (state: WorkbookReduxState, { query, queryResult }: CellProps) => ({
+  worksheet: state.worksheetsByGuid[query.worksheetGuid],
   totalResults: state.searchesByHash[queryResult?.searchHash]?.totalResults,
   searchLoading: state.searchedVariantsLoading.isLoading,
 })

@@ -10,6 +10,7 @@ import {
 } from './types'
 import {
   AddQueryButton, DeleteQueryButton, DeleteWorksheetButton, RenameQueryButton, UpdateWorksheetButton,
+  WorksheetAutomationButton,
 } from './WorkbookButtons'
 
 const BORDER = '1px solid #d4d4d5'
@@ -91,6 +92,7 @@ const WorksheetSidebar = React.memo((
             <RowLabel>{worksheet.name}</RowLabel>
             {workbook.canEdit && <AddQueryButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <UpdateWorksheetButton workbook={workbook} worksheet={worksheet} />}
+            {workbook.canEdit && <WorksheetAutomationButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <DeleteWorksheetButton workbook={workbook} worksheet={worksheet} />}
             <NewResultsBadge
               count={getNumUnreviewed(resultsByQueryTarget, worksheet.queries, targetGuid)}

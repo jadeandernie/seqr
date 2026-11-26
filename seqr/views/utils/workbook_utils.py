@@ -11,6 +11,8 @@ which of them have not been reviewed yet.
 - The first completed run of a cell is the baseline for later runs: its results are not "new" and do not alert.
 - Results are identified by the keys described on WorksheetQueryRun. A change in the annotation of a variant that
   does not add it to or remove it from the results is not detected.
+- A run has the trigger of the load that recorded it: manual for results loaded by a user, scheduled or data load for
+  the automatic reruns of seqr.views.utils.workbook_rerun_utils.
 """
 import hashlib
 import json
@@ -50,21 +52,22 @@ def get_completed_runs(cell):
     return cell.worksheetqueryrun_set.filter(result_keys__isnull=False).order_by('-id')
 
 
-def _record_error_run(cell, user, error, is_new_execution):
+def _record_error_run(cell, user, error, is_new_execution, trigger):
     if is_new_execution:
         is_too_many_results = str(error) == TOO_MANY_RESULTS_ERROR
         WorksheetQueryRun.objects.create(
-            cell=cell, created_by=user, error=str(error),
+            cell=cell, created_by=user, error=str(error), trigger=trigger,
             status=WorksheetQueryRun.STATUS_TOO_MANY_RESULTS if is_too_many_results else WorksheetQueryRun.STATUS_ERROR,
         )
 
 
-def _record_completed_run(cell, user, num_results, keys, keys_hash, is_new_execution):
+def _record_completed_run(cell, user, num_results, keys, keys_hash, is_new_execution, trigger):
     cell_update = {'num_results': num_results}
     previous_run = get_completed_runs(cell).only('keys_hash').first()
     is_changed = previous_run is None or previous_run.keys_hash != keys_hash
     if is_changed or is_new_execution:
-        run = WorksheetQueryRun(cell=cell, created_by=user, num_results=num_results, keys_hash=keys_hash)
+        run = WorksheetQueryRun(
+            cell=cell, created_by=user, num_results=num_results, keys_hash=keys_hash, trigger=trigger)
         if previous_run is None:
             run.result_keys = keys
             cell_update['reviewed_keys'] = keys
@@ -82,7 +85,7 @@ def _record_completed_run(cell, user, num_results, keys, keys_hash, is_new_execu
     WorksheetQueryResult.objects.filter(id=cell.id).update(**cell_update)
 
 
-def _record_runs(cell_ids, user, results=None, error=None):
+def _record_runs(cell_ids, user, results=None, error=None, trigger=WorksheetQueryRun.TRIGGER_MANUAL):
     keys = keys_hash = None
     if error is None:
         keys = get_result_keys(results)
@@ -94,12 +97,20 @@ def _record_runs(cell_ids, user, results=None, error=None):
             is_new_execution = last_run is None or bool(
                 cell.last_run_date and last_run.created_date < cell.last_run_date)
             if error is None:
-                _record_completed_run(cell, user, len(results), keys, keys_hash, is_new_execution)
+                _record_completed_run(cell, user, len(results), keys, keys_hash, is_new_execution, trigger)
             else:
-                _record_error_run(cell, user, error, is_new_execution)
+                _record_error_run(cell, user, error, is_new_execution, trigger)
 
 
-def get_results_and_record_worksheet_query_runs(results_model, user, get_results):
+def record_failed_run(cell, user, error, trigger):
+    # For a run that could not be started. Its date becomes the last run date so that it is not retried at once
+    with transaction.atomic():
+        run = WorksheetQueryRun.objects.create(
+            cell=cell, created_by=user, error=str(error), trigger=trigger, status=WorksheetQueryRun.STATUS_ERROR)
+        WorksheetQueryResult.objects.filter(id=cell.id).update(last_run_date=run.created_date)
+
+
+def get_results_and_record_worksheet_query_runs(results_model, user, get_results, trigger=WorksheetQueryRun.TRIGGER_MANUAL):
     cell_ids = list(WorksheetQueryResult.objects.filter(results=results_model).values_list('id', flat=True))
     if not cell_ids:
         return get_results()
@@ -107,9 +118,9 @@ def get_results_and_record_worksheet_query_runs(results_model, user, get_results
     try:
         results = get_results()
     except Exception as e:
-        _record_runs(cell_ids, user, error=e)
+        _record_runs(cell_ids, user, error=e, trigger=trigger)
         raise
-    _record_runs(cell_ids, user, results=results)
+    _record_runs(cell_ids, user, results=results, trigger=trigger)
     return results
 
 

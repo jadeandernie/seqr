@@ -162,6 +162,8 @@ class CacheControlMiddleware(MiddlewareMixin):
 
     @staticmethod
     def process_response(request, response):
+        if getattr(response, 'allow_private_cache', False):
+            return response
         add_never_cache_headers(response)
         response['Pragma'] = 'no-cache'
         return response

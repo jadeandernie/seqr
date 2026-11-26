@@ -54,6 +54,13 @@ PHO_DATA = [
     'synonym: "Multicystic dysplastic kidney" EXACT []\n',
     'synonym: "Multicystic kidneys" EXACT []\n',
     'synonym: "Multicystic renal dysplasia" EXACT []\n',
+    'synonym: "MCDK" EXACT abbreviation []\n',
+    'synonym: "Multicystic kidney disease" EXACT obsolete_synonym []\n',
+    'synonym: "Kidney \\"multicystic\\" dysplasia" EXACT layperson [HPO:probinson, PMID:31677808]\n',
+    'synonym: "Renal cysts" BROAD []\n',
+    'synonym: "Unilateral multicystic kidney" NARROW []\n',
+    'synonym: "Cystic kidney" RELATED layperson []\n',
+    'synonym: malformed line\n',
     'xref: MSH:D021782\n',
     'xref: SNOMEDCT_US:204962002\n',
     'xref: SNOMEDCT_US:82525005\n',
@@ -77,6 +84,13 @@ PHO_DATA = [
     'synonym: "Head and neck abnormality" EXACT layperson []\n',
     'xref: UMLS:C4021817\n',
     'is_a: HP:0000118 ! Phenotypic abnormality\n',
+    '\n',
+    '[Term]\n', # obsolete terms have no is_a
+    'id: HP:0000057\n',
+    'name: obsolete Clitoromegaly\n',
+    'synonym: "Large clitoris" EXACT []\n',
+    'is_obsolete: true\n',
+    'replaced_by: HP:0008665\n',
 ]
 
 EXPECTED_DB_DATA = {
@@ -86,7 +100,8 @@ EXPECTED_DB_DATA = {
         'name': 'Abnormality of head or neck',
         'parent_id': 'HP:0000118',
         'hpo_id': 'HP:0000152',
-        'category_id': 'HP:0000152'
+        'category_id': 'HP:0000152',
+        'synonyms': ['Abnormality of head or neck', 'Head and neck abnormality'],
     },
     'HP:0000005': {
         'is_category': False,
@@ -95,6 +110,7 @@ EXPECTED_DB_DATA = {
         'parent_id': None,
         'hpo_id': 'HP:0000005',
         'category_id': None,
+        'synonyms': ['Inheritance'],
     },
     'HP:0000001': {
         'is_category': False,
@@ -103,6 +119,7 @@ EXPECTED_DB_DATA = {
         'name': 'All',
         'hpo_id': 'HP:0000001',
         'category_id': None,
+        'synonyms': [],
     },
     'HP:0000002': {
         'is_category': False,
@@ -110,7 +127,8 @@ EXPECTED_DB_DATA = {
         'name': 'Abnormality of body height',
         'parent_id': 'HP:0000003',
         'hpo_id': 'HP:0000002',
-        'category_id': None
+        'category_id': None,
+        'synonyms': ['Abnormality of body height'],
     },
     'HP:0000003': {
         'is_category': False,
@@ -118,8 +136,21 @@ EXPECTED_DB_DATA = {
         'name': 'Multicystic kidney dysplasia',
         'parent_id': 'HP:0000001',
         'hpo_id': 'HP:0000003',
-        'category_id': None
-    }
+        'category_id': None,
+        'synonyms': [
+            'Multicystic dysplastic kidney', 'Multicystic kidneys', 'Multicystic renal dysplasia',
+            'Kidney "multicystic" dysplasia',
+        ],
+    },
+    'HP:0000057': {
+        'is_category': False,
+        'definition': None,
+        'name': 'obsolete Clitoromegaly',
+        'parent_id': None,
+        'hpo_id': 'HP:0000057',
+        'category_id': None,
+        'synonyms': ['Large clitoris'],
+    },
 }
 
 class UpdateHpoTest(ReferenceDataCommandTestCase):
@@ -138,7 +169,7 @@ class UpdateHpoTest(ReferenceDataCommandTestCase):
         }
         self._test_update_command(
             'HumanPhenotypeOntology','2025-03-12',
-            existing_records=12, created_records=5, skipped_records=0, head_response=head_response,
+            existing_records=12, created_records=6, skipped_records=0, head_response=head_response,
         )
 
         records = {record.hpo_id: {
@@ -147,7 +178,8 @@ class UpdateHpoTest(ReferenceDataCommandTestCase):
             'name': record.name,
             'parent_id': record.parent_id,
             'hpo_id': record.hpo_id,
-            'category_id': record.category_id
+            'category_id': record.category_id,
+            'synonyms': record.synonyms,
         } for record in HumanPhenotypeOntology.objects.all()}
         self.assertDictEqual(records, EXPECTED_DB_DATA)
 

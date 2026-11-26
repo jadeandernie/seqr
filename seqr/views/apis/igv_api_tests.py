@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta, timezone
 import json
 import mock
 import responses
 import subprocess # nosec
 
+from botocore.exceptions import ClientError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls.base import reverse
 from seqr.models import IgvSample
@@ -16,6 +18,11 @@ PROJECT_GUID = 'R0001_1kg'
 LOCAL_SAMPLE_GUID = 'S000145_na19675'
 GS_SAMPLE_GUID = 'S000146_na20870'
 OTHER_GS_SAMPLE_GUID = 'S000147_na20870'
+S3_ROLE_ARN = 'arn:aws:iam::123456789012:role/seqr-reads'
+S3_NOT_FOUND_ERROR = ClientError({'Error': {'Code': '404', 'Message': 'Not Found'}}, 'HeadObject')
+S3_ACCESS_ERROR = ClientError({'Error': {
+    'Code': 'AccessDenied', 'Message': f'User: {S3_ROLE_ARN} is not authorized to perform: s3:GetObject',
+}}, 'HeadObject')
 
 
 @mock.patch('seqr.views.utils.permissions_utils.PM_USER_GROUP', 'project-managers')
@@ -147,6 +154,93 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.status_code, 403)
         mock_subprocess.assert_not_called()
 
+    @mock.patch('seqr.utils.file_utils.S3_ARN_ASSUME_ROLE', None)
+    @mock.patch.dict('seqr.utils.file_utils.S3_CLIENT_CACHE', clear=True)
+    @mock.patch('seqr.utils.file_utils.logger')
+    @mock.patch('seqr.utils.file_utils.boto3')
+    def test_proxy_s3_to_igv(self, mock_boto3, mock_file_logger, mock_subprocess):
+        mock_s3 = mock.MagicMock()
+        mock_sts = mock.MagicMock()
+        mock_boto3.client.side_effect = lambda service, **kwargs: {'s3': mock_s3, 'sts': mock_sts}[service]
+        mock_body = mock_s3.get_object.return_value.__getitem__.return_value
+        mock_body.iter_chunks.return_value = STREAMING_READS_CONTENT
+        mock_s3.head_object.side_effect = [S3_NOT_FOUND_ERROR, None]
+
+        sample = IgvSample.objects.get(guid=LOCAL_SAMPLE_GUID)
+        sample.file_path = 's3://readviz-bucket/reads/NA19675.cram'
+        sample.save()
+
+        url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, 's3://readviz-bucket/reads/NA19675.cram.bam.bai'])
+        self.check_require_login(url)
+        response = self.client.get(url, HTTP_RANGE='bytes=100-250')
+        self.assertEqual(response.status_code, 206)
+        self.assertListEqual([val for val in response.streaming_content], STREAMING_READS_CONTENT)
+        self.assertEqual(response['Content-Length'], '151')
+        self.assertEqual(response['Content-Range'], 'bytes 100-250')
+        mock_s3.head_object.assert_has_calls([
+            mock.call(Bucket='readviz-bucket', Key='reads/NA19675.cram.bam.bai'),
+            mock.call(Bucket='readviz-bucket', Key='reads/NA19675.cram.bai'),
+        ])
+        mock_s3.get_object.assert_called_once_with(
+            Bucket='readviz-bucket', Key='reads/NA19675.cram.bai', Range='bytes=100-250')
+        mock_s3.get_object.return_value.__getitem__.assert_called_with('Body')
+        mock_body.iter_chunks.assert_called_with(65536)
+        mock_body.close.assert_called_once_with()
+        mock_boto3.client.assert_called_once_with('s3')
+        mock_file_logger.warning.assert_called_once_with(
+            'An error occurred (404) when calling the HeadObject operation: Not Found', self.no_access_user)
+
+        # test no byte range
+        mock_s3.reset_mock()
+        mock_s3.head_object.side_effect = None
+        url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, 's3://readviz-bucket/reads/NA19675.cram'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual([val for val in response.streaming_content], STREAMING_READS_CONTENT)
+        mock_s3.head_object.assert_called_once_with(Bucket='readviz-bucket', Key='reads/NA19675.cram')
+        mock_s3.get_object.assert_called_once_with(Bucket='readviz-bucket', Key='reads/NA19675.cram')
+        mock_boto3.client.assert_called_once_with('s3')
+        mock_sts.assume_role.assert_not_called()
+        mock_subprocess.assert_not_called()
+
+        # test assumed role
+        mock_s3.reset_mock()
+        mock_boto3.client.reset_mock()
+        mock_sts.assume_role.return_value = {'Credentials': {
+            'AccessKeyId': 'key_id', 'SecretAccessKey': 'secret_key', 'SessionToken': 'token',
+            'Expiration': datetime.now(timezone.utc) + timedelta(hours=1),
+        }}
+        with mock.patch('seqr.utils.file_utils.S3_ARN_ASSUME_ROLE', S3_ROLE_ARN), \
+                mock.patch.dict('seqr.utils.file_utils.S3_CLIENT_CACHE', clear=True):
+            for _ in range(2):
+                response = self.client.get(url, HTTP_RANGE='bytes=0-99')
+                self.assertEqual(response.status_code, 206)
+                self.assertListEqual([val for val in response.streaming_content], STREAMING_READS_CONTENT)
+        mock_sts.assume_role.assert_called_once_with(RoleArn=S3_ROLE_ARN, RoleSessionName='seqr')
+        mock_boto3.client.assert_has_calls([
+            mock.call('sts'),
+            mock.call('s3', aws_access_key_id='key_id', aws_secret_access_key='secret_key', aws_session_token='token'),
+        ])
+        self.assertEqual(mock_boto3.client.call_count, 2)
+        mock_s3.get_object.assert_called_with(Bucket='readviz-bucket', Key='reads/NA19675.cram', Range='bytes=0-99')
+        self.assertEqual(mock_s3.get_object.call_count, 2)
+
+        mock_s3.reset_mock()
+        url = reverse(fetch_igv_track, args=[LOCAL_SAMPLE_GUID, 's3://some/other/path.bam'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+        sample = IgvSample.objects.get(guid=GS_SAMPLE_GUID)
+        sample.individual_id = 19
+        sample.file_path = 's3://readviz-bucket/reads/NA21987.cram'
+        sample.save()
+        self.login_manager()
+        url = reverse(fetch_igv_track, args=[GS_SAMPLE_GUID, 's3://readviz-bucket/reads/NA21987.cram'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 403)
+        mock_s3.head_object.assert_not_called()
+        mock_s3.get_object.assert_not_called()
+
     def test_receive_alignment_table_handler(self, mock_subprocess):
         mock_subprocess.return_value.wait.return_value = 0
         url = reverse(receive_igv_table_handler, args=[PROJECT_GUID])
@@ -252,8 +346,20 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         ])
 
 
+    @mock.patch('seqr.utils.file_utils.S3_ARN_ASSUME_ROLE', S3_ROLE_ARN)
+    @mock.patch.dict('seqr.utils.file_utils.S3_CLIENT_CACHE', clear=True)
+    @mock.patch('seqr.utils.file_utils.logger')
+    @mock.patch('seqr.utils.file_utils.boto3')
     @mock.patch('seqr.utils.file_utils.os.path.isfile')
-    def test_add_alignment_sample(self, mock_local_file_exists, mock_subprocess):
+    def test_add_alignment_sample(self, mock_local_file_exists, mock_boto3, mock_file_logger, mock_subprocess):
+        mock_s3 = mock.MagicMock()
+        mock_sts = mock.MagicMock()
+        mock_boto3.client.side_effect = lambda service, **kwargs: {'s3': mock_s3, 'sts': mock_sts}[service]
+        mock_sts.assume_role.return_value = {'Credentials': {
+            'AccessKeyId': 'key_id', 'SecretAccessKey': 'secret_key', 'SessionToken': 'token',
+            'Expiration': datetime.now(timezone.utc) + timedelta(hours=1),
+        }}
+
         url = reverse(update_individual_igv_sample, args=['I000001_na19675'])
         self.check_pm_login(url)
 
@@ -284,6 +390,25 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.reason_phrase, 'Error accessing "gs://readviz/NA19675_new.cram"')
 
+        mock_s3.head_object.side_effect = S3_ACCESS_ERROR
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'filePath': 's3://readviz-bucket/NA19675_new.cram', 'indexFilePath': None,
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.reason_phrase, 'Error accessing "s3://readviz-bucket/NA19675_new.cram"')
+        self.assertDictEqual(response.json(), {'error': 'Error accessing "s3://readviz-bucket/NA19675_new.cram"'})
+        mock_s3.head_object.assert_called_with(Bucket='readviz-bucket', Key='NA19675_new.cram')
+        mock_file_logger.warning.assert_called_with(
+            f'An error occurred (AccessDenied) when calling the HeadObject operation: User: {S3_ROLE_ARN} is not authorized to perform: s3:GetObject',
+            self.pm_user)
+
+        mock_s3.head_object.side_effect = [None, S3_NOT_FOUND_ERROR]
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'filePath': 's3://readviz-bucket/NA19675_new.cram', 'indexFilePath': 's3://readviz-bucket/NA19675_new.crai',
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.reason_phrase, 'Error accessing "s3://readviz-bucket/NA19675_new.crai"')
+
         mock_local_file_exists.return_value = True
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             'filePath': '/readviz/NA19675.new.cram', 'indexFilePath': 'gs://readviz/NA19675_new.crai',
@@ -304,6 +429,23 @@ class IgvAPITest(AnvilAuthenticationTestCase):
         mock_local_file_exists.assert_has_calls([
             mock.call('/readviz/NA19675.new.cram'), mock.call('/readviz-index/NA19675.cram.crai'),
         ])
+
+        mock_s3.reset_mock()
+        mock_s3.head_object.side_effect = None
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'filePath': 's3://readviz-bucket/NA19675_new.cram', 'indexFilePath': 's3://readviz-index/NA19675_new.crai',
+        }))
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json(), {'igvSamplesByGuid': {'S000145_na19675': {
+            'projectGuid': PROJECT_GUID, 'individualGuid': 'I000001_na19675', 'sampleGuid': 'S000145_na19675',
+            'familyGuid': 'F000001_1', 'filePath': 's3://readviz-bucket/NA19675_new.cram',
+            'indexFilePath': 's3://readviz-index/NA19675_new.crai', 'sampleId': None, 'sampleType': 'alignment'}}})
+        mock_s3.head_object.assert_has_calls([
+            mock.call(Bucket='readviz-bucket', Key='NA19675_new.cram'),
+            mock.call(Bucket='readviz-index', Key='NA19675_new.crai'),
+        ])
+        mock_sts.assume_role.assert_called_once_with(RoleArn=S3_ROLE_ARN, RoleSessionName='seqr')
+        self.assertEqual(mock_boto3.client.call_count, 2)
 
         response = self.client.post(url, content_type='application/json', data=json.dumps({
             'filePath': 'gs://readviz/batch_10.dcr.bed.gz', 'sampleId': 'NA19675', 'indexFilePath': None,

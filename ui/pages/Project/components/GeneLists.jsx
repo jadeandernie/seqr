@@ -28,7 +28,7 @@ const ItemContainer = styled.div`
   }
 `
 
-const LocusListItem = React.memo(({ projectGuid, canEdit, locusList, onSubmit }) => (
+const LocusListItem = React.memo(({ projectGuid, canEdit, locusList, onSubmit }) => (locusList ? (
   <ItemContainer key={locusList.locusListGuid}>
     <Modal
       title={`${locusList.name} Gene List`}
@@ -64,11 +64,11 @@ const LocusListItem = React.memo(({ projectGuid, canEdit, locusList, onSubmit })
       />
     )}
   </ItemContainer>
-))
+) : null))
 
 LocusListItem.propTypes = {
   projectGuid: PropTypes.string.isRequired,
-  locusList: PropTypes.object.isRequired,
+  locusList: PropTypes.object,
   canEdit: PropTypes.bool,
   onSubmit: PropTypes.func.isRequired,
 }

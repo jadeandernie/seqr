@@ -54,6 +54,20 @@ test('getLocusListIntervalsByChromProject', () => {
   })
 })
 
+test('getLocusListIntervalsByChromProject skips gene lists that are no longer loaded', () => {
+  const state = {
+    ...STATE,
+    projectsByGuid: {
+      ...STATE.projectsByGuid,
+      R0237_1000_genomes_demo: {
+        ...STATE.projectsByGuid.R0237_1000_genomes_demo,
+        locusListGuids: ['LL00999_deleted_list', ...STATE.projectsByGuid.R0237_1000_genomes_demo.locusListGuids],
+      },
+    },
+  }
+  expect(getLocusListIntervalsByChromProject(state, {})).toEqual(getLocusListIntervalsByChromProject(STATE, {}))
+})
+
 test('getSpliceOutliersByChromFamily', () => {
   expect(getSpliceOutliersByChromFamily(STATE, {})).toEqual({
     ['10']: {

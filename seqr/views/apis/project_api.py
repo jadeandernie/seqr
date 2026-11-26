@@ -12,6 +12,7 @@ from matchmaker.models import MatchmakerSubmission
 from seqr.models import Project, Family, Individual, Dataset, RnaSample, FamilyNote, PhenotypePrioritization, CAN_EDIT
 from seqr.utils.file_utils import file_iter
 from seqr.utils.logging_utils import SeqrLogger
+from seqr.views.utils.completeness_utils import get_individual_completeness, get_family_completeness
 from seqr.views.utils.airtable_utils import AirtableSession, ANVIL_REQUEST_TRACKING_TABLE
 from seqr.views.utils.dataset_utils import post_process_rna_data, load_rna_seq, RNA_DATA_TYPE_CONFIGS
 from seqr.views.utils.file_utils import get_temp_file_path
@@ -135,12 +136,21 @@ def project_page_data(request, project_guid):
     })
 
 
+COMPLETENESS_INDIVIDUAL_FIELDS = {
+    'maternalGuid': 'mother_id',
+    'paternalGuid': 'father_id',
+    **{_to_camel_case(field): field for field in [
+        'affected', 'features', 'absent_features', 'onset_age', 'sex', 'birth_year', 'consanguinity',
+        'maternal_ethnicity', 'paternal_ethnicity', 'expected_inheritance', 'disorders',
+    ]},
+}
+
 FAMILY_INDIVIDUAL_FIELDS = {
     'caseReviewStatuses': {'agg': ArrayAgg('case_review_status', distinct=True, filter=~Q(case_review_status=''))},
     'caseReviewStatusLastModified': {'agg': Max('case_review_status_last_modified_date'), 'default': None},
     'parental_ids': {
         'agg': ArrayAgg(JSONObject(**{k: k for k in ['id', 'guid', 'father_id', 'mother_id']})),
-        'format': lambda parental_ids, id_guid_map: [
+        'format': lambda parental_ids, id_guid_map, *args: [
             {'paternalGuid': id_guid_map.get(p['father_id']), 'maternalGuid': id_guid_map.get(p['mother_id']), 'individualGuid': p['guid']}
             for p in parental_ids if p['father_id'] or p['mother_id']
         ],
@@ -153,6 +163,15 @@ FAMILY_INDIVIDUAL_FIELDS = {
         )),
         'format': lambda metadata_count, *args: bool(metadata_count),
         'response_key': 'hasRequiredMetadata',
+    },
+    'completeness_fields': {
+        'agg': ArrayAgg(
+            JSONObject(**COMPLETENESS_INDIVIDUAL_FIELDS), filter=Q(affected=Individual.AFFECTED_STATUS_AFFECTED),
+        ),
+        'format': lambda individuals, id_guid_map, family: get_family_completeness([
+            get_individual_completeness(individual, family) for individual in individuals
+        ]),
+        'response_key': 'completeness',
     },
 }
 
@@ -200,7 +219,7 @@ def project_families(request, project_guid):
         id_guid_map = {i['id']: i['guid'] for i in individual_agg.get('parental_ids', [])}
         family.update({
             'individualGuids': sorted(id_guid_map.values()),
-            **{config.get('response_key', key): _get_formatted_value(individual_agg.get(key), config, id_guid_map)
+            **{config.get('response_key', key): _get_formatted_value(individual_agg.get(key), config, id_guid_map, family)
                for key, config in FAMILY_INDIVIDUAL_FIELDS.items()},
             **{key: family_id in data_families for key, data_families in has_data_families.items()},
         })

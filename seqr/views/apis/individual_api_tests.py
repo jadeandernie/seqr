@@ -66,6 +66,19 @@ INDIVIDUAL_UPDATE_DATA = {
     'absentNonstandardFeatures': [{'id': 'Some new feature', 'notes': 'No term for this', 'details': 'extra detail'}]
 }
 
+NO_DATA_MISSING = [
+    {'field': 'features', 'label': 'Observed features (HPO terms)', 'weight': 30, 'level': 'individual'},
+    {'field': 'absentFeatures', 'label': 'Features confirmed absent (HPO terms)', 'weight': 10, 'level': 'individual'},
+    {'field': 'onsetAge', 'label': 'Age of onset', 'weight': 10, 'level': 'individual'},
+    {'field': 'birthYear', 'label': 'Year of birth', 'weight': 6, 'level': 'individual'},
+    {'field': 'consanguinity', 'label': 'Consanguinity (yes or no)', 'weight': 6, 'level': 'individual'},
+    {'field': 'ancestry', 'label': 'Maternal or paternal ancestry', 'weight': 5, 'level': 'individual'},
+    {'field': 'expectedInheritance', 'label': 'Expected mode of inheritance', 'weight': 5, 'level': 'individual'},
+    {'field': 'disorders', 'label': 'Known disorders (OMIM)', 'weight': 4, 'level': 'individual'},
+    {'field': 'codedPhenotype', 'label': 'Family phenotype description', 'weight': 4, 'level': 'family'},
+    {'field': 'mondoId', 'label': 'Family MONDO disease ID', 'weight': 4, 'level': 'family'},
+]
+
 PM_REQUIRED_INDIVIDUAL_GUID = 'I000017_na20889'
 PM_REQUIRED_INDIVIDUAL_UPDATE_DATA = {
     'individualGuid': PM_REQUIRED_INDIVIDUAL_GUID, 'individualId': 'NA20889', 'familyId': '12', 'displayName': 'NA20889_a'
@@ -113,6 +126,7 @@ class IndividualAPITest(object):
                 'notes': 'A note',
                 'birthYear': None,
                 'affected': 'A',
+                'completeness': {'score': 9, 'missing': NO_DATA_MISSING},
             }
         }
         self.check_partial_access_login(
@@ -138,6 +152,9 @@ class IndividualAPITest(object):
         self.assertSetEqual(set(response_json[INDIVIDUAL_UPDATE_GUID].keys()), INDIVIDUAL_CORE_FIELDS)
         self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['birthYear'], 2000)
         self.assertEqual(response_json[INDIVIDUAL_UPDATE_GUID]['affected'], 'A')
+        self.assertDictEqual(response_json[INDIVIDUAL_UPDATE_GUID]['completeness'], {
+            'score': 15, 'missing': [item for item in NO_DATA_MISSING if item['field'] != 'birthYear'],
+        })
 
         update_json = {'analyteType': 'D', 'tissueAffectedStatus': False}
         response = self.client.post(edit_individuals_url, content_type='application/json', data=json.dumps(update_json))
@@ -178,6 +195,9 @@ class IndividualAPITest(object):
         ])
         self.assertIsNone(response_json[INDIVIDUAL_UPDATE_GUID]['absentFeatures'])
         self.assertIsNone(response_json[INDIVIDUAL_UPDATE_GUID]['nonstandardFeatures'])
+        self.assertDictEqual(response_json[INDIVIDUAL_UPDATE_GUID]['completeness'], {
+            'score': 41, 'missing': [item for item in NO_DATA_MISSING if item['field'] != 'features'],
+        })
 
         self.assertListEqual(Individual.objects.get(guid=INDIVIDUAL_UPDATE_GUID).features, [
             {'id': 'HP:0002011', 'qualifiers': [{'type': 'onset', 'label': 'congenital'}]},

@@ -271,3 +271,48 @@ test('filters visible families by required metadata presence/absence', () => {
   const wrapperRequiredFields = renderHeaderRow({}, requiredFieldsState)
   expect(headerText(wrapperRequiredFields)).toEqual('Showing 1 out of 2 families')
 })
+
+test('filters visible families by clinical data completeness', () => {
+  const stateWithFilter = filter => ({
+    ...STATE_WITH_2_FAMILIES,
+    familiesByGuid: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid,
+      F011652_1: {
+        ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_1,
+        individualGuids: [],
+        completeness: { score: 100, numIndividuals: 1, numNoFeatures: 0 },
+      },
+    },
+    individualsByGuid: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid,
+      I021476_na19678_2: {
+        ...STATE_WITH_2_FAMILIES.individualsByGuid.I021476_na19678_2,
+        completeness: { score: 20, missing: [{ field: 'features', label: 'Observed features (HPO terms)' }] },
+      },
+    },
+    familyTableFilterState: { R0237_1000_genomes_demo: { firstSample: [filter] } },
+  })
+  const filteredHeader = filter => headerText(renderHeaderRow({}, stateWithFilter(filter)))
+
+  // F011652_1 is scored by the server roll-up, F011652_2 by its one loaded affected individual
+  expect(filteredHeader('SHOW_CLINICAL_DATA_COMPLETE')).toEqual('Showing 1 out of 2 families')
+  expect(filteredHeader('SHOW_CLINICAL_DATA_INCOMPLETE')).toEqual('Showing 1 out of 2 families')
+  expect(filteredHeader('SHOW_CLINICAL_DATA_UNDER_HALF')).toEqual('Showing 1 out of 2 families')
+  expect(filteredHeader('SHOW_CLINICAL_DATA_NO_FEATURES')).toEqual('Showing 1 out of 2 families')
+  expect(headerText(renderHeaderRow({}, {
+    ...stateWithFilter('SHOW_CLINICAL_DATA_COMPLETE'),
+    familyTableFilterState: {
+      R0237_1000_genomes_demo: { firstSample: ['SHOW_CLINICAL_DATA_COMPLETE', 'SHOW_CLINICAL_DATA_UNDER_HALF'] },
+    },
+  }))).toEqual('Showing all 2 families')
+
+  const unscoredState = stateWithFilter('SHOW_CLINICAL_DATA_INCOMPLETE')
+  unscoredState.individualsByGuid = STATE_WITH_2_FAMILIES.individualsByGuid
+  expect(headerText(renderHeaderRow({}, unscoredState))).toEqual('Showing 0 out of 2 families')
+
+  const wrapper = renderHeaderRow({ fields: [{ id: 'firstSample' }] }, stateWithFilter('SHOW_CLINICAL_DATA_COMPLETE'))
+  const options = wrapper.find('BaseFamilyTableFilter').first().prop('options')
+  expect(options.filter(({ category }) => category === 'Clinical Data Completeness').map(({ name }) => name)).toEqual(
+    ['Fully Complete', 'Incomplete', 'Less Than 50% Complete', 'Affected Individuals Without HPO Terms'],
+  )
+})

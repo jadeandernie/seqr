@@ -9,8 +9,9 @@ import json
 from panelapp.models import PaLocusList
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import GeneNote, VariantNote, VariantTag, VariantFunctionalData, CAN_VIEW, CAN_EDIT, \
-    get_audit_field_names, RnaSeqOutlier, RnaSeqSpliceOutlier, VariantSearchResults
+    get_audit_field_names, RnaSeqOutlier, RnaSeqSpliceOutlier, VariantSearchResults, Individual
 from seqr.utils.xpos_utils import get_chrom_pos
+from seqr.views.utils.completeness_utils import get_individual_completeness
 from seqr.views.utils.json_utils import _to_camel_case
 from seqr.views.utils.permissions_utils import has_project_edit_permission, \
     project_has_anvil, get_workspace_collaborator_perms, user_is_analyst, user_is_data_manager, user_is_pm, \
@@ -222,6 +223,8 @@ def get_json_for_family_note(note):
     return _get_json_for_model(note, **FAMILY_NOTE_KWARGS)
 
 
+COMPLETENESS_FEATURE_FIELDS = ['features', 'absent_features']
+COMPLETENESS_FAMILY_VALUES = {'familyCodedPhenotype': 'coded_phenotype', 'familyMondoId': 'mondo_id'}
 INDIVIDUAL_DISPLAY_NAME_EXPR = Coalesce(NullIf('display_name', Value('')), 'individual_id', output_field=CharField())
 
 
@@ -233,9 +236,9 @@ def _get_json_for_individuals(individuals, user=None, project_guid=None,
         {'fields': ('family', 'project', 'guid'), 'key': 'projectGuid', 'value': project_guid},
     ]
 
+    additional_model_fields += COMPLETENESS_FEATURE_FIELDS
     if add_hpo_details:
-        additional_model_fields += [
-            'features', 'absent_features', 'nonstandard_features', 'absent_nonstandard_features']
+        additional_model_fields += ['nonstandard_features', 'absent_nonstandard_features']
 
     additional_values = {
         'maternalGuid': F('mother__guid'),
@@ -243,17 +246,34 @@ def _get_json_for_individuals(individuals, user=None, project_guid=None,
         'maternalId': F('mother__individual_id'),
         'paternalId': F('father__individual_id'),
         'displayName': INDIVIDUAL_DISPLAY_NAME_EXPR,
+        **{key: F(f'family__{field}') for key, field in COMPLETENESS_FAMILY_VALUES.items()},
     }
 
-    parsed_individuals = get_json_for_queryset(
+    parsed_individuals = list(get_json_for_queryset(
         individuals, user=user, is_analyst=is_analyst, additional_values=additional_values,
         additional_model_fields=additional_model_fields, nested_fields=nested_fields,
-    )
+    ))
+
+    for individual in parsed_individuals:
+        family = {_to_camel_case(field): individual.pop(key) for key, field in COMPLETENESS_FAMILY_VALUES.items()}
+        individual['completeness'] = get_completeness_json(individual, family)
+        if not add_hpo_details:
+            for field in COMPLETENESS_FEATURE_FIELDS:
+                individual.pop(_to_camel_case(field))
 
     if add_hpo_details:
         add_individual_hpo_details(parsed_individuals)
 
     return parsed_individuals
+
+
+def get_completeness_json(individual, family):
+    completeness = get_individual_completeness(individual, family)
+    return completeness and {'score': completeness['score'], 'missing': completeness['missing']}
+
+
+def get_json_for_individual_completeness(individual):
+    return _get_json_for_individuals(Individual.objects.filter(id=individual.id))[0]['completeness']
 
 
 def add_individual_hpo_details(parsed_individuals):

@@ -59,7 +59,49 @@ test('divides content correctly by section for the current project', () => {
       title: 'Analysis Status',
       content: 'No Data',
     },
+    {
+      title: 'Clinical Data Completeness',
+      content: 'No affected individuals',
+    },
   ]))
+})
+
+test('summarizes clinical data completeness for the project and for an analysis group', () => {
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    familiesByGuid: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid,
+      F011652_2: {
+        ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_2,
+        individualGuids: [],
+        completeness: { score: 20, numIndividuals: 2, numNoFeatures: 2 },
+      },
+    },
+    individualsByGuid: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid,
+      I021475_na19675_1: {
+        ...STATE_WITH_2_FAMILIES.individualsByGuid.I021475_na19675_1, completeness: { score: 80, missing: [] },
+      },
+    },
+  }
+  const completenessSection = wrapper => wrapper.find('ProjectOverview__DetailContent').filterWhere(
+    content => content.parents().find('b').first().text() === 'Clinical Data Completeness',
+  ).text()
+
+  expect(completenessSection(renderProjectOverview(state))).toEqual(
+    '40% across 3 affected individuals2 individuals have no HPO terms',
+  )
+
+  const analysisGroupWrapper = mount(
+    <Provider store={configureStore([thunk])(state)}>
+      <MemoryRouter>
+        <ProjectOverview familiesLoading={false} overviewLoading={false} analysisGroupGuid="AG0000183_test_group" />
+      </MemoryRouter>
+    </Provider>,
+  )
+  expect(completenessSection(analysisGroupWrapper)).toEqual(
+    '80% across 1 affected individual0 individuals have no HPO terms',
+  )
 })
 
 test('renders matchmaker submission details when the submissions modal is open', () => {

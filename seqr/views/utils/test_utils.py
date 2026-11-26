@@ -707,7 +707,7 @@ INDIVIDUAL_CORE_FIELDS = {
     'popPlatformFilters', 'filterFlags', 'population', 'birthYear', 'deathYear',
     'onsetAge', 'maternalEthnicity', 'paternalEthnicity', 'consanguinity', 'affectedRelatives', 'expectedInheritance',
     'disorders', 'candidateGenes', 'rejectedGenes', 'arFertilityMeds', 'arIui', 'arIvf', 'arIcsi', 'arSurrogacy',
-    'arDonoregg', 'arDonorsperm', 'svFlags',
+    'arDonoregg', 'arDonorsperm', 'svFlags', 'completeness',
 }
 
 INDIVIDUAL_FIELDS = {

@@ -287,6 +287,54 @@ class FamilyAPITest(object):
         self.assertEqual(response_json['familiesByGuid']['F000002_2']['description'], 'Test description 2')
         self.assertSetEqual(set(response_json['familiesByGuid'].keys()), set([FAMILY_GUID, 'F000002_2']))
 
+        # Recording or clearing a scored family field returns the updated completeness of the family's individuals
+        response = self.client.post(url, content_type='application/json', data=json.dumps({'families': [
+            {'familyGuid': FAMILY_GUID, 'mondoId': 'MONDO:0044970'},
+            {'familyGuid': FAMILY_GUID2, 'codedPhenotype': ''},
+        ]}))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {'familiesByGuid', 'individualsByGuid'})
+        self.assertEqual(response_json['familiesByGuid'][FAMILY_GUID]['mondoId'], 'MONDO:0044970')
+        self.assertSetEqual(set(response_json['individualsByGuid'].keys()), {
+            'I000001_na19675', 'I000002_na19678', 'I000003_na19679', 'I000004_hg00731', 'I000005_hg00732',
+            'I000006_hg00733',
+        })
+        self.assertSetEqual(set(response_json['individualsByGuid'][INDIVIDUAL_GUID].keys()), INDIVIDUAL_FIELDS)
+        self.assertEqual(response_json['individualsByGuid'][INDIVIDUAL_GUID]['projectGuid'], PROJECT_GUID)
+        self.assertDictEqual(
+            response_json['individualsByGuid'][INDIVIDUAL_GUID]['completeness'], {'score': 100, 'missing': []})
+        self.assertIsNone(response_json['individualsByGuid']['I000002_na19678']['completeness'])
+        completeness = response_json['individualsByGuid']['I000004_hg00731']['completeness']
+        self.assertEqual(completeness['score'], 60)
+        self.assertIn('codedPhenotype', [item['field'] for item in completeness['missing']])
+
+        # Individuals are not returned when the scored family fields stay recorded or stay empty,
+        # and only for the families where they change
+        response = self.client.post(url, content_type='application/json', data=json.dumps({'families': [
+            {'familyGuid': FAMILY_GUID, 'mondoId': 'MONDO:0044976', 'codedPhenotype': 'dystrophy'},
+            {'familyGuid': FAMILY_GUID2, 'codedPhenotype': None, 'mondoId': 'MONDO:0044976'},
+            {'familyGuid': 'F000003_3', 'codedPhenotype': '', 'mondoId': '', 'description': 'No phenotype'},
+        ]}))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertListEqual(list(response_json.keys()), ['familiesByGuid'])
+        self.assertEqual(response_json['familiesByGuid'][FAMILY_GUID]['mondoId'], 'MONDO:0044976')
+        self.assertEqual(response_json['familiesByGuid']['F000003_3']['description'], 'No phenotype')
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({'families': [
+            {'familyGuid': FAMILY_GUID, 'mondoId': 'MONDO:0044970', 'codedPhenotype': 'dystrophy'},
+            {'familyGuid': 'F000003_3', 'codedPhenotype': 'myopathy', 'mondoId': ''},
+        ]}))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {FAMILY_GUID, 'F000003_3'})
+        self.assertSetEqual(set(response_json['individualsByGuid'].keys()), {'I000007_na20870'})
+        completeness = response_json['individualsByGuid']['I000007_na20870']['completeness']
+        self.assertEqual(completeness['score'], 13)
+        self.assertNotIn('codedPhenotype', [item['field'] for item in completeness['missing']])
+        self.assertIn('mondoId', [item['field'] for item in completeness['missing']])
+
         # Test PM permission
         url = reverse(edit_families_handler, args=[PM_REQUIRED_PROJECT_GUID])
         response = self.client.post(url, content_type='application/json', data=json.dumps({}))
@@ -564,7 +612,22 @@ class FamilyAPITest(object):
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
 
-        self.assertListEqual(list(response_json.keys()), ['familiesByGuid'])
+        # The upload records a MONDO ID for family 1 and clears the phenotype and MONDO ID of family 2,
+        # so the updated completeness of both families' individuals is returned
+        self.assertSetEqual(set(response_json.keys()), {'familiesByGuid', 'individualsByGuid'})
+        self.assertSetEqual(set(response_json['individualsByGuid'].keys()), {
+            'I000001_na19675', 'I000002_na19678', 'I000003_na19679', 'I000004_hg00731', 'I000005_hg00732',
+            'I000006_hg00733',
+        })
+        self.assertDictEqual(
+            response_json['individualsByGuid']['I000001_na19675']['completeness'], {'score': 100, 'missing': []})
+        self.assertIsNone(response_json['individualsByGuid']['I000002_na19678']['completeness'])
+        completeness = response_json['individualsByGuid']['I000004_hg00731']['completeness']
+        self.assertEqual(completeness['score'], 56)
+        self.assertListEqual([item['field'] for item in completeness['missing']], [
+            'onsetAge', 'birthYear', 'consanguinity', 'ancestry', 'expectedInheritance', 'disorders',
+            'codedPhenotype', 'mondoId',
+        ])
         self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {FAMILY_GUID2, FAMILY_GUID})
         family_1 = response_json['familiesByGuid'][FAMILY_GUID]
         self.assertEqual(family_1['description'], 'family one description')

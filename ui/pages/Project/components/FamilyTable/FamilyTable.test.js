@@ -320,3 +320,65 @@ test('formats family export field values, including notes, firstSample, analysis
   expect(analysisNotes1).toEqual('')
   expect(analysisNotes2).toEqual('A note;Another note')
 })
+
+test('sorts visible families by clinical data completeness with unscored families last, and shows the family roll-up', () => {
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    familiesByGuid: {
+      ...STATE_WITH_2_FAMILIES.familiesByGuid,
+      F011652_1: {
+        ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_1,
+        completeness: { score: 5, numIndividuals: 1, numNoFeatures: 1 },
+      },
+      F011652_2: {
+        ...STATE_WITH_2_FAMILIES.familiesByGuid.F011652_2,
+        individualGuids: [],
+        completeness: { score: 40, numIndividuals: 2, numNoFeatures: 1 },
+      },
+    },
+    individualsByGuid: {
+      ...STATE_WITH_2_FAMILIES.individualsByGuid,
+      I021476_na19678_1: {
+        ...STATE_WITH_2_FAMILIES.individualsByGuid.I021476_na19678_1, completeness: { score: 100, missing: [] },
+      },
+      I021474_na19679_1: {
+        ...STATE_WITH_2_FAMILIES.individualsByGuid.I021474_na19679_1,
+        completeness: { score: 70, missing: [{ field: 'features', label: 'Observed features (HPO terms)' }] },
+      },
+      I021475_na19675_1: { ...STATE_WITH_2_FAMILIES.individualsByGuid.I021475_na19675_1, completeness: null },
+    },
+    familyTableState: {
+      ...STATE_WITH_2_FAMILIES.familyTableState,
+      familiesSortOrder: 'SORT_BY_CLINICAL_DATA_COMPLETENESS',
+      familiesSortDirection: 1,
+    },
+  }
+  const wrapper = renderTable(state)
+  const rows = wrapper.find('FamilyTableRow')
+  expect(rows.map(content => content.prop('familyGuid'))).toEqual(['F011652_2', 'F011652_1'])
+
+  // the roll-up from the server is used until individuals are loaded, then the loaded individuals are averaged
+  expect(rows.at(0).find('FamilyCompletenessLabel').text()).toEqual('Clinical data 40% mostly missing')
+  expect(rows.at(1).find('FamilyCompletenessLabel').text()).toEqual('Clinical data 85% partly complete')
+  expect(rows.at(1).find('FamilyCompletenessLabel').prop('completeness')).toEqual(
+    { score: 85, numIndividuals: 2, numNoFeatures: 1 },
+  )
+
+  const descendingWrapper = renderTable({
+    ...state, familyTableState: { ...state.familyTableState, familiesSortDirection: -1 },
+  })
+  expect(descendingWrapper.find('FamilyTableRow').map(content => content.prop('familyGuid'))).toEqual(
+    ['F011652_1', 'F011652_2'],
+  )
+
+  const unscoredWrapper = renderTable({
+    ...state,
+    familiesByGuid: {
+      ...state.familiesByGuid,
+      F011652_2: { ...state.familiesByGuid.F011652_2, completeness: null },
+    },
+  })
+  const unscoredRows = unscoredWrapper.find('FamilyTableRow')
+  expect(unscoredRows.map(content => content.prop('familyGuid'))).toEqual(['F011652_1', 'F011652_2'])
+  expect(unscoredRows.at(1).find('FamilyCompletenessLabel').isEmptyRender()).toBe(true)
+})

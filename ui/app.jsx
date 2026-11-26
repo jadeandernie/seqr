@@ -44,24 +44,24 @@ ReactDOM.render(
   <Provider store={configureStore(rootReducer, window.initialJSON)}>
     <BrowserRouter>
       <BaseLayout>
-        <Switch>
-          <Route exact path="/" component={Home} />
-          <Route path="/dashboard" component={Dashboard} />
-          <Route path="/project/:projectGuid" component={Project} />
-          <Route path="/create_project_from_workspace/:workspaceNamespace/:workspaceName" component={LoadWorkspaceData} />
-          <Route path="/workspace/:workspaceNamespace/:workspaceName" component={WorkspaceAccessError} />
-          <Route path="/variant_search" component={VariantSearch} />
-          <Route path="/variant_lookup/:gene?" component={VariantLookup} />
-          <Route path="/data_management" component={DataManagement} />
-          <Route path="/report" component={Report} />
-          <Route path="/summary_data" component={SummaryData} />
-          <Route path="/login" component={Login} />
-          <Route path="/accept_policies" component={AcceptPolicies} />
-          <React.Suspense fallback={<Loader />}>
+        <React.Suspense fallback={<Loader />}>
+          <Switch>
+            <Route exact path="/" component={Home} />
+            <Route path="/dashboard" component={Dashboard} />
+            <Route path="/project/:projectGuid" component={Project} />
+            <Route path="/create_project_from_workspace/:workspaceNamespace/:workspaceName" component={LoadWorkspaceData} />
+            <Route path="/workspace/:workspaceNamespace/:workspaceName" component={WorkspaceAccessError} />
+            <Route path="/variant_search" component={VariantSearch} />
+            <Route path="/variant_lookup/:gene?" component={VariantLookup} />
+            <Route path="/data_management" component={DataManagement} />
+            <Route path="/report" component={Report} />
+            <Route path="/summary_data" component={SummaryData} />
+            <Route path="/login" component={Login} />
+            <Route path="/accept_policies" component={AcceptPolicies} />
             {PUBLIC_ROUTES.map(props => <Route key={props.path} {...props} />)}
-          </React.Suspense>
-          <Route component={Error404} />
-        </Switch>
+            <Route component={Error404} />
+          </Switch>
+        </React.Suspense>
       </BaseLayout>
     </BrowserRouter>
   </Provider>,

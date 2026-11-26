@@ -9,6 +9,7 @@ import {
   getGenesById,
   getTranscriptsById,
   getLocusListIntervalsByChromProject,
+  getLocusListsByGuid,
   getOmimIntervalsByChrom,
   getFamiliesByGuid,
   getUser,
@@ -422,18 +423,17 @@ const mapStateToProps = state => ({
 
 const SearchLinks = connect(mapStateToProps)(BaseSearchLinks)
 
-const getLocusListLabels = locusLists => locusLists.map(({ locusListGuid, name, description }) => ({
-  color: 'teal',
-  maxWidth: '8em',
-  key: locusListGuid,
-  label: name,
-  content: description,
-}))
+const getLocusListLabels = locusListsByGuid => intervals => (
+  [...new Set(intervals.map(({ locusListGuid }) => locusListGuid))].map((locusListGuid) => {
+    const { name, description } = locusListsByGuid[locusListGuid] || {}
+    return { color: 'teal', maxWidth: '8em', key: locusListGuid, label: name, content: description }
+  })
+)
 
 const mapLocusListStateToProps = (state, ownProps) => ({
   groupedIntervals: getLocusListIntervalsByChromProject(state, ownProps),
-  getOverlapArgs: [fGuid => getFamiliesByGuid(state)[fGuid].projectId],
-  getLabels: getLocusListLabels,
+  getOverlapArgs: [fGuid => getFamiliesByGuid(state)[fGuid]?.projectGuid],
+  getLabels: getLocusListLabels(getLocusListsByGuid(state)),
 })
 
 const VariantLocusListLabels = connect(mapLocusListStateToProps)(OverlappedIntervalLabels)

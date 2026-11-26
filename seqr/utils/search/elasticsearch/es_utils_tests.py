@@ -2,20 +2,25 @@ from copy import deepcopy
 import mock
 import jmespath
 import json
+import logging
 import re
 from collections import defaultdict
 from datetime import timedelta
+from django.db import connection
 from django.test import TestCase
+from django.utils import timezone
 from elasticsearch.exceptions import ConnectionTimeout, TransportError
 from sys import maxsize
 from urllib3.exceptions import ReadTimeoutError
 from urllib3_mock import Responses
 
-from seqr.models import Project, Family, Sample, VariantSearch, VariantSearchResults
+from seqr.models import Project, Family, Individual, Sample, VariantSearch, VariantSearchResults
 from seqr.utils.search.utils import get_single_variant, query_variants, \
     get_variant_query_gene_counts, get_variants_for_variant_ids, InvalidSearchException
-from seqr.utils.search.elasticsearch.es_search import _get_family_affected_status, _liftover_grch38_to_grch37
+from seqr.utils.search.elasticsearch.es_search import EsSearch, _get_family_affected_status, _liftover_grch38_to_grch37, \
+    _chunk_search_clauses
 from seqr.utils.search.elasticsearch.es_utils import InvalidIndexException
+from settings import MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES
 from seqr.views.utils.test_utils import PARSED_VARIANTS, PARSED_SV_VARIANT, PARSED_SV_WGS_VARIANT,\
     PARSED_MITO_VARIANT, TRANSCRIPT_2, PARSED_COMPOUND_HET_VARIANTS_MULTI_PROJECT
 
@@ -3806,3 +3811,290 @@ class EsUtilsTest(TestCase):
                 ]
             }
         })
+
+    def _create_test_index_families(self, num_families):
+        project = Project.objects.get(guid='R0001_1kg')
+        families = Family.objects.bulk_create([
+            Family(guid=f'F9{i:06d}_many', family_id=f'many_{i}', project=project) for i in range(num_families)
+        ])
+        individuals = Individual.objects.bulk_create([
+            Individual(guid=f'I9{i:06d}_many', individual_id=f'MANY{i}', family=family, affected='A')
+            for i, family in enumerate(families)
+        ])
+        Sample.objects.bulk_create([
+            Sample(
+                guid=f'S9{i:06d}_many', sample_id=f'MANY{i}', individual=individual, sample_type='WES',
+                dataset_type='SNV_INDEL', elasticsearch_index=INDEX_NAME, is_active=True, loaded_date=timezone.now(),
+            ) for i, individual in enumerate(individuals)
+        ])
+        return {family.guid for family in families}
+
+    def test_chunk_search_clauses(self):
+        self.assertListEqual(_chunk_search_clauses([]), [[]])
+        for num_clauses in [1, 1023, 1024, 1025, 2047, 2048, 2049, 3072, 5000, 10241]:
+            clauses = list(range(num_clauses))
+            chunks = _chunk_search_clauses(clauses)
+            self.assertEqual(len(chunks), -(-num_clauses // 1024))
+            self.assertTrue(all(0 < len(chunk) <= 1024 for chunk in chunks))
+            # Every clause is included exactly once, so OR-ing the chunks is equivalent to OR-ing all the clauses
+            self.assertListEqual([clause for chunk in chunks for clause in chunk], clauses)
+
+    @urllib3_responses.activate
+    def test_max_search_clauses_get_es_variants(self):
+        setup_responses()
+        # Testing multiple indices is done in other tests, it is helpful to have a strightforward single index test
+        Sample.objects.exclude(elasticsearch_index=INDEX_NAME).delete()
+        # Inheritance search is disabled for the other families as they have no affected individuals
+        fixture_family_guids = {'F000002_2', 'F000003_3'}
+
+        search_model = VariantSearch.objects.create(search={
+            'inheritance': {'mode': 'de_novo'}, 'locus': {'rawItems': 'chr2:1234-5678'},
+        })
+        results_model = VariantSearchResults.objects.create(variant_search=search_model)
+
+        new_family_guids = sorted(self._create_test_index_families(4200))
+
+        def _assert_expected_search_clauses(num_new_families, expected_num_searches):
+            family_guids = set(fixture_family_guids)
+            family_guids.update(new_family_guids[:num_new_families])
+            self.assertEqual(len(family_guids), num_new_families + 2)
+            results_model.families.set(Family.objects.filter(guid__in=family_guids))
+            # Update the query planner statistics for the bulk created models, otherwise the test queries are very slow
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'ANALYZE seqr_family, seqr_individual, seqr_sample, seqr_variantsearchresults_families')
+
+            _set_cache(f'search_results__{results_model.guid}__xpos', None)
+            del urllib3_responses.calls[:]
+            variants, _ = query_variants(results_model, num_results=2)
+            self.assertEqual(len(variants), 2)
+
+            if expected_num_searches == 1:
+                self.assertTrue(urllib3_responses.calls[-1].request.url.endswith('/_search'))
+                executed_searches = [urllib3_responses.call_request_json()]
+            else:
+                self.assertEqual(urllib3_responses.calls[-1].request.url, '/_msearch')
+                executed_search = parse_msearch_body(urllib3_responses.calls[-1].request.body)
+                self.assertTrue(all(row == {'index': [INDEX_NAME]} for row in executed_search[::2]))
+                executed_searches = executed_search[1::2]
+            self.assertEqual(len(executed_searches), expected_num_searches)
+
+            searched_families = []
+            for executed_search in executed_searches:
+                filters = executed_search['query']['bool']['filter']
+                # All searches have the same non-genotype filters
+                self.assertListEqual(filters[:-1], executed_searches[0]['query']['bool']['filter'][:-1])
+                self.assertIn('xpos', json.dumps(filters[:-1]))
+                genotype_filter = filters[-1]['bool']
+                family_clauses = genotype_filter.get('should') or [filters[-1]]
+                if 'should' in genotype_filter:
+                    self.assertSetEqual(set(genotype_filter.keys()), {'should'})
+                # No executed bool query exceeds the elasticsearch clause limit
+                self.assertLessEqual(len(family_clauses), 1024)
+                searched_families += [clause['bool']['_name'] for clause in family_clauses]
+                for clause in family_clauses:
+                    self.assertSetEqual(set(clause['bool'].keys()), {'_name', 'must'})
+            # Every family is searched exactly once, so the combined searches are equivalent to a single OR query
+            self.assertEqual(len(searched_families), len(family_guids))
+            self.assertSetEqual(set(searched_families), family_guids)
+
+        # 2 fixture families are always searched, test just below, at and above multiples of the clause limit
+        _assert_expected_search_clauses(1021, 1)
+        _assert_expected_search_clauses(1022, 1)
+        _assert_expected_search_clauses(1023, 2)
+        _assert_expected_search_clauses(2046, 2)
+        _assert_expected_search_clauses(2047, 3)
+        _assert_expected_search_clauses(4200, 5)
+
+    @mock.patch('seqr.utils.search.elasticsearch.es_search.MAX_SEARCH_CLAUSES', 1)
+    @urllib3_responses.activate
+    def test_max_search_clauses_compound_het_get_es_variants(self):
+        setup_responses()
+        Sample.objects.exclude(elasticsearch_index=INDEX_NAME).delete()
+        search_model = VariantSearch.objects.create(search={
+            'annotations': {'frameshift': ['frameshift_variant']}, 'inheritance': {'mode': 'compound_het'},
+        })
+        results_model = VariantSearchResults.objects.create(variant_search=search_model)
+        family_guids = {'F000002_2', 'F000003_3'}
+        family_guids.update(self._create_test_index_families(3))
+        results_model.families.set(Family.objects.filter(guid__in=family_guids))
+
+        query_variants(results_model, num_results=2)
+
+        executed_searches = parse_msearch_body(urllib3_responses.calls[-1].request.body)[1::2]
+        self.assertEqual(len(executed_searches), 5)
+        self.assertTrue(all('genes' in search['aggs'] for search in executed_searches))
+        family_filters = [search['query']['bool']['filter'][-1]['bool'] for search in executed_searches]
+        self.assertTrue(all('should' not in family_filter for family_filter in family_filters))
+        self.assertSetEqual({family_filter['_name'] for family_filter in family_filters}, family_guids)
+
+    @mock.patch('seqr.utils.search.elasticsearch.es_search.MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES', 2)
+    @urllib3_responses.activate
+    def test_no_location_genotype_filter_family_limit(self):
+        setup_responses()
+        self.assertEqual(MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES, 1024)
+        expected_error = 'Location must be specified to search more than 2 families by genotype. Please add genes or ' \
+                         'intervals to the search, search fewer families, or remove the inheritance and quality filters'
+
+        search_model = VariantSearch.objects.create(search={})
+        results_model = VariantSearchResults.objects.create(variant_search=search_model)
+
+        def _set_search(search, families):
+            search_model.search = search
+            search_model.save()
+            results_model.families.set(families)
+            _set_cache(f'search_results__{results_model.guid}__xpos', None)
+            del urllib3_responses.calls[:]
+
+        def _assert_invalid_search(search, families):
+            nonlocal expected_error
+            _set_search(search, families)
+            with self.assertRaises(InvalidSearchException) as cm:
+                query_variants(results_model, num_results=2)
+            self.assertEqual(str(cm.exception), expected_error)
+            # The search is rejected before it is sent to elasticsearch
+            self.assertFalse(any('search' in call.request.url for call in urllib3_responses.calls))
+
+            _set_search(search, families)
+            with self.assertRaises(InvalidSearchException) as cm:
+                get_variant_query_gene_counts(results_model, None)
+            self.assertEqual(str(cm.exception), expected_error)
+            self.assertFalse(any('search' in call.request.url for call in urllib3_responses.calls))
+
+        def _assert_valid_search(search, families):
+            _set_search(search, families)
+            variants, _ = query_variants(results_model, num_results=2)
+            self.assertEqual(len(variants), 2)
+            self.assertTrue(any('search' in call.request.url for call in urllib3_responses.calls))
+
+        project_families = Family.objects.filter(project__guid='R0001_1kg')
+        location = {'rawItems': 'chr2:1234-5678'}
+
+        # Searches which need a genotype filter for every family are not allowed without a location
+        _assert_invalid_search({'inheritance': {'mode': 'de_novo'}}, project_families)
+        _assert_invalid_search({'inheritance': {'mode': 'x_linked_recessive'}}, project_families)
+        _assert_invalid_search({'qualityFilter': {'min_gq': 10}}, project_families)
+        # Searching only some of the families in an index needs a genotype filter for every family
+        _assert_invalid_search({}, self.families)
+        # Excluding locations does not restrict the search
+        _assert_invalid_search(
+            {'inheritance': {'mode': 'de_novo'}, 'locus': dict(excludeLocations=True, **location)}, project_families)
+
+        # Searches restricted to a location are allowed for any number of families
+        _assert_valid_search({'inheritance': {'mode': 'de_novo'}, 'locus': location}, project_families)
+        _assert_valid_search({'qualityFilter': {'min_gq': 10}, 'locus': location}, project_families)
+        _assert_valid_search({'locus': location}, self.families)
+        _assert_valid_search(
+            {'inheritance': {'mode': 'de_novo'}, 'locus': {'rawVariantItems': '1-248367227-TC-T,2-103343353-GAGA-G'}},
+            project_families)
+
+        # Searching all the samples in an index does not need a genotype filter for every family, so is always allowed
+        _assert_valid_search({}, project_families)
+        _assert_valid_search({'inheritance': {'mode': 'any_affected'}}, project_families)
+
+        # Searches up to the limit are allowed, inheritance search is disabled for the family with no affected individuals
+        _assert_valid_search({'inheritance': {'mode': 'de_novo'}}, self.families)
+        _assert_valid_search({'inheritance': {'mode': 'any_affected'}}, self.families)
+        with mock.patch('seqr.utils.search.elasticsearch.es_search.MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES', 1):
+            expected_error = expected_error.replace('more than 2 families', 'more than 1 families')
+            _assert_invalid_search({'inheritance': {'mode': 'de_novo'}}, self.families)
+            _assert_invalid_search({'inheritance': {'mode': 'any_affected'}}, self.families)
+            _assert_valid_search({'inheritance': {'mode': 'any_affected'}}, project_families)
+
+    @mock.patch('seqr.utils.search.elasticsearch.es_search.uuid4', lambda: mock.Mock(hex='abc123'))
+    @mock.patch('seqr.utils.search.elasticsearch.es_search.logger')
+    @urllib3_responses.activate
+    def test_timeout_cancel_search_tasks(self, mock_logger):
+        setup_responses()
+        search_model = VariantSearch.objects.create(search={})
+        results_model = VariantSearchResults.objects.create(variant_search=search_model)
+        results_model.families.set(self.families)
+
+        # Searches are tagged so the elasticsearch tasks they start can be identified
+        query_variants(results_model, num_results=2)
+        self.assertEqual(urllib3_responses.calls[-1].request.url, '/_msearch')
+        self.assertEqual(urllib3_responses.calls[-1].request.headers['x-opaque-id'], 'seqr-search-abc123')
+        mock_logger.warning.assert_not_called()
+        mock_logger.error.assert_not_called()
+
+        _set_cache(f'search_results__{results_model.guid}__xpos', None)
+        urllib3_responses.reset()
+        setup_responses()
+        urllib3_responses._urls = [url for url in urllib3_responses._urls if url['url'] != '/_msearch']
+        urllib3_responses.add(urllib3_responses.POST, '/_msearch', body=ReadTimeoutError('', '', 'timeout'))
+        tasks = {
+            'node1:12': {'running_time_in_nanos': 10, 'headers': {'X-Opaque-Id': 'seqr-search-xyz789'}},
+            'node1:34': {
+                'running_time_in_nanos': 6 * 10 ** 10, 'cancellable': True,
+                'headers': {'X-Opaque-Id': 'seqr-search-abc123'},
+                'children': [
+                    {'node': 'node2', 'id': 78, 'cancellable': True, 'headers': {'X-Opaque-Id': 'seqr-search-abc123'}},
+                ],
+            },
+            'node1:56': {'running_time_in_nanos': 10 ** 12, 'headers': {}},
+            'node2:90': {
+                'running_time_in_nanos': 6 * 10 ** 10, 'cancellable': False,
+                'headers': {'X-Opaque-Id': 'seqr-search-abc123'},
+                'children': [
+                    {'node': 'node3', 'id': 91, 'cancellable': True, 'headers': {'X-Opaque-Id': 'seqr-search-abc123'}},
+                    {'node': 'node3', 'id': 92, 'cancellable': False, 'headers': {'X-Opaque-Id': 'seqr-search-abc123'}},
+                ],
+            },
+        }
+        urllib3_responses.add_json('/_tasks?actions=*search&group_by=parents', {'tasks': tasks})
+        urllib3_responses.add_json('/_tasks/node1%3A34/_cancel', {'nodes': {}}, method=urllib3_responses.POST)
+        urllib3_responses.add_json('/_tasks/node3%3A91/_cancel', {'nodes': {}}, method=urllib3_responses.POST)
+        with self.assertRaises(ConnectionTimeout):
+            query_variants(results_model, num_results=2)
+        # Only the cancellable tasks started by the timed out search are cancelled
+        self.assertListEqual(
+            [call.request.url for call in urllib3_responses.calls if 'mapping' not in call.request.url], [
+                '/_msearch', '/_tasks?actions=%2Asearch&group_by=parents', '/_tasks/node1%3A34/_cancel',
+                '/_tasks/node3%3A91/_cancel',
+            ])
+        mock_logger.warning.assert_called_once_with(
+            'ES Query Timeout: Cancelled 2 timed out search tasks', None, detail=['node1:34', 'node3:91'])
+        mock_logger.error.assert_called_with('ES Query Timeout: Found 1 long running searches', None, detail=[
+            {'task': tasks['node1:56'], 'parent_task_id': 'node1:56'},
+        ])
+
+        # Failing to cancel the search does not change the reported error
+        mock_logger.reset_mock()
+        del urllib3_responses.calls[:]
+        urllib3_responses.replace_json(
+            '/_tasks/node1%3A34/_cancel', {'error': {'type': 'security_exception'}}, method=urllib3_responses.POST,
+            status=403)
+        with self.assertRaises(ConnectionTimeout):
+            query_variants(results_model, num_results=2)
+        self.assertEqual(urllib3_responses.calls[-1].request.url, '/_tasks/node3%3A91/_cancel')
+        self.assertEqual(mock_logger.warning.call_count, 2)
+        self.assertTrue(mock_logger.warning.call_args_list[0].args[0].startswith(
+            'ES Query Timeout: Unable to cancel search task node1:34: AuthorizationException(403'))
+        mock_logger.warning.assert_called_with(
+            'ES Query Timeout: Cancelled 1 timed out search tasks', None, detail=['node3:91'])
+        mock_logger.error.assert_called_with('ES Query Timeout: Found 1 long running searches', None, detail=mock.ANY)
+
+    def test_execute_search_debug_logging(self):
+        es_search = mock.Mock(_user=None)
+        search = mock.MagicMock()
+        search.to_dict.return_value = {'query': {'match_all': {}}}
+        executed_search = search.params.return_value.using.return_value
+        search_logger = logging.getLogger('seqr.utils.search.elasticsearch.es_search')
+        self.assertFalse(search_logger.isEnabledFor(logging.DEBUG))
+
+        # The search is not serialized unless debug logging is enabled
+        with mock.patch('seqr.utils.search.elasticsearch.es_search.json.dumps') as mock_dumps:
+            response = EsSearch._execute_search(es_search, search)
+        self.assertEqual(response, executed_search.execute.return_value)
+        search.to_dict.assert_not_called()
+        mock_dumps.assert_not_called()
+
+        search_logger.setLevel(logging.DEBUG)
+        try:
+            with self.assertLogs(search_logger, level='DEBUG') as logs:
+                EsSearch._execute_search(es_search, search)
+        finally:
+            search_logger.setLevel(logging.NOTSET)
+        search.to_dict.assert_called_once_with()
+        self.assertListEqual([record.getMessage() for record in logs.records], [json.dumps(search.to_dict.return_value, indent=2)])
+        self.assertEqual(executed_search.execute.call_count, 2)

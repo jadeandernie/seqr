@@ -4,9 +4,11 @@ import elasticsearch
 from elasticsearch_dsl import Search, Q, MultiSearch
 import hashlib
 import json
+import logging
 from pyliftover.liftover import LiftOver
 from sys import maxsize
 from itertools import combinations
+from uuid import uuid4
 
 from reference_data.models import GENOME_VERSION_GRCh38, GENOME_VERSION_GRCh37
 from seqr.models import Sample, Individual
@@ -24,6 +26,7 @@ from seqr.utils.logging_utils import SeqrLogger
 from seqr.utils.redis_utils import safe_redis_get_json, safe_redis_set_json
 from seqr.utils.xpos_utils import get_xpos, MIN_POS, MAX_POS, get_chrom_pos
 from seqr.views.utils.json_utils import _to_camel_case
+from settings import MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES
 
 logger = SeqrLogger(__name__)
 
@@ -208,6 +211,8 @@ class EsSearch(object):
         self._filter_custom(custom_query)
 
         self._filter_by_location(genes, intervals, variant_ids, rs_ids, locus)
+        has_location_filter = bool(variant_ids or rs_ids) or bool(
+            (genes or intervals) and not (locus and locus.get('excludeLocations')))
 
         self._parse_annotation_overrides(annotations, pathogenicity)
 
@@ -243,7 +248,9 @@ class EsSearch(object):
         if skip_genotype_filter and not inheritance_mode:
             return
 
-        self._filter_by_genotype(inheritance_mode, inheritance_filter, quality_filters_by_family, dataset_type)
+        self._filter_by_genotype(
+            inheritance_mode, inheritance_filter, quality_filters_by_family, dataset_type,
+            has_location_filter=has_location_filter)
 
     def _parse_annotation_overrides(self, annotations, pathogenicity):
         clinvar_terms, hgmd_classes = _parse_pathogenicity_filter(pathogenicity or {})
@@ -395,10 +402,12 @@ class EsSearch(object):
         self._filter(Q('terms', variantId=variant_ids))
         return self
 
-    def _filter_by_genotype(self, inheritance_mode, inheritance_filter, quality_filters_by_family, dataset_type):
+    def _filter_by_genotype(self, inheritance_mode, inheritance_filter, quality_filters_by_family, dataset_type, has_location_filter=False):
+        from seqr.utils.search.utils import InvalidSearchException
         has_inheritance_filter = inheritance_filter or inheritance_mode
         all_sample_search = (not quality_filters_by_family) and (inheritance_mode == ANY_AFFECTED or not has_inheritance_filter)
         no_filter_indices = set()
+        genotype_filter_families = set()
 
         indices = self._dataset_type_indices(dataset_type) if dataset_type else self._indices
         for index in indices:
@@ -425,17 +434,24 @@ class EsSearch(object):
                         no_filter_indices.add(index)
                     continue
 
+            # Every family that is not covered by the all-samples case above needs its own genotype clause. Without a
+            # location filter each of those clauses is evaluated against every variant in the index, so reject searches
+            # which can not realistically complete instead of sending them to elasticsearch
+            genotype_filter_families.update(family_samples_by_id.keys())
+            if not has_location_filter and len(genotype_filter_families) > MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES:
+                raise InvalidSearchException(
+                    f'Location must be specified to search more than {MAX_NO_LOCATION_GENOTYPE_FILTER_FAMILIES} '
+                    f'families by genotype. Please add genes or intervals to the search, search fewer families, or '
+                    f'remove the inheritance and quality filters')
+
             genotypes_qs = [
                 self._get_family_sample_query(
                     family_guid, family_samples_by_id, quality_filters_by_family,
                     index_fields, inheritance_mode, inheritance_filter
                 ) for family_guid in sorted(family_samples_by_id.keys())
             ]
-            if len(genotypes_qs) > MAX_SEARCH_CLAUSES:
-                self._index_searches[index].append(self._search.filter(_or_filters(genotypes_qs[:MAX_SEARCH_CLAUSES])))
-                genotypes_qs = genotypes_qs[MAX_SEARCH_CLAUSES:]
-
-            self._index_searches[index].append(self._search.filter(_or_filters(genotypes_qs)))
+            for genotypes_q_chunk in _chunk_search_clauses(genotypes_qs):
+                self._index_searches[index].append(self._search.filter(_or_filters(genotypes_q_chunk)))
 
         if no_filter_indices and self._index_searches:
             for index in no_filter_indices:
@@ -494,10 +510,7 @@ class EsSearch(object):
             self._get_paired_indices_comp_het_queries(comp_het_qs_by_index, quality_filters_by_family)
 
         for index, compound_het_qs in comp_het_qs_by_index.items():
-            comp_het_qs_list = [
-                compound_het_qs[:MAX_SEARCH_CLAUSES], compound_het_qs[MAX_SEARCH_CLAUSES:]
-            ] if len(compound_het_qs) > MAX_SEARCH_CLAUSES else [compound_het_qs]
-            for compound_het_q in comp_het_qs_list:
+            for compound_het_q in _chunk_search_clauses(compound_het_qs):
                 compound_het_search = comp_het_search.filter(_or_filters(compound_het_q))
                 compound_het_search.aggs.bucket(
                     'genes', 'terms', field='geneIds', min_doc_count=2, size=MAX_COMPOUND_HET_GENES + 1
@@ -1263,24 +1276,44 @@ class EsSearch(object):
         return searches, log_messages
 
     def _execute_search(self, search):
-        logger.debug(json.dumps(search.to_dict(), indent=2), self._user)
+        # Serializing the query for a search across many families is expensive, only do it if it will be logged
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(json.dumps(search.to_dict(), indent=2), self._user)
+        # Tag the request so that the tasks it starts in elasticsearch can be identified if it times out
+        opaque_id = f'seqr-search-{uuid4().hex}'
         try:
-            return search.using(self._client).execute()
+            return search.params(opaque_id=opaque_id).using(self._client).execute()
         except elasticsearch.exceptions.ConnectionTimeout as e:
-            tasks = self._get_long_running_tasks()
+            tasks = self._get_long_running_tasks(timed_out_opaque_id=opaque_id)
             if tasks:
                 logger.error('ES Query Timeout: Found {} long running searches'.format(len(tasks)), self._user, detail=tasks)
             else:
                 logger.warning('ES Query Timeout. No long running searches found', self._user)
             raise e
 
-    def _get_long_running_tasks(self):
+    def _get_long_running_tasks(self, timed_out_opaque_id=None):
         search_tasks = self._client.tasks.list(actions='*search', group_by='parents')
+        if timed_out_opaque_id:
+            self._cancel_timed_out_tasks(search_tasks['tasks'], timed_out_opaque_id)
         long_running = []
         for parent_id, task in search_tasks['tasks'].items():
             if task['running_time_in_nanos'] > 10 ** 11:
                 long_running.append({'task': task, 'parent_task_id': parent_id})
         return long_running
+
+    def _cancel_timed_out_tasks(self, tasks, opaque_id):
+        # The client has stopped waiting for the search, but elasticsearch keeps executing it unless it is cancelled.
+        # Only tasks started by the timed out request are cancelled
+        cancelled = []
+        for task_id in _get_cancellable_task_ids(tasks.items(), opaque_id):
+            try:
+                self._client.tasks.cancel(task_id=task_id)
+                cancelled.append(task_id)
+            except Exception as e:
+                logger.warning(f'ES Query Timeout: Unable to cancel search task {task_id}: {e}', self._user)
+        if cancelled:
+            logger.warning(
+                f'ES Query Timeout: Cancelled {len(cancelled)} timed out search tasks', self._user, detail=cancelled)
 
     def _get_quality_filters_by_family(self, quality_filter, affected_only):
         quality_field_configs = {
@@ -1537,6 +1570,28 @@ def _pop_freq_filter(filter_key, value):
 
 def _build_or_filter(op, filters):
     return  _or_filters([Q(op, **filter_kwargs) for filter_kwargs in filters])
+
+
+def _get_cancellable_task_ids(tasks, opaque_id):
+    task_ids = []
+    for task_id, task in tasks:
+        if (task.get('headers') or {}).get('X-Opaque-Id') != opaque_id:
+            continue
+        if task.get('cancellable', True):
+            # Cancelling a task also cancels its children
+            task_ids.append(task_id)
+        else:
+            task_ids += _get_cancellable_task_ids(
+                [(f"{child['node']}:{child['id']}", child) for child in task.get('children') or []], opaque_id)
+    return task_ids
+
+
+def _chunk_search_clauses(clause_qs):
+    # Elasticsearch rejects a bool query with more than MAX_SEARCH_CLAUSES clauses, so the clauses are split into as many
+    # groups as needed, each of which is executed as its own search
+    if not clause_qs:
+        return [clause_qs]
+    return [clause_qs[i:i + MAX_SEARCH_CLAUSES] for i in range(0, len(clause_qs), MAX_SEARCH_CLAUSES)]
 
 
 def _or_filters(filter_qs):

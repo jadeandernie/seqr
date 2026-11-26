@@ -168,6 +168,13 @@ export const createManualVariant = (familyGuid, values) => dispatch => new HttpR
   },
 ).post(values)
 
+export const updateManualVariant = (familyGuid, variantGuid, values) => dispatch => new HttpRequestHelper(
+  `/api/saved_variant/update_manual/${familyGuid}/${variantGuid}`,
+  (responseJson) => {
+    dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+  },
+).post(values)
+
 export const updateFamilies = values => (dispatch, getState) => {
   const action = values.delete ? 'delete' : 'edit'
   return new HttpRequestHelper(`/api/project/${getState().currentProjectGuid}/${action}_families`,

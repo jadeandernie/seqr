@@ -5,6 +5,7 @@ import styled from 'styled-components'
 import { Grid, Popup, Label, Button, Header, Tab } from 'semantic-ui-react'
 
 import { GENOME_VERSION_37, clinvarColor, getVariantMainGeneId } from 'shared/utils/constants'
+import { EditManualVariantButton } from 'pages/Project/components/CreateVariantButton'
 import { VerticalSpacer } from '../../Spacers'
 import { TagFieldDisplay } from '../view-fields/TagFieldView'
 import FamilyReads from '../family/FamilyReads'
@@ -194,6 +195,7 @@ export const Variant = React.memo((
         <Grid.Row>
           <Grid.Column width={16}>
             {variant.familyGuids && <VariantIndividuals variant={variant} />}
+            {variant.variantGuid && variant.key === null && <EditManualVariantButton variant={variant} />}
             {variant.numFamilies && `Variant present in ${variant.numFamilies} families in external projects`}
             {showReads}
           </Grid.Column>

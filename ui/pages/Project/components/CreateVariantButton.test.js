@@ -6,7 +6,8 @@ import thunk from 'redux-thunk'
 import { Provider } from 'react-redux'
 
 import { mockFetchResponse, getLastFetchUrl, getLastFetchBody } from 'shared/utils/testHelpers'
-import CreateVariantButtons from './CreateVariantButton'
+import UpdateButton from 'shared/components/buttons/UpdateButton'
+import CreateVariantButtons, { EditManualVariantButton } from './CreateVariantButton'
 import { STATE_WITH_2_FAMILIES } from '../fixtures'
 
 configure({ adapter: new Adapter() })
@@ -168,4 +169,131 @@ test('renders buttons for a non-editable project when the user is an analyst on 
 
   expect(wrapper.text()).toContain('Add Manual Variant')
   expect(wrapper.text()).toContain('Add Manual SV')
+})
+
+const MANUAL_VARIANT = {
+  variantGuid: 'SV_MANUAL_1',
+  key: null,
+  familyGuids: [FAMILY.familyGuid],
+  variantId: '7-100-G-A',
+  chrom: '7',
+  pos: 100,
+  ref: 'G',
+  alt: 'A',
+  geneIds: ['ENSG00000228198'],
+  mainTranscriptId: 'ENST00000001',
+  transcripts: { ENSG00000228198: [{ transcriptId: 'ENST00000001', hgvsc: 'c.1G>A', hgvsp: 'p.Val1Met' }] },
+  genotypes: { I021475_na19675_1: { numAlt: 1 } },
+}
+
+const MANUAL_SV = {
+  variantGuid: 'SV_MANUAL_2',
+  key: null,
+  familyGuids: [FAMILY.familyGuid],
+  variantId: 'Deletion:chr7',
+  chrom: '7',
+  pos: 100,
+  end: 200,
+  svType: 'DEL',
+  geneIds: [],
+  genotypes: { I021475_na19675_1: { cn: 1 } },
+}
+
+test('edits a manual variant using the manual variant form with the current values', async () => {
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'SV_MANUAL_1-editVariant': { open: true } },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <EditManualVariantButton variant={MANUAL_VARIANT} />
+    </Provider>,
+  )
+
+  expect(wrapper.text()).toContain('Edit Manual Variant')
+  const { initialValues, formFields, onSubmit } = wrapper.find(UpdateButton).props()
+  expect(initialValues).toEqual({
+    chrom: '7',
+    pos: 100,
+    ref: 'G',
+    alt: 'A',
+    geneId: 'ENSG00000228198',
+    mainTranscriptId: 'ENST00000001',
+    hgvsc: 'c.1G>A',
+    hgvsp: 'p.Val1Met',
+    genotypes: { I021475_na19675_1: { numAlt: 1 } },
+  })
+  expect(formFields.map(({ name }) => name)).toEqual(
+    ['chrom', 'pos', 'end', 'ref', 'alt', 'geneId', 'mainTranscriptId', 'hgvsc', 'hgvsp', 'genotypes'],
+  )
+  expect(wrapper.find('input[placeholder="OR2M3 (search to change)"]').exists()).toBe(true)
+  expect(wrapper.find('ForwardRef(Field)[name^="genotypes."]').length).toBeGreaterThan(0)
+
+  mockFetchResponse({ savedVariantsByGuid: { SV_MANUAL_1: { alt: 'T' } } })
+  const dispatchCount = store.getActions().length
+  await onSubmit({ ...initialValues, alt: 'T' })
+
+  expect(getLastFetchUrl()).toEqual(`/api/saved_variant/update_manual/${FAMILY.familyGuid}/SV_MANUAL_1`)
+  expect(getLastFetchBody()).toEqual({ ...initialValues, alt: 'T' })
+  expect(store.getActions()[dispatchCount]).toEqual(
+    { type: 'RECEIVE_DATA', updatesById: { savedVariantsByGuid: { SV_MANUAL_1: { alt: 'T' } } } },
+  )
+})
+
+test('edits a manual SV using the manual SV form', () => {
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'SV_MANUAL_2-editVariant': { open: true } },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <EditManualVariantButton variant={MANUAL_SV} />
+    </Provider>,
+  )
+
+  expect(wrapper.text()).toContain('Edit Manual SV')
+  const { initialValues, formFields } = wrapper.find(UpdateButton).props()
+  expect(initialValues).toEqual({
+    chrom: '7', pos: 100, end: 200, svType: 'DEL', svName: 'Deletion:chr7', genotypes: { I021475_na19675_1: { cn: 1 } },
+  })
+  expect(formFields.map(({ name }) => name)).toEqual(['chrom', 'pos', 'end', 'geneId', 'svName', 'svType', 'genotypes'])
+  // no gene is set, so the gene search keeps its default prompt
+  expect(wrapper.find('input[placeholder="Search for gene"]').exists()).toBe(true)
+  expect(wrapper.find('input[placeholder$="(search to change)"]').exists()).toBe(false)
+})
+
+test('shows the gene id for the current gene of a manual variant when the gene is not loaded', () => {
+  const variant = { ...MANUAL_VARIANT, variantGuid: 'SV_MANUAL_3', geneIds: ['ENSG00000999999'], transcripts: {} }
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'SV_MANUAL_3-editVariant': { open: true } },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <EditManualVariantButton variant={variant} />
+    </Provider>,
+  )
+
+  // the transcript details are unknown, but the gene and transcript id are still kept in the form
+  expect(wrapper.find(UpdateButton).prop('initialValues')).toEqual(expect.objectContaining({
+    geneId: 'ENSG00000999999', mainTranscriptId: 'ENST00000001', hgvsc: undefined, hgvsp: undefined,
+  }))
+  expect(wrapper.find('input[placeholder="ENSG00000999999 (search to change)"]').exists()).toBe(true)
+})
+
+test('does not render the manual variant edit button when the project is not editable', () => {
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    projectsByGuid: {
+      ...STATE_WITH_2_FAMILIES.projectsByGuid,
+      R0237_1000_genomes_demo: { ...STATE_WITH_2_FAMILIES.projectsByGuid.R0237_1000_genomes_demo, canEdit: false },
+    },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <EditManualVariantButton variant={MANUAL_VARIANT} />
+    </Provider>,
+  )
+
+  expect(wrapper.text()).toEqual('')
 })

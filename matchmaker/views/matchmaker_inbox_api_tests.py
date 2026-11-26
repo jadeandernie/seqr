@@ -451,6 +451,7 @@ class MatchmakerInboxAPITest(MatchmakerInboxTestMixin, AuthenticationTestCase):
 
 
 class AnvilMatchmakerInboxAPITest(MatchmakerInboxTestMixin, AnvilAuthenticationTestCase):
+    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data']
 
     def test_matchmaker_inbox_analysis_group_access(self):
         self._create_results()

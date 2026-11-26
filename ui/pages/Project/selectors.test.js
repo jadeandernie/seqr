@@ -4,7 +4,8 @@ import orderBy from 'lodash/orderBy'
 import { getVisibleFamilies, getVisibleFamiliesInSortedOrder, getProjectExportUrls, getCurrentAnalysisGroup,
   getCaseReviewStatusCounts, getProjectAnalysisGroupFamiliesByGuid, getIndividualTaggedVariants,
   getDefaultMmeSubmission, getMmeResultsBySubmission, getMmeDefaultContactEmail, getIndividualPhenotypeGeneScores,
-  getCompletenessByFamilyGuid, getProjectAnalysisGroupCompleteness,
+  getCompletenessByFamilyGuid, getProjectAnalysisGroupCompleteness, getOpenDataRequestsByIndividualGuid,
+  getProjectOpenDataRequests,
 } from './selectors'
 
 import { STATE_WITH_2_FAMILIES } from './fixtures'
@@ -287,4 +288,59 @@ test('getVisibleFamilies filtered by clinical data completeness', () => {
   expect(visibleGuids('SHOW_CLINICAL_DATA_INCOMPLETE')).toEqual(['F011652_1', 'F011652_2'])
   expect(visibleGuids('SHOW_CLINICAL_DATA_UNDER_HALF')).toEqual(['F011652_2'])
   expect(visibleGuids('SHOW_CLINICAL_DATA_NO_FEATURES')).toEqual(['F011652_1', 'F011652_2'])
+})
+
+const DATA_REQUEST = {
+  dataRequestGuid: 'DR1',
+  individualGuid: 'I021474_na19679_1',
+  familyGuid: 'F011652_1',
+  projectGuid: 'R0237_1000_genomes_demo',
+  status: 'O',
+  createdDate: '2026-11-20T10:00:00Z',
+}
+const DATA_REQUEST_STATE = {
+  ...STATE_WITH_2_FAMILIES,
+  dataRequestsByGuid: {
+    DR1: DATA_REQUEST,
+    DR2: { ...DATA_REQUEST, dataRequestGuid: 'DR2', individualGuid: 'I021476_na19678_1', createdDate: '2026-10-01T10:00:00Z' },
+    DR3: { ...DATA_REQUEST, dataRequestGuid: 'DR3', individualGuid: 'I021476_na19678_2', familyGuid: 'F011652_2', status: 'F' },
+    DR4: { ...DATA_REQUEST, dataRequestGuid: 'DR4', individualGuid: 'I_other', familyGuid: 'F_other', projectGuid: 'R_other' },
+  },
+}
+
+test('getOpenDataRequestsByIndividualGuid', () => {
+  expect(getOpenDataRequestsByIndividualGuid(STATE_WITH_2_FAMILIES)).toEqual({})
+  expect(getOpenDataRequestsByIndividualGuid(DATA_REQUEST_STATE)).toEqual({
+    I021474_na19679_1: DATA_REQUEST,
+    I021476_na19678_1: DATA_REQUEST_STATE.dataRequestsByGuid.DR2,
+    I_other: DATA_REQUEST_STATE.dataRequestsByGuid.DR4,
+  })
+})
+
+test('getProjectOpenDataRequests returns the open requests of the current project, oldest first', () => {
+  expect(getProjectOpenDataRequests(STATE_WITH_2_FAMILIES)).toEqual([])
+  expect(getProjectOpenDataRequests(DATA_REQUEST_STATE).map(({ dataRequestGuid }) => dataRequestGuid)).toEqual(
+    ['DR2', 'DR1'],
+  )
+})
+
+test('getVisibleFamilies filtered by open data request', () => {
+  const visibleGuids = (state, filters = ['SHOW_OPEN_DATA_REQUEST']) => getVisibleFamilies({
+    ...state,
+    familyTableFilterState: { R0237_1000_genomes_demo: { firstSample: filters } },
+  }, {}).map(({ familyGuid }) => familyGuid)
+
+  // fulfilled requests and requests in other projects do not count
+  expect(visibleGuids(DATA_REQUEST_STATE)).toEqual(['F011652_1'])
+  expect(visibleGuids(STATE_WITH_2_FAMILIES)).toEqual([])
+  expect(visibleGuids(DATA_REQUEST_STATE, [])).toEqual(['F011652_1', 'F011652_2'])
+
+  const fulfilledState = {
+    ...DATA_REQUEST_STATE,
+    dataRequestsByGuid: {
+      DR1: { ...DATA_REQUEST, status: 'F' },
+      DR3: { ...DATA_REQUEST_STATE.dataRequestsByGuid.DR3, status: 'O' },
+    },
+  }
+  expect(visibleGuids(fulfilledState)).toEqual(['F011652_2'])
 })

@@ -35,6 +35,7 @@ const REQUEST_MME_SUBMISSIONS = 'REQUEST_MME_SUBMISSIONS'
 const REQUEST_LOCUS_LISTS = 'REQUEST_LOCUS_LISTS'
 const RECEIVE_LOCUS_LISTS = 'RECEIVE_LOCUS_LISTS'
 const RECEIVE_RNA_SEQ_UPLOAD_STATS = 'RECEIVE_RNA_SEQ_UPLOAD_STATS'
+const REQUEST_DATA_REQUESTS = 'REQUEST_DATA_REQUESTS'
 
 // Data actions
 
@@ -87,6 +88,26 @@ export const loadProjectAnalysisGroupCollaborators = analysisGroupGuid => (
 export const loadCurrentProjectAnalysisGroups = () => (dispatch, getState) => {
   const { currentProjectGuid } = getState()
   return loadProjectAnalysisGroups(currentProjectGuid)(dispatch, getState)
+}
+
+// Listing data requests needs access to the whole project, which is only known once its details are loaded
+export const loadDataRequests = () => (dispatch, getState) => {
+  const { currentProjectGuid, projectsByGuid, dataRequestsLoading } = getState()
+  const project = projectsByGuid[currentProjectGuid]
+  if (project && project.canEdit !== undefined && !project.partialAccess && !dataRequestsLoading.isLoading) {
+    loadProjectChildEntities(currentProjectGuid, 'data requests', REQUEST_DATA_REQUESTS)(dispatch, getState)
+  }
+}
+
+// Requests are created from a checklist of fields and coded values only, and never include free text
+export const updateDataRequest = ({
+  projectGuid, dataRequestGuid, status, individualGuid, requestedFields, reason, assignedTo,
+}) => (dispatch) => {
+  const urlBase = `/api/project/${projectGuid}/data_requests`
+  return new HttpRequestHelper(dataRequestGuid ? `${urlBase}/${dataRequestGuid}/update_status` : `${urlBase}/create`,
+    (responseJson) => {
+      dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+    }).post(dataRequestGuid ? { status } : { individualGuid, requestedFields, reason, assignedTo })
 }
 
 export const loadProjectLocusLists = () => loadCurrentProjectChildEntities('locus lists', REQUEST_LOCUS_LISTS, RECEIVE_LOCUS_LISTS)
@@ -432,6 +453,7 @@ export const reducers = {
   projectOverviewLoading: loadingReducer(REQUEST_PROJECT_OVERVIEW, RECEIVE_PROJECT_OVERVIEW),
   projectCollaboratorsLoading: loadingReducer(REQUEST_PROJECT_COLLABORATORS, RECEIVE_PROJECT_COLLABORATORS),
   projectLocusListsLoading: loadingReducer(REQUEST_LOCUS_LISTS, RECEIVE_LOCUS_LISTS),
+  dataRequestsLoading: loadingReducer(REQUEST_DATA_REQUESTS, RECEIVE_DATA),
   familyTableState: createSingleObjectReducer(UPDATE_FAMILY_TABLE_STATE, {
     familiesSearch: '',
     familiesSortOrder: SORT_BY_FAMILY_NAME,

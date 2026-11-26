@@ -29,9 +29,11 @@ test('renders the project sections and the families table', () => {
 
   const sectionHeaders = wrapper.find('StyledComponents__SectionHeader').map(header => header.text())
   expect(sectionHeaders).toEqual([
-    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Notifications', 'Collaborators', 'Families',
+    'Analysis Groups', 'Access Groups', 'Gene Lists', 'Overview', 'Variant Tags', 'Notifications', 'Data Requests',
+    'Collaborators', 'Families',
   ])
   expect(wrapper.find('FamilyTableRow').length).toEqual(2)
+  expect(wrapper.text()).toContain('Data RequestsNo open data requests')
 })
 
 test('renders an analysis group page without an edit button or notifications section', () => {
@@ -49,6 +51,7 @@ test('renders an analysis group page without an edit button or notifications sec
   expect(sectionHeaders).toEqual([
     'Analysis Group', 'Gene Lists', 'Overview', 'Variant Tags', 'Collaborators', 'Families',
   ])
+  expect(wrapper.text()).not.toContain('No open data requests')
   expect(wrapper.find('Link').someWhere(
     link => link.prop('to') === '/project/R0237_1000_genomes_demo/saved_variants/analysis_group/AG0000183_test_group',
   )).toBe(true)

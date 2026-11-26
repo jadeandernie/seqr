@@ -316,3 +316,22 @@ test('filters visible families by clinical data completeness', () => {
     ['Fully Complete', 'Incomplete', 'Less Than 50% Complete', 'Affected Individuals Without HPO Terms'],
   )
 })
+
+test('offers a filter for families with an open data request', () => {
+  const state = {
+    ...STATE_WITH_2_FAMILIES,
+    dataRequestsByGuid: {
+      DR1: { dataRequestGuid: 'DR1', familyGuid: 'F011652_2', projectGuid: 'R0237_1000_genomes_demo', status: 'O' },
+      DR2: { dataRequestGuid: 'DR2', familyGuid: 'F011652_1', projectGuid: 'R0237_1000_genomes_demo', status: 'C' },
+    },
+    familyTableFilterState: { R0237_1000_genomes_demo: { firstSample: ['SHOW_OPEN_DATA_REQUEST'] } },
+  }
+  const wrapper = renderHeaderRow({ fields: [{ id: 'firstSample' }] }, state)
+  expect(headerText(wrapper)).toEqual('Showing 1 out of 2 families')
+  const options = wrapper.find('BaseFamilyTableFilter').first().prop('options')
+  expect(options.filter(({ category }) => category === 'Clinical Data Requests').map(({ name }) => name)).toEqual(
+    ['Has Open Data Request'],
+  )
+
+  expect(headerText(renderHeaderRow({}, { ...state, dataRequestsByGuid: {} }))).toEqual('Showing 0 out of 2 families')
+})

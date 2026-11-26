@@ -22,6 +22,7 @@ import AnalysisGroups from './AnalysisGroups'
 import { UpdateAnalysisGroupButton } from './AnalysisGroupButtons'
 import ProjectCollaborators from './ProjectCollaborators'
 import ProjectNotifications from './ProjectNotifications'
+import { DataRequestsPanel } from './DataRequests'
 import { GeneLists, AddGeneListsButton } from './GeneLists'
 import FamilyTable from './FamilyTable/FamilyTable'
 import VariantTags from './VariantTags'
@@ -108,6 +109,12 @@ const ProjectPageUI = React.memo(({ analysisGroupGuid, load, loading, familiesLo
           {!analysisGroupGuid && (
             <ProjectSection label="Notifications">
               <ProjectNotifications />
+            </ProjectSection>
+          )}
+          <VerticalSpacer height={10} />
+          {!analysisGroupGuid && (
+            <ProjectSection label="Data Requests">
+              <DataRequestsPanel />
             </ProjectSection>
           )}
           <VerticalSpacer height={10} />

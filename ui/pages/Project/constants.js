@@ -2,6 +2,7 @@
 
 import { stripMarkdown } from 'shared/utils/stringUtils'
 import { COMPLETENESS_FAMILY_FILTERS, createCompletenessSortKeyGetter } from 'shared/utils/completeness'
+import { HAS_OPEN_DATA_REQUEST_FILTER } from 'shared/utils/dataRequests'
 import {
   CATEGORY_FAMILY_FILTERS,
   ASSIGNED_TO_ME_FILTER,
@@ -309,6 +310,7 @@ export const PROJECT_CATEGORY_FAMILY_FILTERS = {
       createFilter: family => !familyHasRequiredMetadata(family),
     },
     ...COMPLETENESS_FAMILY_FILTERS,
+    HAS_OPEN_DATA_REQUEST_FILTER,
   ],
   [FAMILY_FIELD_SAVED_VARIANTS]: [MME_TAG_NAME, ANALYST_HIGH_PRIORITY_TAG].map(tagName => ({
     value: tagName,

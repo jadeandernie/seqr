@@ -8,6 +8,7 @@ import { reducers as reportReducers } from 'pages/Report/reducers'
 import { reducers as summaryDataReducers } from 'pages/SummaryData/reducers'
 import { HttpRequestHelper } from 'shared/utils/httpRequestHelper'
 import { hasFamilyCompletenessUpdate } from 'shared/utils/completeness'
+import { getOpenDataRequests } from 'shared/utils/dataRequests'
 import {
   createObjectsByIdReducer, loadingReducer, zeroActionsReducer, createSingleObjectReducer, createSingleValueReducer,
 } from './utils/reducerFactories'
@@ -82,6 +83,16 @@ export const loadFamilyDetails = familyGuid => loadFamilyData(
   familyGuid, 'detailsLoaded', 'details', REQUEST_FAMILY_DETAILS, true,
 )
 
+// Open data requests are fulfilled by the server when the requested data is recorded
+const reloadOpenDataRequests = (dispatch, getState, guidField, guid) => {
+  const dataRequests = getOpenDataRequests(getState().dataRequestsByGuid).filter(request => request[guidField] === guid)
+  if (dataRequests.length) {
+    new HttpRequestHelper(`/api/project/${dataRequests[0].projectGuid}/get_data_requests`, (responseJson) => {
+      dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+    }).get({ status: 'all', dataRequestGuids: dataRequests.map(({ dataRequestGuid }) => dataRequestGuid).join(',') })
+  }
+}
+
 export const updateFamily = (values) => {
   const urlBase = `/api/family/${values.familyGuid}`
   if (values.nestedField) {
@@ -107,15 +118,17 @@ export const updateFamily = (values) => {
         new HttpRequestHelper(`${urlBase}/details`, (detailsJson) => {
           dispatch({ type: RECEIVE_DATA, updatesById: detailsJson })
         }).get()
+        reloadOpenDataRequests(dispatch, getState, 'familyGuid', values.familyGuid)
       }
     }).post(values)
 }
 
-export const updateIndividual = values => (dispatch) => {
+export const updateIndividual = values => (dispatch, getState) => {
   const individualField = values.individualField ? `_${values.individualField}` : ''
   return new HttpRequestHelper(`/api/individual/${values.individualGuid}/update${individualField}`,
     (responseJson) => {
       dispatch({ type: RECEIVE_DATA, updatesById: { individualsByGuid: responseJson } })
+      reloadOpenDataRequests(dispatch, getState, 'individualGuid', values.individualGuid)
     }).post(values)
 }
 
@@ -271,6 +284,7 @@ const rootReducer = combineReducers({
   familyNotesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'familyNotesByGuid'),
   familyDetailsLoading: createSingleObjectReducer(REQUEST_FAMILY_DETAILS),
   individualsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'individualsByGuid'),
+  dataRequestsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'dataRequestsByGuid'),
   datasetsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'datasetsByGuid'),
   igvSamplesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'igvSamplesByGuid'),
   analysisGroupsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'analysisGroupsByGuid'),

@@ -27,6 +27,7 @@ import { loadSavedVariants, updateSavedVariantTable } from '../reducers'
 import {
   getCurrentProject, getProjectTagTypeOptions, getTaggedVariantsByFamily, getProjectVariantSavedByOptions,
   getSavedVariantTagTypeCounts, getSavedVariantTagTypeCountsByFamily, getSavedVariantTableState,
+  getProjectSavedVariantTagTypeCounts,
 } from '../selectors'
 import VariantTagTypeBar, { getSavedVariantsLinkPath } from './VariantTagTypeBar'
 import SelectSavedVariantsTable, { TAG_COLUMN, VARIANT_POS_COLUMN, GENES_COLUMN } from './SelectSavedVariantsTable'
@@ -167,7 +168,7 @@ class BaseProjectSavedVariants extends React.PureComponent {
 
   loadVariants = (newParams) => {
     const { analysisGroupFamilyGuids, match, loadProjectSavedVariants, updateTableField } = this.props
-    const { familyGuid, variantGuid, analysisGroupGuid } = match.params
+    const { familyGuid, variantGuid, analysisGroupGuid, tag } = match.params
 
     const isInitialLoad = match.params === newParams
     const hasUpdatedFamilies = newParams.familyGuid !== familyGuid ||
@@ -177,7 +178,7 @@ class BaseProjectSavedVariants extends React.PureComponent {
     const familyGuids = newParams.familyGuid ? [newParams.familyGuid] : analysisGroupFamilyGuids
 
     updateTableField('page')(1)
-    if (isInitialLoad || hasUpdatedFamilies) {
+    if (isInitialLoad || hasUpdatedFamilies || newParams.tag !== tag) {
       loadProjectSavedVariants({ familyGuids, ...newParams })
     }
   }
@@ -270,12 +271,18 @@ class BaseProjectSavedVariants extends React.PureComponent {
 
 }
 
+const getTagTypeCounts = (state, ownProps) => {
+  const { familyGuid, analysisGroupGuid } = ownProps.match.params
+  if (familyGuid) {
+    return getSavedVariantTagTypeCountsByFamily(state)[familyGuid]
+  }
+  return analysisGroupGuid ? getSavedVariantTagTypeCounts(state, ownProps) : getProjectSavedVariantTagTypeCounts(state)
+}
+
 const mapStateToProps = (state, ownProps) => ({
   project: getCurrentProject(state),
   analysisGroupFamilyGuids: getCurrentAnalysisGroupFamilyGuids(state, ownProps),
-  tagTypeCounts: ownProps.match.params.familyGuid ?
-    getSavedVariantTagTypeCountsByFamily(state)[ownProps.match.params.familyGuid] :
-    getSavedVariantTagTypeCounts(state, ownProps),
+  tagTypeCounts: getTagTypeCounts(state, ownProps),
   categoryFilter: getSavedVariantTableState(state)?.categoryFilter,
 })
 

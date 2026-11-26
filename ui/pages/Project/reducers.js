@@ -7,9 +7,11 @@ import {
   REQUEST_SAVED_VARIANTS, updateEntity, loadProjectChildEntities, loadFamilyData, loadProjectDetails,
   loadProjectAnalysisGroups,
 } from 'redux/utils/reducerUtils'
-import { SHOW_ALL, SORT_BY_FAMILY_GUID, NOTE_TAG_NAME } from 'shared/utils/constants'
+import { SHOW_ALL, SORT_BY_FAMILY_GUID, NOTE_TAG_NAME, MME_TAG_NAME } from 'shared/utils/constants'
 import { HttpRequestHelper, loadMultipleData } from 'shared/utils/httpRequestHelper'
-import { SHOW_IN_REVIEW, SORT_BY_FAMILY_NAME, SORT_BY_FAMILY_ADDED_DATE, CASE_REVIEW_TABLE_NAME } from './constants'
+import {
+  SHOW_IN_REVIEW, SORT_BY_FAMILY_NAME, SORT_BY_FAMILY_ADDED_DATE, CASE_REVIEW_TABLE_NAME, getSavedVariantTagKey,
+} from './constants'
 
 // action creators and reducers in one file as suggested by https://github.com/erikras/ducks-modular-redux
 const RECEIVE_DATA = 'RECEIVE_DATA'
@@ -18,6 +20,7 @@ const UPDATE_FAMILY_TABLE_FILTER_STATE = 'UPDATE_FAMILY_TABLE_FILTER_STATE'
 const UPDATE_CASE_REVIEW_TABLE_STATE = 'UPDATE_CASE_REVIEW_TABLE_STATE'
 const UPDATE_CURRENT_PROJECT = 'UPDATE_CURRENT_PROJECT'
 const RECEIVE_SAVED_VARIANT_FAMILIES = 'RECEIVE_SAVED_VARIANT_FAMILIES'
+const RECEIVE_PROJECT_SAVED_VARIANT_TAGS = 'RECEIVE_PROJECT_SAVED_VARIANT_TAGS'
 const UPDATE_SAVED_VARIANT_TABLE_STATE = 'UPDATE_VARIANT_STATE'
 const REQUEST_MME_MATCHES = 'REQUEST_MME_MATCHES'
 const RECEIVE_MME_MATCHES = 'RECEIVE_MME_MATCHES'
@@ -95,13 +98,18 @@ export const loadFamilyVariantSummary = familyGuid => loadFamilyData(
   familyGuid, 'discoveryGeneIds', 'variant_tag_summary', REQUEST_FAMILY_VARIANT_SUMMARY,
 )
 
+// Variants with notes or MME submissions may be untagged, so are not all included when loading all tagged variants
+const UNTAGGED_VARIANT_TAGS = new Set([NOTE_TAG_NAME, MME_TAG_NAME])
+
 export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatch, getState) => {
   const state = getState()
   const projectGuid = state.currentProjectGuid
 
   let url = `/api/project/${projectGuid}/saved_variants`
 
-  const loadNotes = tag === NOTE_TAG_NAME || familyGuids
+  const isProjectLoad = !familyGuids && !variantGuid
+  const projectTag = isProjectLoad && tag && tag !== SHOW_ALL ? tag : null
+  const loadAllFamilyVariants = !!familyGuids || UNTAGGED_VARIANT_TAGS.has(projectTag)
 
   // Do not load if already loaded
   let expectedFamilyGuids
@@ -120,8 +128,16 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
 
     if ((expectedFamilyGuids || []).length > 0 && expectedFamilyGuids.every((family) => {
       const { loaded, noteVariants } = state.savedVariantFamilies[family] || {}
-      return loaded && (noteVariants || !loadNotes)
+      return loaded && (noteVariants || !loadAllFamilyVariants)
     })) {
+      return
+    }
+
+    const loadedTags = state.projectSavedVariantTags || {}
+    if (isProjectLoad && (
+      loadedTags[getSavedVariantTagKey(projectGuid, projectTag)] ||
+      (!loadAllFamilyVariants && loadedTags[getSavedVariantTagKey(projectGuid)])
+    )) {
       return
     }
   }
@@ -135,18 +151,24 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
   }
   if (familyGuids) {
     params.families = familyGuids.join(',')
-  } else if (loadNotes) {
-    params.includeNoteVariants = true
+  } else if (projectTag) {
+    params.tag = projectTag
   }
 
   dispatch({ type: REQUEST_SAVED_VARIANTS })
   new HttpRequestHelper(url,
     (responseJson) => {
-      if (expectedFamilyGuids || responseJson.familiesByGuid) {
+      if (isProjectLoad) {
+        dispatch({
+          type: RECEIVE_PROJECT_SAVED_VARIANT_TAGS, updates: { [getSavedVariantTagKey(projectGuid, projectTag)]: true },
+        })
+      }
+      // A tag specific response does not include all the variants for a family
+      if (!projectTag && (expectedFamilyGuids || responseJson.familiesByGuid)) {
         dispatch({
           type: RECEIVE_SAVED_VARIANT_FAMILIES,
           updates: (expectedFamilyGuids || Object.keys(responseJson.familiesByGuid)).reduce(
-            (acc, family) => ({ ...acc, [family]: { loaded: true, noteVariants: loadNotes } }), {},
+            (acc, family) => ({ ...acc, [family]: { loaded: true, noteVariants: familyGuids } }), {},
           ),
         })
       }
@@ -425,6 +447,7 @@ export const reducers = {
   familyTagTypeCounts: createObjectsByIdReducer(RECEIVE_DATA, 'familyTagTypeCounts'),
   importStats: createObjectsByIdReducer(RECEIVE_DATA, 'importStats'),
   savedVariantFamilies: createSingleObjectReducer(RECEIVE_SAVED_VARIANT_FAMILIES),
+  projectSavedVariantTags: createSingleObjectReducer(RECEIVE_PROJECT_SAVED_VARIANT_TAGS),
   familiesLoading: loadingReducer(REQUEST_FAMILIES, RECEIVE_FAMILIES),
   familyVariantSummaryLoading: loadingReducer(REQUEST_FAMILY_VARIANT_SUMMARY, RECEIVE_DATA),
   individualsLoading: loadingReducer(REQUEST_INDIVIDUALS, RECEIVE_DATA),

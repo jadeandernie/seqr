@@ -4,7 +4,7 @@ import mock
 from django.urls.base import reverse
 
 from clickhouse_search.all_search_tests import ClickhouseSearchTestCase
-from seqr.models import SavedVariant, VariantNote, VariantTag, VariantFunctionalData, Project
+from seqr.models import SavedVariant, VariantNote, VariantTag, VariantTagType, VariantFunctionalData, Project
 from seqr.views.apis.saved_variant_api import saved_variant_data, create_variant_note_handler, create_saved_variant_handler, \
     update_variant_note_handler, delete_variant_note_handler, update_variant_tags_handler, create_manual_saved_variant_handler, \
     update_variant_main_transcript, update_variant_functional_data_handler, update_variant_acmg_classification_handler
@@ -375,6 +375,47 @@ class SavedVariantAPITest(ClickhouseSearchTestCase):
         self.assertEqual(len(response_json['locusListsByGuid']), 1)
         self.assertDictEqual(response_json['projectsByGuid'], {PROJECT_GUID: {'familiesLoaded': True}})
 
+        # filter by tag
+        response = self.client.get(f'{load_family_context_url}&tag=Review')
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        family_context_response_keys.remove('projectsByGuid')
+        self.assertSetEqual(set(response_json.keys()), family_context_response_keys)
+        self.assertSetEqual(set(response_json['savedVariantsByGuid'].keys()), {VARIANT_GUID})
+        self.assertSetEqual(set(response_json['familiesByGuid'].keys()), {'F000001_1'})
+
+        for tag, expected_guids in [
+            ('Excluded', {VARIANT_GUID_2}), ('Has Notes', {VARIANT_GUID_2}), ('MME Submission', {VARIANT_GUID}),
+            ('Not a tag', set()),
+        ]:
+            response = self.client.get(f'{url}?tag={tag}')
+            self.assertEqual(response.status_code, 200)
+            self.assertSetEqual(set(response.json()['savedVariantsByGuid'].keys()), expected_guids)
+
+        # the family filter takes precedence over the tag filter
+        response = self.client.get(f'{url}?families=F000001_1&tag=Excluded')
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(
+            set(response.json()['savedVariantsByGuid'].keys()), {VARIANT_GUID, COMPOUND_HET_1_GUID, COMPOUND_HET_2_GUID})
+
+        # variants linked to a tagged variant by a shared tag or note are included
+        comp_het_variants = SavedVariant.objects.filter(guid__in=[COMPOUND_HET_1_GUID, COMPOUND_HET_2_GUID])
+        aip_tag = VariantTag.objects.create(variant_tag_type=VariantTagType.objects.get(name='AIP'))
+        aip_tag.saved_variants.set(comp_het_variants.filter(guid=COMPOUND_HET_1_GUID))
+        note = VariantNote.objects.create(note='linked')
+        note.saved_variants.set(comp_het_variants)
+        linked_tag = VariantTag.objects.create(variant_tag_type=VariantTagType.objects.get(name='Excluded'))
+        linked_tag.saved_variants.set(SavedVariant.objects.filter(guid__in=[VARIANT_GUID, COMPOUND_HET_2_GUID]))
+        response = self.client.get(f'{url}?tag=AIP')
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(
+            set(response.json()['savedVariantsByGuid'].keys()), {VARIANT_GUID_2, COMPOUND_HET_1_GUID, COMPOUND_HET_2_GUID})
+        response = self.client.get(f'{url}?tag=Review')
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(set(response.json()['savedVariantsByGuid'].keys()), {VARIANT_GUID, COMPOUND_HET_2_GUID})
+        VariantTag.objects.filter(guid__in=[aip_tag.guid, linked_tag.guid]).delete()
+        note.delete()
+
         # Test with discovery SVs
         response = self.client.get(url.replace(PROJECT_GUID, 'R0003_test'))
         self.assertEqual(response.status_code, 200)
@@ -423,9 +464,9 @@ class SavedVariantAPITest(ClickhouseSearchTestCase):
             mock.ANY, 'ext-data', 'empty')
         self.mock_get_ws_access_level.assert_called_with(
             mock.ANY, 'my-seqr-billing', 'anvil-1kg project n\u00e5me with uni\u00e7\u00f8de')
-        self.assertEqual(self.mock_get_ws_access_level.call_count, 27)
+        self.assertEqual(self.mock_get_ws_access_level.call_count, 36)
         self.mock_get_groups.assert_called_with(self.collaborator_user)
-        self.assertEqual(self.mock_get_groups.call_count, 2)
+        self.assertEqual(self.mock_get_groups.call_count, 3)
         self.mock_get_ws_acl.assert_not_called()
         self.mock_get_group_members.assert_not_called()
 

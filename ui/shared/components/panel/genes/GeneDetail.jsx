@@ -8,11 +8,12 @@ import { Grid, Popup, Loader, Label } from 'semantic-ui-react'
 
 import { loadGene, updateGeneNote } from 'redux/rootReducer'
 import { getGenesIsLoading, getGenesById, getUser } from 'redux/selectors'
-import { getDecipherGeneLink } from 'shared/utils/constants'
+import { getGeneResourceLinks, getOmimEntryUrl, getOtherGeneNames } from 'shared/utils/externalResources'
 import { SectionHeader, ColoredLabel } from '../../StyledComponents'
 import DataLoader from '../../DataLoader'
 import NoteListFieldView from '../view-fields/NoteListFieldView'
 import { HorizontalSpacer } from '../../Spacers'
+import ExternalLink from '../external-resources/ExternalLink'
 
 const Gtex = React.lazy(() => import('../../graph/Gtex'))
 
@@ -82,7 +83,7 @@ const textWithLinks = (text) => {
   )
 }
 
-export const getOtherGeneNames = gene => (gene.geneNames || '').split(';').filter(name => name !== gene.geneSymbol)
+export { getOtherGeneNames }
 
 const ScoreDetails = ({ scores, fields, note, rankDescription }) => {
   const fieldsToShow = fields.map(({ field, shouldShow, ...config }) => {
@@ -304,7 +305,7 @@ const GeneDetailContent = React.memo(({ gene, user, updateGeneNote: dispatchUpda
           {gene.omimPhenotypes.map(phenotype => (
             <span key={phenotype.phenotypeDescription}>
               {phenotype.phenotypeMimNumber ? (
-                <a href={`http://www.omim.org/entry/${phenotype.phenotypeMimNumber}`} target="_blank" rel="noreferrer">
+                <a href={getOmimEntryUrl(phenotype.phenotypeMimNumber)} target="_blank" rel="noreferrer">
                   {phenotype.phenotypeDescription}
                 </a>
               ) : phenotype.phenotypeDescription}
@@ -323,38 +324,20 @@ const GeneDetailContent = React.memo(({ gene, user, updateGeneNote: dispatchUpda
       content: gene.genCc?.classifications ? <GenCC genCc={gene.genCc} /> : <i>Not Submitted</i>,
     },
   ]
-  const linkDetails = [
-    gene.mimNumber ? { title: 'OMIM', link: `http://www.omim.org/entry/${gene.mimNumber}`, description: 'Database of Mendelian phenotypes' } : null,
-    { title: 'PubMed', link: `http://www.ncbi.nlm.nih.gov/pubmed/?term=(${[gene.geneSymbol, ...otherGeneNames].join(' OR ')})`, description: 'Search PubMed' },
-    { title: 'GeneCards', link: `http://www.genecards.org/cgi-bin/carddisp.pl?gene=${gene.geneId}`, description: 'Reference of public data for this gene' },
-    { title: 'Protein Atlas', link: `http://www.proteinatlas.org/${gene.geneId}/tissue`, description: 'Detailed protein and transcript expression' },
-    { title: 'NCBI Gene', link: `http://www.ncbi.nlm.nih.gov/gene/?term=${gene.geneId}`, description: 'NCBI\'s gene information resource' },
-    { title: 'GTEx Portal', link: `http://www.gtexportal.org/home/gene/${gene.geneId}`, description: 'Reference of public data for this gene' },
-    { title: 'Monarch', link: `https://monarchinitiative.org/explore?search=${gene.geneSymbol}#search`, description: 'Cross-species gene and phenotype resource' },
-    { title: 'Decipher', link: getDecipherGeneLink(gene), description: 'DatabasE of genomiC varIation and Phenotype in Humans using Ensembl Resources' },
-    { title: 'UniProt', link: `http://www.uniprot.org/uniprot?query=${gene.geneId}+AND(reviewed:true)+AND(organism_id:9606)`, description: 'Protein sequence and functional information' },
-    { title: 'Geno2MP', link: `https://geno2mp.gs.washington.edu/Geno2MP/#/gene/${gene.geneSymbol}/gene/0/0/0`, description: 'Genotype to Mendelian Phenotype' },
-    { title: 'gnomAD', link: `https://gnomad.broadinstitute.org/gene/${gene.geneId}?dataset=gnomad_r4`, description: 'Genome Aggregation Database' },
-    { title: 'primAD', link: `http://primad.basespace.illumina.com/gene/${gene.geneSymbol}`, description: 'Primate Genome Aggregation Database' },
-    gene.mgiMarkerId ? { title: 'MGI', link: `http://www.informatics.jax.org/marker/${gene.mgiMarkerId}`, description: 'Mouse Genome Informatics' } : null,
-    gene.mgiMarkerId ? { title: 'IMPC', link: `https://www.mousephenotype.org/data/genes/${gene.mgiMarkerId}`, description: 'International Mouse Phenotyping Consortium' } : null,
-    { title: 'KEGG', link: `https://www.kegg.jp/kegg-bin/search_pathway_text?keyword=${gene.geneSymbol}&viewImage=true`, description: 'Pathway maps representing known molecular interaction' },
-    gene.clinGen ? { title: 'ClinGen', link: gene.clinGen.href, description: 'ClinGen Dosage Sensitivity' } : null,
-    { title: 'ClinVar', link: `https://www.ncbi.nlm.nih.gov/clinvar?term=${gene.geneSymbol}[gene]`, description: 'Aggregated information about human genomic variation' },
-    user.isAnalyst ? { title: 'HGMD', link: `https://my.qiagendigitalinsights.com/bbp/view/hgmd/pro/gene.php?gene=${gene.geneSymbol}`, description: 'Human Gene Mutation Database ' } : null,
-  ]
+  const links = getGeneResourceLinks(gene, user)
+  const flyoutContext = { entity: 'gene', title: gene.geneSymbol, geneId: gene.geneId, links }
   return (
     <div>
-      {linkDetails.filter(linkConfig => linkConfig).map(linkConfig => (
+      {links.map(link => (
         <Popup
-          key={linkConfig.title}
+          key={link.key}
           trigger={
-            <a href={linkConfig.link} target="_blank" rel="noreferrer">
-              <b>{linkConfig.title}</b>
+            <ExternalLink link={link} context={flyoutContext}>
+              <b>{link.label}</b>
               <HorizontalSpacer width={20} />
-            </a>
+            </ExternalLink>
           }
-          content={linkConfig.description}
+          content={link.description}
         />
       ))}
       <SectionHeader>Basics</SectionHeader>

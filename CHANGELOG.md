@@ -2,6 +2,7 @@
 
 ## dev
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
+* Adds a side panel that shows gene and variant resources which allow embedding without leaving seqr. This adds a frame-src Content-Security-Policy directive listing those resources
 
 ## 11/24/26
 * Adds AlphaGenome in silico score to clickhouse (REQUIRES DB MIGRATION)

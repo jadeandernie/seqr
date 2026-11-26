@@ -135,6 +135,8 @@ from seqr.views.apis.awesomebar_api import awesomebar_autocomplete_handler
 from seqr.views.apis.auth_api import login_required_error, login_view, logout_view, policies_required_error
 from seqr.views.apis.igv_api import fetch_igv_track, receive_igv_table_handler, update_individual_igv_sample, \
     receive_bulk_igv_table_handler
+from seqr.views.apis.report_template_api import project_report_templates, create_report_template, \
+    update_report_template, delete_report_template, family_report, preview_family_report
 from seqr.views.apis.analysis_group_api import update_analysis_group_handler, delete_analysis_group_handler, \
     update_dynamic_analysis_group_handler, delete_dynamic_analysis_group_handler, analysis_group_collaborators
 from seqr.views.apis.project_api import create_project_handler, update_project_handler, delete_project_handler, \
@@ -243,6 +245,13 @@ api_endpoints = {
     'project/(?P<project_guid>[^/]+)/save_individuals_metadata_table/(?P<upload_file_id>[^/]+)': save_individuals_metadata_table_handler,
 
     'project/(?P<project_guid>[^/]+)/analysis_groups/create': update_analysis_group_handler,
+    'project/(?P<project_guid>[^/]+)/report_templates': project_report_templates,
+    'project/(?P<project_guid>[^/]+)/report_templates/create': create_report_template,
+    'report_template/create': create_report_template,
+    'report_template/(?P<template_guid>[^/]+)/update': update_report_template,
+    'report_template/(?P<template_guid>[^/]+)/delete': delete_report_template,
+    'family/(?P<family_guid>[\w.|-]+)/report/(?P<template_guid>[^/]+)': family_report,
+    'family/(?P<family_guid>[\w.|-]+)/report_template_preview': preview_family_report,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/update': update_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/delete': delete_analysis_group_handler,
     'project/(?P<project_guid>[^/]+)/analysis_groups/(?P<analysis_group_guid>[^/]+)/get_collaborators': analysis_group_collaborators,

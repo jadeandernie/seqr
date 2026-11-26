@@ -70,6 +70,7 @@ psql -U postgres -c 'CREATE DATABASE seqrdb';
 ./manage.py check
 ./manage.py loaddata variant_tag_types
 ./manage.py loaddata variant_searches
+./manage.py loaddata report_templates
 ./manage.py update_all_reference_data --use-cached-omim
 ./manage.py createsuperuser
 ```

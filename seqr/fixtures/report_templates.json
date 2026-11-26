@@ -1,0 +1,32 @@
+[
+    {
+        "model": "seqr.reporttemplate",
+        "pk": 1,
+        "fields": {
+            "guid": "RT0000001_family_analysis_summ",
+            "created_date": "2026-11-26T00:00:00.000Z",
+            "created_by": null,
+            "last_modified_date": null,
+            "project": null,
+            "name": "Family analysis summary",
+            "description": "Research summary of a family: status, phenotype, individuals and all saved variants",
+            "audience": "researcher",
+            "body": "# Family analysis summary: {{family.displayName}}\n\n- Project: {{project.name}}\n- Genome build: {{project.genomeVersion}}\n- Date generated: {{date}}\n- Analysis status: {{family.analysisStatus}}\n- Coded phenotype: {{family.codedPhenotype}}\n- MONDO ID: {{family.mondoId}}\n\n## Individuals\n\n{{#individuals}}\n### {{individual.id}}\n\n- Sex: {{individual.sex}}\n- Affected status: {{individual.affected}}\n- Age of onset: {{individual.onset}}\n- HPO terms present: {{individual.hpoPresent}}\n- HPO terms absent: {{individual.hpoAbsent}}\n\n{{/individuals}}\n{{^individuals}}\nNo individuals are recorded for this family.\n\n{{/individuals}}\n## Saved variants\n\n{{#variants}}\n### {{variant.genes}}: {{variant.variantId}}\n\n- HGVS c.: {{variant.hgvsc}}\n- HGVS p.: {{variant.hgvsp}}\n- Zygosity: {{variant.zygosity}}\n- gnomAD allele frequency: {{variant.gnomadFrequency}}\n- ClinVar significance: {{variant.clinvar}}\n- ACMG classification: {{variant.acmg}}\n- Tags: {{variant.tags}}\n\n{{/variants}}\n{{^variants}}\nNo variants have been saved for this family.\n\n{{/variants}}\n"
+        }
+    },
+    {
+        "model": "seqr.reporttemplate",
+        "pk": 2,
+        "fields": {
+            "guid": "RT0000002_findings_summary",
+            "created_date": "2026-11-26T00:00:00.000Z",
+            "created_by": null,
+            "last_modified_date": null,
+            "project": null,
+            "name": "Findings summary",
+            "description": "Plain-language summary of research findings for a clinician",
+            "audience": "clinician",
+            "body": "# Findings summary for family {{family.displayName}}\n\nPrepared on {{date}} from the research project {{project.name}}.\n\nThis summary describes findings from a research analysis. It has not been produced by an accredited diagnostic laboratory. Any finding that could affect care needs to be confirmed by an accredited laboratory before it is acted on.\n\n## Where the analysis is up to\n\n- Current status of the analysis: {{family.analysisStatus}}\n- Condition being investigated: {{family.codedPhenotype}}\n\n## Who was included\n\n{{#individuals}}\n- {{individual.id}}: {{individual.sex}}, {{individual.affected}}. Clinical features recorded: {{individual.hpoPresent}}\n{{/individuals}}\n{{^individuals}}\nNo individuals are recorded for this family.\n{{/individuals}}\n\n## Genetic changes the research team has noted\n\n{{#variants}}\n### A change in {{variant.genes}}\n\n- The change: {{variant.hgvsc}} (effect on the protein: {{variant.hgvsp}})\n- Who carries it: {{variant.zygosity}}\n- How common it is in the general population (gnomAD): {{variant.gnomadFrequency}}\n- What public records say about it (ClinVar): {{variant.clinvar}}\n- How the research team has classified it (ACMG): {{variant.acmg}}\n\n{{/variants}}\n{{^variants}}\nThe research team has not noted any genetic changes for this family so far. This does not rule out a genetic cause.\n\n{{/variants}}\n"
+        }
+    }
+]

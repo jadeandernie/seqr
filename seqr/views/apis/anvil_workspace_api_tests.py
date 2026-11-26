@@ -1,14 +1,16 @@
 from copy import deepcopy
 from datetime import datetime
+import gzip
 import json
 import mock
 from django.urls.base import reverse
+from google.api_core.exceptions import Forbidden
 import responses
 
 from seqr.models import Project, Family, Individual
 from seqr.views.apis.anvil_workspace_api import anvil_workspace_page, create_project_from_workspace, \
     validate_anvil_vcf, grant_workspace_access, add_workspace_data, get_anvil_vcf_list, get_anvil_igv_options
-from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase, AirtableTest, \
+from seqr.views.utils.test_utils import AnvilAuthenticationTestCase, AuthenticationTestCase, AirtableTest, MockGoogleStorage, \
     TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME, TEST_WORKSPACE_NAME1, TEST_NO_PROJECT_WORKSPACE_NAME, TEST_NO_PROJECT_WORKSPACE_NAME2
 from seqr.views.utils.terra_api_utils import remove_token, TerraAPIException, TerraRefreshTokenFailedException
 from settings import SEQR_SLACK_ANVIL_DATA_LOADING_CHANNEL, SEQR_SLACK_LOADING_NOTIFICATION_CHANNEL
@@ -82,6 +84,8 @@ REQUEST_BODY.update(VALIDATE_VCF_BODY)
 REQUEST_BODY.update(VALIDATE_VFC_RESPONSE)
 
 TEMP_PATH = '/temp_path/temp_filename'
+TEMP_UPLOAD_FILE_PATH = 'gs://seqr-scratch-temp/temp_upload_test_temp_file_id.json.gz'
+GENE_ID_FILE_PATH = 'gs://seqr-loading-temp/v3.1/db_id_to_gene_id.csv.gz'
 
 MOCK_AIRTABLE_URL = 'http://testairtable'
 
@@ -302,9 +306,14 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.url,
                          '/login/google-oauth2?next=/api/create_project_from_workspace/my-seqr-billing/anvil-no-project-workspace1/grant_access')
 
-    @mock.patch('seqr.utils.file_utils.logger')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
-    def test_validate_anvil_vcf(self, mock_subprocess, mock_file_logger, mock_utils_logger):
+    @staticmethod
+    def _add_vcf(mock_gcs, path, lines):
+        content = b''.join([line.rstrip(b'\n') + b'\n' for line in lines])
+        mock_gcs.add_file(path, gzip.compress(content) if path.endswith('gz') else content)
+
+    @mock.patch('seqr.utils.google_storage_utils.logger')
+    def test_validate_anvil_vcf(self, mock_gs_logger, mock_utils_logger):
+        mock_gcs = MockGoogleStorage().start(self)
         # Requesting to load data from a workspace without an existing project
         url = reverse(validate_anvil_vcf,
                       args=[TEST_WORKSPACE_NAMESPACE, TEST_NO_PROJECT_WORKSPACE_NAME])
@@ -330,41 +339,42 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
 
         # Test bad data path
-        mock_subprocess.return_value.wait.return_value = -1
-        mock_subprocess.return_value.stdout = [b'File not found']
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['Data file or path /test_path.vcf.gz is not found.'])
-        mock_subprocess.assert_called_with('gsutil ls gs://test_bucket/test_path.vcf.gz', stdout=-1, stderr=-2, shell=True)  # nosec
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path.vcf.gz', self.manager_user),
+        mock_gcs.assert_calls(self, [
+            mock.call.exists('gs://test_bucket/test_path.vcf.gz'),
+            mock.call.list_blobs('gs://test_bucket', prefix='test_path.vcf.gz/', max_results=1),
         ])
-        mock_file_logger.warning.assert_has_calls([
-            mock.call('File not found', self.manager_user),
-        ])
+        mock_gs_logger.warning.assert_called_with(
+            'Unable to access gs://test_bucket/test_path.vcf.gz: One or more URLs matched no objects.', None)
 
-        # Test bad sharded data path
-        mock_file_logger.reset_mock()
-        mock_subprocess.return_value.communicate.return_value = b'', b'File not found'
+        # Test inaccessible data path
+        mock_gcs.bucket_errors['test_bucket'] = Forbidden('user does not have storage.objects.get access')
+        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], ['Data file or path /test_path.vcf.gz is not found.'])
+        mock_gs_logger.warning.assert_called_with(
+            'Unable to access gs://test_bucket/test_path.vcf.gz: 403 user does not have storage.objects.get access', None)
+
+        # Test inaccessible sharded data path
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_SHARDED_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['Data file or path /test_path-*.vcf.gz is not found.'])
-        mock_subprocess.assert_called_with('gsutil ls gs://test_bucket/test_path-*.vcf.gz', stdout=-1, stderr=-1, shell=True)  # nosec
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path-*.vcf.gz', self.manager_user),
-            mock.call('File not found', self.manager_user),
-        ])
+        mock_gs_logger.info.assert_called_with(
+            'Unable to list gs://test_bucket/test_path-*.vcf.gz: 403 user does not have storage.objects.get access', None)
 
         # Test empty sharded data path
-        mock_file_logger.reset_mock()
-        mock_subprocess.return_value.communicate.return_value = b'\n', b''
+        mock_gcs.bucket_errors.clear()
+        mock_gs_logger.reset_mock()
+        self._add_vcf(mock_gcs, 'gs://test_bucket/shards/test_path-001.vcf.gz', BASIC_META)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_SHARDED_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['Data file or path /test_path-*.vcf.gz is not found.'])
-        mock_subprocess.assert_called_with('gsutil ls gs://test_bucket/test_path-*.vcf.gz', stdout=-1, stderr=-1, shell=True)  # nosec
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path-*.vcf.gz', self.manager_user),
+        mock_gcs.assert_calls(self, [
+            mock.call.list_blobs('gs://test_bucket', prefix='test_path-', match_glob='test_path-*.vcf.gz'),
         ])
+        mock_gs_logger.info.assert_not_called()
 
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_BAD_DATA_PATH))
         self.assertEqual(response.status_code, 400)
@@ -372,34 +382,27 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
                          ['Invalid VCF file format - file path must end with .vcf or .vcf.gz or .vcf.bgz'])
 
         # test no header line
-        mock_file_logger.reset_mock()
-        mock_subprocess.reset_mock()
-        mock_subprocess.return_value.wait.return_value = 0
-        mock_subprocess.return_value.stdout = BASIC_META + DATA_LINES
+        gz_path = 'gs://test_bucket/test_path.vcf.gz'
+        self._add_vcf(mock_gcs, gz_path, BASIC_META + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['No header found in the VCF file.'])
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://test_bucket/test_path.vcf.gz', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call('gsutil cat -r 0-65536 gs://test_bucket/test_path.vcf.gz | gunzip -c -q - ',
-                      stdout=-1, stderr=-2, shell=True),  # nosec
-        ])
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path.vcf.gz', self.manager_user),
-            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path.vcf.gz | gunzip -c -q - ', self.manager_user),
+        mock_gcs.assert_calls(self, [
+            mock.call.exists(gz_path),
+            mock.call.download_as_bytes(gz_path, start=0, end=65536),
         ])
 
-        # test improperly encoded file
-        mock_subprocess.return_value.stdout = [b'\x80']
-        response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
-        self.assertEqual(response.status_code, 400)
-        self.assertListEqual(response.json()['errors'], [
-            'Unable to read the VCF file. This often occurs when a file is improperly gzipped, or when the file extension does not align with the file type (i.e. a .gz file that is not actually gzipped)',
-        ])
+        # test improperly encoded file and file that is not actually gzipped
+        for content in [gzip.compress(b'\x80'), b''.join(BASIC_META + HEADER_LINE)]:
+            mock_gcs.add_file(gz_path, content)
+            response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
+            self.assertEqual(response.status_code, 400)
+            self.assertListEqual(response.json()['errors'], [
+                'Unable to read the VCF file. This often occurs when a file is improperly gzipped, or when the file extension does not align with the file type (i.e. a .gz file that is not actually gzipped)',
+            ])
 
         # test header errors
-        mock_subprocess.return_value.stdout = BASIC_META + BAD_INFO_META + BAD_FORMAT_META + BAD_HEADER_LINE + DATA_LINES
+        self._add_vcf(mock_gcs, gz_path, BASIC_META + BAD_INFO_META + BAD_FORMAT_META + BAD_HEADER_LINE + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], [
@@ -407,13 +410,13 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
 
         # test no samples
-        mock_subprocess.return_value.stdout = BASIC_META + NO_SAMPLE_HEADER_LINE + DATA_LINES
+        self._add_vcf(mock_gcs, gz_path, BASIC_META + NO_SAMPLE_HEADER_LINE + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], ['No samples found in the provided VCF.'])
 
         # test meta info errors
-        mock_subprocess.return_value.stdout = BASIC_META + BAD_INFO_META + BAD_FORMAT_META + HEADER_LINE + DATA_LINES
+        self._add_vcf(mock_gcs, gz_path, BASIC_META + BAD_INFO_META + BAD_FORMAT_META + HEADER_LINE + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_GZ_DATA_PATH))
         self.assertEqual(response.status_code, 400)
         self.assertListEqual(response.json()['errors'], [
@@ -423,42 +426,28 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         ])
 
         # Test valid operations
-        mock_subprocess.reset_mock()
-        mock_file_logger.reset_mock()
-        mock_subprocess.return_value.stdout = BASIC_META + INFO_META + FORMAT_META + REFERENCE_META + HEADER_LINE + DATA_LINES
+        mock_gcs.calls.reset_mock()
+        self._add_vcf(
+            mock_gcs, 'gs://test_bucket/test_path.vcf',
+            BASIC_META + INFO_META + FORMAT_META + REFERENCE_META + HEADER_LINE + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(VALIDATE_VCF_BODY))
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), VALIDATE_VFC_RESPONSE)
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://test_bucket/test_path.vcf', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call('gsutil cat gs://test_bucket/test_path.vcf', stdout=-1, stderr=-2, shell=True),  # nosec
-        ])
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path.vcf', self.manager_user),
-            mock.call('==> gsutil cat gs://test_bucket/test_path.vcf', self.manager_user),
+        mock_gcs.assert_calls(self, [
+            mock.call.exists('gs://test_bucket/test_path.vcf'),
+            mock.call.open('gs://test_bucket/test_path.vcf', 'r'),
         ])
 
         # Test a valid sharded VCF file path
-        mock_subprocess.reset_mock()
-        mock_file_exist_or_list_subproc = mock.MagicMock()
-        mock_get_header_subproc = mock.MagicMock()
-        mock_subprocess.side_effect = [mock_file_exist_or_list_subproc, mock_file_exist_or_list_subproc, mock_get_header_subproc]
-        mock_file_exist_or_list_subproc.communicate.return_value = b'gs://test_bucket/test_path-001.vcf.gz\ngs://test_bucket/test_path-102.vcf.gz\n', None
-        mock_file_exist_or_list_subproc.wait.return_value = 0
-        mock_get_header_subproc.stdout = BASIC_META + INFO_META + FORMAT_META + HEADER_LINE + DATA_LINES
+        for path in ['gs://test_bucket/test_path-001.vcf.gz', 'gs://test_bucket/test_path-102.vcf.gz']:
+            self._add_vcf(mock_gcs, path, BASIC_META + INFO_META + FORMAT_META + HEADER_LINE + DATA_LINES)
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_SHARDED_DATA_PATH))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'fullDataPath': 'gs://test_bucket/test_path-*.vcf.gz', 'vcfSamples': ['HG00735', 'NA19675_1', 'NA19679']})
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://test_bucket/test_path-*.vcf.gz', stdout=-1, stderr=-1, shell=True),  # nosec
-            mock.call('gsutil ls gs://test_bucket/test_path-001.vcf.gz', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call('gsutil cat -r 0-65536 gs://test_bucket/test_path-001.vcf.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True),  # nosec
-        ])
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket/test_path-*.vcf.gz', self.manager_user),
-            mock.call('==> gsutil ls gs://test_bucket/test_path-001.vcf.gz', self.manager_user),
-            mock.call('==> gsutil cat -r 0-65536 gs://test_bucket/test_path-001.vcf.gz | gunzip -c -q - ', self.manager_user),
+        mock_gcs.assert_calls(self, [
+            mock.call.list_blobs('gs://test_bucket', prefix='test_path-', match_glob='test_path-*.vcf.gz'),
+            mock.call.exists('gs://test_bucket/test_path-001.vcf.gz'),
+            mock.call.download_as_bytes('gs://test_bucket/test_path-001.vcf.gz', start=0, end=65536),
         ])
 
         # Test logged in locally
@@ -469,72 +458,59 @@ class AnvilWorkspaceAPITest(AnvilAuthenticationTestCase):
         self.assertEqual(response.url,
                          '/login/google-oauth2?next=/api/create_project_from_workspace/my-seqr-billing/anvil-no-project-workspace1/validate_vcf')
 
-    @mock.patch('seqr.utils.file_utils.logger')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
     def test_get_anvil_igv_options(self, *args):
         url = reverse(get_anvil_igv_options, args=[TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME1])
         expected_options = [
-            {'name': '/test.bam', 'value': 'gs://test_bucket/test.bam'},
             {'name': '/data/test.cram', 'value': 'gs://test_bucket/data/test.cram'},
+            {'name': '/test.bam', 'value': 'gs://test_bucket/test.bam'},
         ]
         self._test_get_workspace_files(url, 'igv_options', expected_options, *args)
 
-    @mock.patch('seqr.utils.file_utils.logger')
-    @mock.patch('seqr.utils.file_utils.subprocess.Popen')
     def test_get_anvil_vcf_list(self, *args):
         url = reverse(get_anvil_vcf_list, args=[TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME1])
         expected_files = [
-            '/test.vcf', '/test.vcf.gz', '/data/test.vcf.gz', '/data/test-101.vcf.gz', '/data/test-102.vcf.gz', '/sharded/test-*.vcf.gz',
+            '/data/test-101.vcf.gz', '/data/test-102.vcf.gz', '/data/test.vcf.gz', '/sharded/test-*.vcf.gz', '/test.vcf', '/test.vcf.gz',
         ]
         self._test_get_workspace_files(url, 'dataPathList', expected_files, *args)
 
-    def _test_get_workspace_files(self, url, response_key, expected_files, mock_subprocess, mock_file_logger, mock_utils_logger):
+    def _test_get_workspace_files(self, url, response_key, expected_files, mock_utils_logger):
+        mock_gcs = MockGoogleStorage().start(self)
         self.check_manager_login(url, login_redirect_url='/login/google-oauth2')
         mock_utils_logger.warning.assert_called_with('User does not have sufficient permissions for workspace {}/{}'
                                                      .format(TEST_WORKSPACE_NAMESPACE, TEST_WORKSPACE_NAME1),
                                                      self.collaborator_user)
 
-        # Test gsutil error
-        mock_subprocess.return_value.communicate.return_value = b'', b'-bash: gsutil: command not found.\nPlease check the path.\n'
+        # Test google storage error
+        mock_gcs.bucket_errors['test_bucket'] = Forbidden('user does not have storage.objects.list access')
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()['error'], 'Run command failed: -bash: gsutil: command not found. Please check the path.')
+        self.assertEqual(response.json()['error'], '403 user does not have storage.objects.list access')
 
         # Test empty bucket
-        mock_subprocess.return_value.communicate.return_value = b'', None
+        mock_gcs.bucket_errors.clear()
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {response_key: []})
-        mock_subprocess.assert_called_with('gsutil ls gs://test_bucket', stdout=-1, stderr=-1, shell=True)  # nosec
-        mock_file_logger.info.assert_called_with('==> gsutil ls gs://test_bucket', self.manager_user)
+        mock_gcs.assert_calls(self, [mock.call.list_blobs('gs://test_bucket')])
 
         # Test a valid operation
-        mock_subprocess.reset_mock()
-        mock_file_logger.reset_mock()
-        mock_subprocess.return_value.communicate.return_value = b'\n'.join([
-            b'Warning: some packages are out of date',
-            b'gs://test_bucket/test.vcf', b'gs://test_bucket/test.vcf.gz', b'gs://test_bucket/test.tsv',
-            b'gs://test_bucket/test.bam', b'gs://test_bucket/test.bam.bai', b'gs://test_bucket/data/test.cram',
+        for path in [
+            'gs://test_bucket/test.vcf', 'gs://test_bucket/test.vcf.gz', 'gs://test_bucket/test.tsv',
+            'gs://test_bucket/test.bam', 'gs://test_bucket/test.bam.bai', 'gs://test_bucket/data/test.cram',
             # path with common prefix but not sharded VCFs
-            b'gs://test_bucket/data/test.vcf.gz', b'gs://test_bucket/data/test-101.vcf.gz',
-            b'gs://test_bucket/data/test-102.vcf.gz',
+            'gs://test_bucket/data/test.vcf.gz', 'gs://test_bucket/data/test-101.vcf.gz',
+            'gs://test_bucket/data/test-102.vcf.gz',
             # sharded VCFs
-            b'gs://test_bucket/sharded/test-101.vcf.gz', b'gs://test_bucket/sharded/test-102.vcf.gz',
-            b'gs://test_bucket/sharded/test-2345.vcf.gz\n'
-        ]), None
+            'gs://test_bucket/sharded/test-101.vcf.gz', 'gs://test_bucket/sharded/test-102.vcf.gz',
+            'gs://test_bucket/sharded/test-2345.vcf.gz',
+            # files in other buckets
+            'gs://test_bucket_2/test.vcf', 'gs://test_bucket_2/test.bam',
+        ]:
+            mock_gcs.add_file(path, '')
         response = self.client.get(url, content_type='application/json')
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.json(), {response_key: expected_files})
-        mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://test_bucket', stdout=-1, stderr=-1, shell=True),  # nosec
-            mock.call().communicate(),
-            mock.call('gsutil ls gs://test_bucket/**', stdout=-1, stderr=-1, shell=True),  # nosec
-            mock.call().communicate(),
-        ])
-        mock_file_logger.info.assert_has_calls([
-            mock.call('==> gsutil ls gs://test_bucket', self.manager_user),
-            mock.call('==> gsutil ls gs://test_bucket/**', self.manager_user),
-        ])
+        mock_gcs.assert_calls(self, [mock.call.list_blobs('gs://test_bucket')])
 
 
 @mock.patch('seqr.utils.add_data_utils.LOADING_DATASETS_DIR', 'gs://seqr-loading-temp/v3.1')
@@ -565,11 +541,9 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         patcher = mock.patch('seqr.utils.add_data_utils.logger')
         self.mock_add_data_utils_logger = patcher.start()
         self.addCleanup(patcher.stop)
-        patcher = mock.patch('seqr.utils.file_utils.subprocess.Popen')
-        self.mock_subprocess = patcher.start()
-        self.mock_subprocess.return_value.wait.return_value = 0
-        self.mock_subprocess.return_value.stdout = [json.dumps(LOAD_SAMPLE_DATA).encode('utf-8')]
-        self.addCleanup(patcher.stop)
+        self.mock_gcs = MockGoogleStorage().start(self)
+        self._set_load_file_iter(LOAD_SAMPLE_DATA)
+        self.mock_gcs.add_file(GENE_ID_FILE_PATH, '')
         patcher = mock.patch('seqr.views.utils.export_utils.TemporaryDirectory')
         mock_tempdir = patcher.start()
         mock_tempdir.return_value.__enter__.return_value = TEMP_PATH
@@ -577,8 +551,11 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         patcher = mock.patch('seqr.views.utils.export_utils.open')
         self.mock_temp_open = patcher.start()
         self.addCleanup(patcher.stop)
+        gzip_open = gzip.open
         patcher = mock.patch('seqr.views.utils.export_utils.gzip.open')
         self.mock_gzip_temp_open = patcher.start()
+        # Only mock writing the temp files, reading gzipped files from google storage is not mocked
+        self.mock_gzip_temp_open.side_effect = lambda f, *args: mock.DEFAULT if isinstance(f, str) else gzip_open(f, *args)
         self.addCleanup(patcher.stop)
         patcher = mock.patch('seqr.views.apis.anvil_workspace_api.logger')
         self.mock_api_logger = patcher.start()
@@ -594,7 +571,7 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         super().setUp()
 
     def _set_load_file_iter(self, data):
-        self.mock_subprocess.return_value.stdout = [json.dumps(data).encode('utf-8')]
+        self.mock_gcs.add_file(TEMP_UPLOAD_FILE_PATH, json.dumps(data))
 
     @mock.patch('seqr.models.Family._compute_guid', lambda family: f'F_{family.family_id}_{family.project.workspace_name[17:]}')
     @mock.patch('seqr.models.Project._compute_guid', lambda project: f'P_{project.name}')
@@ -613,7 +590,7 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         # Test valid operation
         responses.calls.reset()
         self._set_load_file_iter(LOAD_SAMPLE_DATA)
-        self.mock_subprocess.return_value.wait.side_effect = [0, 0, 1, 0]
+        del self.mock_gcs.files[GENE_ID_FILE_PATH]
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY))
         self.assertEqual(response.status_code, 200)
         project = Project.objects.get(workspace_namespace=TEST_WORKSPACE_NAMESPACE, workspace_name=TEST_NO_PROJECT_WORKSPACE_NAME)
@@ -714,7 +691,7 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         ])
 
         # Test a valid operation
-        self.mock_subprocess.return_value.wait.side_effect = [0, 0, 1, 0]
+        del self.mock_gcs.files[GENE_ID_FILE_PATH]
         self._set_load_file_iter(LOAD_SAMPLE_DATA_ALL_PENDING)
         mock_compute_indiv_guid.side_effect = ['I0000020_hg00735', 'I0000021_hg00736']
         response = self.client.post(url, content_type='application/json', data=json.dumps(REQUEST_BODY_ADD_DATA))
@@ -833,16 +810,14 @@ class LoadAnvilDataAPITest(AnvilAuthenticationTestCase, AirtableTest):
         self.assertListEqual(gene_file[:3], ['db_id,gene_id', '1,ENSG00000223972', '2,ENSG00000227232'])
 
         gs_path = f'gs://seqr-loading-temp/v3.1/{genome_version}/SNV_INDEL/pedigrees/WES/'
-        self.mock_subprocess.assert_has_calls([
-            mock.call('gsutil ls gs://seqr-scratch-temp/temp_upload_test_temp_file_id.json.gz', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call('gsutil cat gs://seqr-scratch-temp/temp_upload_test_temp_file_id.json.gz | gunzip -c -q - ', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call(f'gsutil mv {TEMP_PATH}/* {gs_path}',  stdout=-1, stderr=-2, shell=True), # nosec
-            mock.call().wait(),
-            mock.call('gsutil ls gs://seqr-loading-temp/v3.1/db_id_to_gene_id.csv.gz', stdout=-1, stderr=-2, shell=True),  # nosec
-            mock.call().wait(),
-            mock.call(f'gsutil mv {TEMP_PATH}/* gs://seqr-loading-temp/v3.1/',  stdout=-1, stderr=-2, shell=True), # nosec
-            mock.call().wait(),
+        self.mock_gcs.calls.assert_has_calls([
+            mock.call.exists(TEMP_UPLOAD_FILE_PATH),
+            mock.call.open(TEMP_UPLOAD_FILE_PATH, 'rb'),
+            mock.call.upload_from_filename(
+                f'{gs_path}{project.guid}_pedigree.tsv', f'{TEMP_PATH}/{project.guid}_pedigree.tsv'),
+            mock.call.exists(GENE_ID_FILE_PATH),
+            mock.call.list_blobs('gs://seqr-loading-temp', prefix='v3.1/db_id_to_gene_id.csv.gz/', max_results=1),
+            mock.call.upload_from_filename(GENE_ID_FILE_PATH, f'{TEMP_PATH}/db_id_to_gene_id.csv.gz'),
         ])
 
         variables = {
@@ -915,22 +890,16 @@ Pedigree files have been uploaded to gs://seqr-loading-temp/v3.1/{genome_version
 Loading pipeline is triggered with:
 ```{json.dumps(variables, indent=4)}```"""
 
-    def _raise_move_file_error(self, command, *args, **kwargs):
-        mock_subprocess = mock.MagicMock()
-        is_mv_pedigree_command = 'pedigrees' in command
-        mock_subprocess.wait.return_value = 1 if is_mv_pedigree_command else 0
-        mock_subprocess.stdout = [b'Something wrong while moving the file.'] if is_mv_pedigree_command else self.mock_subprocess.return_value.stdout
-        return mock_subprocess
-
     def _test_mv_file_and_triggering_loading_exception(self, url, workspace, sample_data, genome_version, request_body, num_samples=None, sample_type='WES'):
         # Test saving ID file exception
         responses.calls.reset()
         self.mock_slack.reset_mock()
-        self.mock_subprocess.side_effect = self._raise_move_file_error
         # Test triggering loading exception
         responses.add(responses.POST, PIPELINE_RUNNER_URL, status=409)
 
-        response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
+        with mock.patch('seqr.views.utils.export_utils.mv_file_to_gs') as mock_mv_file:
+            mock_mv_file.side_effect = Forbidden('Something wrong while moving the file.')
+            response = self.client.post(url, content_type='application/json', data=json.dumps(request_body))
         self.assertEqual(response.status_code, 200)
         project = Project.objects.get(**workspace)
         variables = {
@@ -944,7 +913,7 @@ Loading pipeline is triggered with:
         }
 
         self.mock_add_data_utils_logger.error.assert_called_with(
-            'Uploading Pedigrees failed. Errors: Run command failed: Something wrong while moving the file.',
+            'Uploading Pedigrees failed. Errors: 403 Something wrong while moving the file.',
             self.manager_user, detail={f'{project.guid}_pedigree': sample_data})
         self.mock_api_logger.error.assert_not_called()
         self.mock_add_data_utils_logger.warning.assert_called_with(

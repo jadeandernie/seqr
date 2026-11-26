@@ -75,7 +75,9 @@ from seqr.views.apis.locus_list_api import \
     add_project_locus_lists, \
     delete_project_locus_lists
 
+from matchmaker.views.matchmaker_inbox_api import matchmaker_inbox, update_matchmaker_inbox_results
 from matchmaker.views.matchmaker_api import \
+    log_external_mme_match, \
     get_individual_mme_matches, \
     get_mme_nodes, \
     search_local_individual_mme_matches, \
@@ -299,6 +301,7 @@ api_endpoints = {
     'matchmaker/submission/(?P<submission_guid>[\w.|-]+)/update': update_mme_submission,
     'matchmaker/submission/(?P<submission_guid>[\w.|-]+)/delete': delete_mme_submission,
     'matchmaker/result_status/(?P<matchmaker_result_guid>[\w.|-]+)/update': update_mme_result_status,
+    'matchmaker/submission/(?P<submission_guid>[\w.|-]+)/log_external_match': log_external_mme_match,
     'matchmaker/send_email/(?P<matchmaker_result_guid>[\w.|-]+)': send_mme_contact_email,
     'matchmaker/contact_notes/(?P<institution>[^/]+)/update': update_mme_contact_note,
     'matchmaker/update_project_contact/(?P<project_guid>[^/]+)': update_mme_project_contact,
@@ -344,6 +347,8 @@ api_endpoints = {
     'summary_data/hpo/(?P<hpo_id>[^/]+)': hpo_summary_data,
     'summary_data/success_story/(?P<success_story_types>[^/]+)': success_story,
     'summary_data/matchmaker': mme_details,
+    'summary_data/matchmaker_inbox': matchmaker_inbox,
+    'summary_data/matchmaker_inbox/update': update_matchmaker_inbox_results,
     'summary_data/update_external_analysis': bulk_update_family_external_analysis,
     'summary_data/individual_metadata/(?P<project_guid>[^/]+)': individual_metadata,
 

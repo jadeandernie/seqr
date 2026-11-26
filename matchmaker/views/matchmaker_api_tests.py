@@ -6,12 +6,12 @@ from copy import deepcopy
 from datetime import datetime
 from django.urls.base import reverse
 
-from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, MatchmakerSubmission
+from matchmaker.models import MatchmakerResult, MatchmakerContactNotes, MatchmakerSubmission, MatchmakerIncomingQuery
 from matchmaker.matchmaker_utils import MME_DISCLAIMER
 from matchmaker.views.matchmaker_api import get_individual_mme_matches, search_individual_mme_matches, \
     update_mme_submission, delete_mme_submission, update_mme_result_status, send_mme_contact_email, \
     get_mme_nodes, search_local_individual_mme_matches, finalize_mme_search, send_vlm_email, \
-    update_mme_contact_note, update_mme_project_contact
+    update_mme_contact_note, update_mme_project_contact, log_external_mme_match
 from seqr.views.utils.test_utils import AuthenticationTestCase, SAVED_VARIANT_FIELDS
 
 INDIVIDUAL_GUID = 'I000001_na19675'
@@ -751,6 +751,138 @@ class MatchmakerAPITest(AuthenticationTestCase):
 
         result_model = MatchmakerResult.objects.get(guid=RESULT_STATUS_GUID)
         self.assertEqual(result_model.comments, 'test comment')
+        self.assertEqual(result_model.status, 'relevant')
+
+        # The triage status follows the flags and can not be set directly
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'deemedIrrelevant': True, 'status': 'responded', 'assignedTo': 'test_user', 'source': 'other',
+        }))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['mmeResultsByGuid'][RESULT_STATUS_GUID]['matchStatus']['deemedIrrelevant'])
+        result_model = MatchmakerResult.objects.get(guid=RESULT_STATUS_GUID)
+        self.assertEqual(result_model.status, 'not_relevant')
+        self.assertIsNone(result_model.assigned_to)
+        self.assertEqual(result_model.source, 'mme')
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'deemedIrrelevant': False, 'flagForAnalysis': False}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MatchmakerResult.objects.get(guid=RESULT_STATUS_GUID).status, 'reviewing')
+
+    def test_finalize_mme_search_keeps_logged_matches(self):
+        query = MatchmakerIncomingQuery.objects.create(institution='Broad Center for Mendelian Genomics')
+        url = f'{reverse(finalize_mme_search, args=[SUBMISSION_GUID])}?incomingQueryGuid={query.guid}'
+        self.check_collaborator_login(url)
+
+        logged_result = MatchmakerResult(
+            submission_id=1, source='variantmatcher', result_data={'patient': {'id': 'variantmatcher-1'}})
+        logged_result.save(last_modified_date=datetime(2019, 1, 1))
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.json()['mmeResultsByGuid'], {
+            'MR0004688_RGP_105_3': {'matchStatus': mock.ANY},
+            'MR0003552_SHE_1006P_1': {'matchStatus': mock.ANY},
+            'MR0007228_VCGS_FAM50_156': None,
+        })
+        self.assertFalse(MatchmakerResult.objects.get(guid=logged_result.guid).match_removed)
+
+    def test_log_external_mme_match(self):
+        url = reverse(log_external_mme_match, args=[SUBMISSION_GUID])
+        self.check_collaborator_login(url)
+
+        invalid_project_url = reverse(log_external_mme_match, args=[INVALID_PROJECT_SUBMISSION_GUID])
+        response = self.client.post(invalid_project_url, content_type='application/json', data=json.dumps({}))
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({}))
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], [
+            'Source must be one of variantmatcher, genematcher, other',
+            'institution is required',
+            'A valid contact email is required',
+            'Genes or HPO terms are required',
+        ])
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'source': 'mme', 'institution': 5, 'contactName': 'a' * 256, 'contactEmail': 'A patient with seizures',
+            'genes': ['RP11', 'ENSG00000135953', 'ENSG00000000001', 'NOT_A_GENE'], 'hpoTerms': ['HP:0001252', 'seizures'],
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertListEqual(response.json()['errors'], [
+            'Source must be one of variantmatcher, genematcher, other',
+            'Invalid institution',
+            'Invalid contactName',
+            'A valid contact email is required',
+            'Invalid genes: ENSG00000000001, NOT_A_GENE',
+            'Invalid HPO terms: seizures',
+        ])
+
+        valid_body = {'source': 'variantmatcher', 'institution': 'A Lab', 'contactEmail': 'pi@lab.org'}
+        for update, error in [
+            ({'genes': 'RP11'}, 'Invalid genes'),
+            ({'hpoTerms': [{'id': 'HP:0001252'}]}, 'Invalid hpoTerms'),
+            ({'genes': [f'GENE{i}' for i in range(51)]}, 'No more than 50 genes can be recorded'),
+        ]:
+            response = self.client.post(url, content_type='application/json', data=json.dumps({**valid_body, **update}))
+            self.assertEqual(response.status_code, 400)
+            self.assertListEqual(response.json()['errors'], [error])
+        self.assertEqual(MatchmakerResult.objects.filter(submission__guid=SUBMISSION_GUID).count(), 3)
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            **valid_body, 'institution': ' A Lab ', 'contactName': 'Dr PI', 'genes': ['OR4F5', ' RP11', 'ENSG00000135953', ''],
+            'hpoTerms': ['HP:0012469', 'HP:0001252'], 'comments': 'ignored free text', 'description': 'ignored free text',
+            'weContacted': True,
+        }))
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {'mmeResultsByGuid', 'genesById', 'mmeContactNotes'})
+        self.assertEqual(len(response_json['mmeResultsByGuid']), 1)
+        result_guid = next(iter(response_json['mmeResultsByGuid']))
+        result_model = MatchmakerResult.objects.get(guid=result_guid)
+        patient_id = result_model.result_data['patient']['id']
+        self.assertRegex(patient_id, '^variantmatcher-[0-9a-f]{32}$')
+        self.assertDictEqual(result_model.result_data, {'patient': {
+            'id': patient_id,
+            'contact': {'institution': 'A Lab', 'name': 'Dr PI', 'href': 'mailto:pi@lab.org'},
+            'genomicFeatures': [{'gene': {'id': 'ENSG00000135953'}}, {'gene': {'id': 'ENSG00000186092'}}],
+            'features': [{'id': 'HP:0001252', 'observed': 'yes'}, {'id': 'HP:0012469', 'observed': 'yes'}],
+        }})
+        self.assertEqual(result_model.source, 'variantmatcher')
+        self.assertEqual(result_model.status, 'reviewing')
+        self.assertTrue(result_model.host_contacted)
+        self.assertFalse(result_model.we_contacted)
+        self.assertIsNone(result_model.comments)
+        self.assertEqual(result_model.submission.guid, SUBMISSION_GUID)
+        self.assertEqual(result_model.created_by, self.collaborator_user)
+
+        result_json = response_json['mmeResultsByGuid'][result_guid]
+        self.assertEqual(result_json['submissionGuid'], SUBMISSION_GUID)
+        self.assertEqual(result_json['id'], patient_id)
+        self.assertListEqual(result_json['geneVariants'], [{'geneId': 'ENSG00000135953'}, {'geneId': 'ENSG00000186092'}])
+        self.assertListEqual(result_json['phenotypes'], [
+            {'id': 'HP:0001252', 'label': 'Muscular hypotonia', 'observed': 'yes'},
+            {'id': 'HP:0012469', 'label': 'Infantile spasms', 'observed': 'yes'},
+        ])
+        self.assertTrue(result_json['matchStatus']['hostContacted'])
+        self.assertSetEqual(set(response_json['genesById'].keys()), {'ENSG00000135953', 'ENSG00000186092'})
+
+        # A match with only phenotypes or only genes is valid, and is returned with the other matches
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            **valid_body, 'source': 'other', 'hpoTerms': ['HP:0001252']}))
+        self.assertEqual(response.status_code, 200)
+        phenotype_result = MatchmakerResult.objects.get(guid=next(iter(response.json()['mmeResultsByGuid'])))
+        self.assertDictEqual(phenotype_result.result_data['patient'], {
+            'id': mock.ANY, 'contact': {'institution': 'A Lab', 'href': 'mailto:pi@lab.org'},
+            'features': [{'id': 'HP:0001252', 'observed': 'yes'}],
+        })
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            **valid_body, 'source': 'genematcher', 'genes': ['RP11']}))
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(reverse(get_individual_mme_matches, args=[SUBMISSION_GUID]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()['mmeResultsByGuid']), 6)
 
     @mock.patch('matchmaker.views.matchmaker_api.EmailMessage')
     def test_send_mme_contact_email(self, mock_email):

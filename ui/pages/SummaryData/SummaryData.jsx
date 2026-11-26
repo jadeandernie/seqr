@@ -10,6 +10,7 @@ import GeneDetail from 'shared/components/panel/genes/GeneDetail'
 
 import SuccessStory from './components/SuccessStory'
 import Matchmaker from './components/Matchmaker'
+import MatchmakerInbox from './components/MatchmakerInbox'
 import SavedVariants from './components/SavedVariants'
 import GeneInfoSearch from './components/GeneInfoSearch'
 import LocusLists from './components/LocusLists'
@@ -31,6 +32,7 @@ const SUMMARY_DATA_PAGES = [
   { path: 'saved_variants', component: SavedVariants },
   { path: 'individual_metadata', params: '/:projectGuid?', component: IndividualMetadata },
   { path: 'hpo_terms', component: Hpo },
+  { path: 'matchmaker_inbox', component: MatchmakerInbox },
   { path: 'matchmaker', component: Matchmaker },
 ]
 

@@ -46,6 +46,7 @@ import {
   getVariantGeneId,
   getCurrentProject,
 } from '../selectors'
+import LogExternalMatchButton from './LogExternalMatchButton'
 import SelectSavedVariantsTable from './SelectSavedVariantsTable'
 
 const BreakWordLink = styled.a.attrs({ target: '_blank' })`
@@ -458,6 +459,8 @@ const BaseMatchmakerIndividual = React.memo((
             buttonText="Delete Submission"
             confirmDialog="Are you sure you want to remove this patient from the Matchmaker Exchange"
           />
+          | &nbsp; &nbsp;
+          <LogExternalMatchButton submissionGuid={mmeSubmission.submissionGuid} disabled={loading} />
           <DataTable
             basic="very"
             fixed

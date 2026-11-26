@@ -1,7 +1,10 @@
 import json
 import requests
+import uuid
 from datetime import datetime
+from django.core.exceptions import ValidationError
 from django.core.mail.message import EmailMessage
+from django.core.validators import validate_email
 from django.db.models import prefetch_related_objects, F, Q, Value, CharField
 from django.db.models.functions import Coalesce
 
@@ -11,6 +14,7 @@ from matchmaker.matchmaker_utils import get_mme_genes_phenotypes_for_results, pa
     get_submission_json_for_external_match, parse_mme_features, get_submission_gene_variants, get_mme_matches, \
     get_gene_ids_for_feature, validate_patient_data, get_hpo_terms_by_id, MME_DISCLAIMER
 from seqr.models import Individual, SavedVariant
+from seqr.utils.gene_utils import get_genes, get_gene_ids_for_gene_symbols
 from seqr.utils.communication_utils import safe_post_to_slack, set_email_message_stream
 from seqr.utils.logging_utils import SeqrLogger
 from seqr.utils.middleware import ErrorsWarningsException
@@ -148,6 +152,8 @@ def finalize_mme_search(request, submission_guid):
     removed_results = submission_results.filter(
         # Any matches will have been updated so their modified timestamp will be after the query was submitted
         last_modified_date__lt=originating_query.created_date,
+        # Manually logged matches are never returned by a search
+        source=MatchmakerResult.SOURCE_MME,
     )
 
     total_results = submission_results.count() - removed_results.count()
@@ -349,11 +355,96 @@ def update_mme_result_status(request, matchmaker_result_guid):
 
     request_json = json.loads(request.body)
     update_model_from_json(
-        result, request_json, user=request.user, allow_unknown_keys=True, immutable_keys=['originating_submission'])
+        result, request_json, user=request.user, allow_unknown_keys=True,
+        immutable_keys=['originating_submission', 'status', 'assigned_to', 'source'])
 
     return create_json_response({
         'mmeResultsByGuid': {matchmaker_result_guid: {'matchStatus': _get_json_for_model(result)}},
     })
+
+
+MAX_EXTERNAL_MATCH_FIELD_LENGTH = 255
+MAX_EXTERNAL_MATCH_FEATURES = 50
+EXTERNAL_MATCH_SOURCES = [source for source, _ in MatchmakerResult.MANUAL_SOURCE_CHOICES]
+
+
+def _parse_external_match_list(request_json, key):
+    values = request_json.get(key) or []
+    if not (isinstance(values, list) and all(isinstance(value, str) for value in values)):
+        raise ErrorsWarningsException([f'Invalid {key}'])
+    values = sorted({value.strip() for value in values if value.strip()})
+    if len(values) > MAX_EXTERNAL_MATCH_FEATURES:
+        raise ErrorsWarningsException([f'No more than {MAX_EXTERNAL_MATCH_FEATURES} {key} can be recorded'])
+    return values
+
+
+def _parse_external_match(request_json):
+    errors = []
+
+    source = request_json.get('source')
+    if source not in EXTERNAL_MATCH_SOURCES:
+        errors.append(f'Source must be one of {", ".join(EXTERNAL_MATCH_SOURCES)}')
+
+    contact = {}
+    for key, contact_key, required in [('institution', 'institution', True), ('contactName', 'name', False)]:
+        value = request_json.get(key) or ''
+        if not isinstance(value, str) or len(value) > MAX_EXTERNAL_MATCH_FIELD_LENGTH:
+            errors.append(f'Invalid {key}')
+        elif value.strip():
+            contact[contact_key] = value.strip()
+        elif required:
+            errors.append(f'{key} is required')
+
+    email = request_json.get('contactEmail')
+    try:
+        validate_email(email)
+        contact['href'] = f'mailto:{email}'
+    except ValidationError:
+        errors.append('A valid contact email is required')
+
+    genes = _parse_external_match_list(request_json, 'genes')
+    symbols_to_ids = get_gene_ids_for_gene_symbols(genes)
+    known_gene_ids = get_genes([gene for gene in genes if gene.startswith('ENSG')])
+    gene_ids = {gene: gene if gene in known_gene_ids else next(iter(symbols_to_ids.get(gene, [])), None) for gene in genes}
+    invalid_genes = [gene for gene, gene_id in gene_ids.items() if not gene_id]
+    if invalid_genes:
+        errors.append(f'Invalid genes: {", ".join(invalid_genes)}')
+
+    hpo_ids = _parse_external_match_list(request_json, 'hpoTerms')
+    invalid_hpo_ids = sorted(set(hpo_ids) - set(get_hpo_terms_by_id(hpo_ids)))
+    if invalid_hpo_ids:
+        errors.append(f'Invalid HPO terms: {", ".join(invalid_hpo_ids)}')
+
+    if not (genes or hpo_ids):
+        errors.append('Genes or HPO terms are required')
+
+    if errors:
+        raise ErrorsWarningsException(errors)
+
+    patient = {'id': f'{source}-{uuid.uuid4().hex}', 'contact': contact}
+    if gene_ids:
+        patient['genomicFeatures'] = [{'gene': {'id': gene_id}} for gene_id in sorted(set(gene_ids.values()))]
+    if hpo_ids:
+        patient['features'] = [{'id': hpo_id, 'observed': 'yes'} for hpo_id in hpo_ids]
+    return source, {'patient': patient}
+
+
+@login_and_policies_required
+def log_external_mme_match(request, submission_guid):
+    """Record a match received outside of the Matchmaker Exchange, e.g. by email from VariantMatcher"""
+    submission = MatchmakerSubmission.objects.get(guid=submission_guid)
+    check_mme_permissions(submission, request.user)
+
+    source, result_data = _parse_external_match(json.loads(request.body))
+    result = create_model_from_json(MatchmakerResult, {
+        'submission': submission,
+        'result_data': result_data,
+        'source': source,
+        'host_contacted': True,
+        'last_modified_by': request.user,
+    }, request.user)
+
+    return _parse_mme_results(submission, [result], request.user)
 
 
 @login_and_policies_required

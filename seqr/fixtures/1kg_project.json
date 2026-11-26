@@ -2385,6 +2385,7 @@
         "last_modified_by": 10,
         "we_contacted": false,
         "host_contacted": true,
+        "status": "not_relevant",
         "deemed_irrelevant": true,
         "flag_for_analysis": false,
         "comments": "AMBRA1 c.2228G>C p.(Ser743Thr) missense variant. Maternally inherited, both have epilepsy"
@@ -2461,6 +2462,7 @@
         "last_modified_by": 10,
         "we_contacted": true,
         "host_contacted": false,
+        "status": "responded",
         "deemed_irrelevant": false,
         "flag_for_analysis": false,
         "comments": ""

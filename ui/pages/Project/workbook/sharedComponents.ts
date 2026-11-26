@@ -15,7 +15,7 @@ export interface FormField {
   name: string
   label: string
   component?: React.ElementType
-  options?: Option[]
+  options?: Option<string | number>[]
   color?: string
   validate?: (value?: string) => string | undefined
   format?: (value?: string[]) => string[]

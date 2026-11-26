@@ -37,6 +37,11 @@ interface WorksheetValues {
   delete?: boolean
 }
 
+interface WorkbookAutomationValues {
+  rerunIntervalDays?: number | null
+  notifyOnNewResults?: boolean
+}
+
 interface WorksheetQueryValues {
   worksheetQueryGuid?: string
   worksheetGuid?: string
@@ -147,6 +152,20 @@ export const updateWorkbook = (
 ): WorkbookThunk => (isDelete ?
   postWorkbookData(`/api/workbook/${workbookGuid}/delete`) :
   postWorkbookData(`/api/workbook/${workbookGuid}/update`, { name, description: description || null }))
+
+// A form has no empty interval, so no interval is submitted as 0
+export const updateWorkbookAutomation = (
+  workbookGuid: string, { rerunIntervalDays, notifyOnNewResults }: WorkbookAutomationValues,
+): WorkbookThunk => postWorkbookData(
+  `/api/workbook/${workbookGuid}/update`,
+  { rerunIntervalDays: rerunIntervalDays || null, notifyOnNewResults: !!notifyOnNewResults },
+)
+
+export const updateWorksheetAutomation = (
+  workbookGuid: string, worksheetGuid: string, { rerunIntervalDays }: WorkbookAutomationValues,
+): WorkbookThunk => postWorkbookData(
+  `/api/workbook/${workbookGuid}/worksheets/${worksheetGuid}/update`, { rerunIntervalDays: rerunIntervalDays || null },
+)
 
 export const duplicateWorkbook = (
   { workbookGuid, name, familyGuids, analysisGroupGuids }: WorkbookValues,

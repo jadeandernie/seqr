@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react'
 import { connect } from 'react-redux'
 
-import { Multiselect, Select } from '../../../shared/components/form/Inputs'
+import { BooleanCheckbox, Multiselect, Select } from '../../../shared/components/form/Inputs'
 import { ButtonLink } from '../../../shared/components/StyledComponents'
+import { NO_RERUN_INTERVAL, WORKBOOK_RERUN_INTERVAL_OPTIONS, WORKSHEET_RERUN_INTERVAL_OPTIONS } from './constants'
 import {
-  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, updateWorkbook, updateWorksheet,
-  updateWorksheetQuery,
+  addWorkbookTargets, createWorkbook, deleteWorkbookTarget, duplicateWorkbook, updateWorkbook, updateWorkbookAutomation,
+  updateWorksheet, updateWorksheetAutomation, updateWorksheetQuery,
 } from './reducers'
 import { getProjectAnalysisGroupOptions, getProjectFamilyOptions, getSavedSearchOptions } from './selectors'
 import { DeleteButton, FormField, UpdateButton } from './sharedComponents'
@@ -216,6 +217,60 @@ const BaseDeleteWorksheetButton = React.memo(({ worksheet, onSubmit }: ExistingW
 export const DeleteWorksheetButton = connect(null, (dispatch, { workbook, worksheet }: ExistingWorksheetProps) => ({
   onSubmit: () => dispatch(updateWorksheet(workbook.workbookGuid, { ...worksheet, delete: true })),
 }))(BaseDeleteWorksheetButton)
+
+const RERUN_INTERVAL_FIELD = { name: 'rerunIntervalDays', label: 'Rerun queries that were run', component: Select }
+const WORKBOOK_AUTOMATION_FIELDS: FormField[] = [
+  { ...RERUN_INTERVAL_FIELD, options: WORKBOOK_RERUN_INTERVAL_OPTIONS },
+  {
+    name: 'notifyOnNewResults',
+    label: 'Notify the creator of this workbook when a rerun has new results to review',
+    component: BooleanCheckbox,
+  },
+]
+const WORKSHEET_AUTOMATION_FIELDS: FormField[] = [
+  { ...RERUN_INTERVAL_FIELD, options: WORKSHEET_RERUN_INTERVAL_OPTIONS },
+]
+
+const BaseWorkbookAutomationButton = React.memo(({ workbook, onSubmit }: WorkbookProps & SubmitProps<object>) => (
+  <UpdateButton
+    modalId={`workbookAutomation-${workbook.workbookGuid}`}
+    modalTitle={`Automatic reruns of ${workbook.name}`}
+    trigger={<IconTrigger icon="clock outline" label={`Automatic reruns of workbook ${workbook.name}`} />}
+    formFields={WORKBOOK_AUTOMATION_FIELDS}
+    initialValues={useMemo(() => ({
+      rerunIntervalDays: workbook.rerunIntervalDays || NO_RERUN_INTERVAL,
+      notifyOnNewResults: !!workbook.notifyOnNewResults,
+    }), [workbook])}
+    onSubmit={onSubmit}
+    showErrorPanel
+  />
+))
+
+export const WorkbookAutomationButton = connect(null, (dispatch, { workbook }: WorkbookProps) => ({
+  onSubmit: (values: object) => dispatch(updateWorkbookAutomation(workbook.workbookGuid, values)),
+}))(BaseWorkbookAutomationButton)
+
+const BaseWorksheetAutomationButton = React.memo((
+  { worksheet, onSubmit }: ExistingWorksheetProps & SubmitProps<object>,
+) => (
+  <UpdateButton
+    modalId={`worksheetAutomation-${worksheet.worksheetGuid}`}
+    modalTitle={`Automatic reruns of ${worksheet.name}`}
+    trigger={<IconTrigger icon="clock outline" label={`Automatic reruns of worksheet ${worksheet.name}`} />}
+    formFields={WORKSHEET_AUTOMATION_FIELDS}
+    initialValues={useMemo(
+      () => ({ rerunIntervalDays: worksheet.rerunIntervalDays || NO_RERUN_INTERVAL }), [worksheet],
+    )}
+    onSubmit={onSubmit}
+    showErrorPanel
+  />
+))
+
+export const WorksheetAutomationButton = connect(null, (dispatch, { workbook, worksheet }: ExistingWorksheetProps) => ({
+  onSubmit: (values: object) => dispatch(
+    updateWorksheetAutomation(workbook.workbookGuid, worksheet.worksheetGuid, values),
+  ),
+}))(BaseWorksheetAutomationButton)
 
 const validateSavedSearch = (value?: string) => (value ? undefined : 'A saved search is required')
 

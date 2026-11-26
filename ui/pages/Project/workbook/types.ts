@@ -9,6 +9,8 @@ export interface Workbook {
   createdBy: string | null
   lastModifiedDate: string
   canEdit: boolean
+  rerunIntervalDays?: number | null
+  notifyOnNewResults?: boolean
 }
 
 export interface WorkbookTarget {
@@ -25,6 +27,7 @@ export interface Worksheet {
   workbookGuid: string
   name: string
   order: number
+  rerunIntervalDays?: number | null
 }
 
 export interface WorksheetQuery {
@@ -51,13 +54,16 @@ export interface WorksheetQueryResult {
   hasUnreviewed?: boolean
   numUnreviewed?: number
   lastRun?: WorksheetQueryRun | null
+  lastScheduledRunDate?: string | null
 }
+
+export type RunTrigger = 'M' | 'S' | 'D'
 
 export interface WorksheetQueryRun {
   runId: number
   createdDate: string
   createdBy: string | null
-  trigger: 'M' | 'S' | 'D'
+  trigger: RunTrigger
   status: 'C' | 'T' | 'E'
   error: string | null
   numResults: number | null
@@ -215,8 +221,8 @@ export interface WorksheetDisplay extends Worksheet {
   queries: WorksheetQuery[]
 }
 
-export interface Option {
-  value: string
+export interface Option<V = string> {
+  value: V
   text: string
 }
 

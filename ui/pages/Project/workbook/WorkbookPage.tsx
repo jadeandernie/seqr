@@ -5,6 +5,7 @@ import { Message } from 'semantic-ui-react'
 import styled from 'styled-components'
 
 import DataLoader from '../../../shared/components/DataLoader'
+import AutomationSummary from './AutomationSummary'
 import { WORK_PANE_ID } from './constants'
 import { loadWorkbookPage } from './reducers'
 import {
@@ -74,6 +75,7 @@ const WorkbookContent = React.memo(({
 
   return (
     <WorkArea>
+      <AutomationSummary workbook={workbook} />
       <TargetTabs
         workbook={workbook}
         targets={targets}

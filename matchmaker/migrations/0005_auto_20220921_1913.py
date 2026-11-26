@@ -13,7 +13,19 @@ from seqr.utils.xpos_utils import get_chrom_pos
 
 MAX_GUID_SIZE = 30
 
-liftover_to_38 = LiftOver('hg19', 'hg38')
+LIFTOVERS = {}
+
+
+def _get_liftover_to_38():
+    if 'hg38' not in LIFTOVERS:
+        try:
+            LIFTOVERS['hg38'] = LiftOver('hg19', 'hg38')
+        except Exception as e:
+            raise Exception(
+                'Unable to load the hg19ToHg38 liftover chain file, which is required to migrate GRCh37 matchmaker '
+                f'submission variants in GRCh38 projects. Download hg19ToHg38.over.chain.gz to ~/.pyliftover: {e}'
+            ) from e
+    return LIFTOVERS['hg38']
 
 
 def _get_model_id(chrom, pos, end, ref, alt):
@@ -41,7 +53,7 @@ def _get_linked_variant(submission, variant, family_variants):
     if not variant_models and \
             submission.individual.family.project.genome_version == '38' and variant['assembly'] == 'GRCh37':
         lifted_variant = deepcopy(variant)
-        lifted = liftover_to_38.convert_coordinate(f'chr{variant["referenceName"]}', int(variant['start']))
+        lifted = _get_liftover_to_38().convert_coordinate(f'chr{variant["referenceName"]}', int(variant['start']))
         lifted_variant['start'] = lifted[0][1]
         variant_models = [sv for sv in family_variants if _is_match(sv, lifted_variant)]
 

@@ -180,6 +180,7 @@ test('shows the controls to edit the structure of a workbook the user can edit',
     'Remove 1',
     'Remove Test Group',
     'Add families or analysis groups',
+    'Export to Talos',
     'Add a query to worksheet De Novo',
     'Rename worksheet De Novo',
     'Delete worksheet De Novo',
@@ -203,7 +204,7 @@ test('only shows the status, note and run controls for a workbook the user can n
     withDetail({ workbooksByGuid: { [WORKBOOK_GUID]: { ...WORKBOOK, canEdit: false } } }),
   )
 
-  expect(getButtonLabels(wrapper)).toEqual(['Save Note', 'Run'])
+  expect(getButtonLabels(wrapper)).toEqual(['Export to Talos', 'Save Note', 'Run'])
   expect(wrapper.find('div[role="tabpanel"] Dropdown').first().prop('aria-label')).toEqual('Status')
   expect(getTabs(wrapper)).toHaveLength(2)
   expect(getSidebar(wrapper)).toHaveLength(2)
@@ -531,7 +532,7 @@ test('prompts for targets and queries when the workbook has none', async () => {
   expect(getPaneText(empty.wrapper)).toEqual('Add a family or analysis group to this workbook to review it')
   expect(empty.wrapper.find('div[role="tabpanel"]').prop('aria-labelledby')).toBeUndefined()
   expect(empty.wrapper.find('nav[aria-label="Worksheets"]').text()).toContain('No worksheets')
-  expect(getButtonLabels(empty.wrapper)).toEqual(['Add families or analysis groups', 'Add Worksheet'])
+  expect(getButtonLabels(empty.wrapper)).toEqual(['Add families or analysis groups', 'Export to Talos', 'Add Worksheet'])
 
   const noQueries = await renderWorkbook(withDetail({ worksheetQueriesByGuid: {}, worksheetQueryResultsByGuid: {} }))
   expect(noQueries.history.location.pathname).toEqual(`${PATH}/${FAMILY_TARGET_GUID}`)

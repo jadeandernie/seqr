@@ -241,7 +241,10 @@ test('edits a manual variant using the manual variant form with the current valu
 })
 
 test('edits a manual SV using the manual SV form', () => {
-  const store = configureStore(STATE_WITH_2_FAMILIES)
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'SV_MANUAL_2-editVariant': { open: true } },
+  })
   const wrapper = mount(
     <Provider store={store}>
       <EditManualVariantButton variant={MANUAL_SV} />
@@ -254,6 +257,28 @@ test('edits a manual SV using the manual SV form', () => {
     chrom: '7', pos: 100, end: 200, svType: 'DEL', svName: 'Deletion:chr7', genotypes: { I021475_na19675_1: { cn: 1 } },
   })
   expect(formFields.map(({ name }) => name)).toEqual(['chrom', 'pos', 'end', 'geneId', 'svName', 'svType', 'genotypes'])
+  // no gene is set, so the gene search keeps its default prompt
+  expect(wrapper.find('input[placeholder="Search for gene"]').exists()).toBe(true)
+  expect(wrapper.find('input[placeholder$="(search to change)"]').exists()).toBe(false)
+})
+
+test('shows the gene id for the current gene of a manual variant when the gene is not loaded', () => {
+  const variant = { ...MANUAL_VARIANT, variantGuid: 'SV_MANUAL_3', geneIds: ['ENSG00000999999'], transcripts: {} }
+  const store = configureStore({
+    ...STATE_WITH_2_FAMILIES,
+    modal: { 'SV_MANUAL_3-editVariant': { open: true } },
+  })
+  const wrapper = mount(
+    <Provider store={store}>
+      <EditManualVariantButton variant={variant} />
+    </Provider>,
+  )
+
+  // the transcript details are unknown, but the gene and transcript id are still kept in the form
+  expect(wrapper.find(UpdateButton).prop('initialValues')).toEqual(expect.objectContaining({
+    geneId: 'ENSG00000999999', mainTranscriptId: 'ENST00000001', hgvsc: undefined, hgvsp: undefined,
+  }))
+  expect(wrapper.find('input[placeholder="ENSG00000999999 (search to change)"]').exists()).toBe(true)
 })
 
 test('does not render the manual variant edit button when the project is not editable', () => {

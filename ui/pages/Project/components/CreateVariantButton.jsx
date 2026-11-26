@@ -261,7 +261,7 @@ const EDIT_SV_FIELDS = getEditFields(SV_FIELDS)
 const getEditInitialValues = ({
   chrom, pos, end, ref, alt, svType, genotypes, geneIds, mainTranscriptId, transcripts, variantId,
 }) => {
-  const mainTranscript = mainTranscriptId && Object.values(transcripts || {}).flat().find(
+  const mainTranscript = mainTranscriptId && Object.values(transcripts).flat().find(
     ({ transcriptId }) => transcriptId === mainTranscriptId,
   )
   return {
@@ -272,7 +272,7 @@ const getEditInitialValues = ({
     alt,
     svType,
     genotypes,
-    [GENE_ID_FIELD_NAME]: mainTranscript?.geneId || (geneIds || [])[0],
+    [GENE_ID_FIELD_NAME]: mainTranscript?.geneId || geneIds[0],
     [TRANSCRIPT_ID_FIELD_NAME]: mainTranscriptId,
     [HGVSC_FIELD_NAME]: mainTranscript?.hgvsc,
     [HGVSP_FIELD_NAME]: mainTranscript?.hgvsp,

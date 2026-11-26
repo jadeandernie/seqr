@@ -177,9 +177,11 @@ const getGenePath = ({ variant }) => `gene/${getVariantMainGeneId(variant)}`
 
 const gnomadLink = ({ fieldTitle, variant, ...props }) => {
   const [prefix, detail] = fieldTitle.split(' ')
+  const title = `${prefix} v4`
   return (
     <span>
-      <FreqLink {...props} variant={variant} displayValue={`${prefix} v4`} getPath={getGenePath} />
+      {getVariantMainGeneId(variant) ?
+        <FreqLink {...props} variant={variant} displayValue={title} getPath={getGenePath} /> : title}
       &nbsp;
       {detail}
     </span>

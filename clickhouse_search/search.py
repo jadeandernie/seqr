@@ -10,6 +10,7 @@ import json
 from pyliftover.liftover import LiftOver
 
 from clickhouse_search.backend.fields import NamedTupleField
+from clickhouse_search.filter_registry import apply_dynamic_filters
 from clickhouse_search.backend.functions import Array, ArrayFilter, ArrayIntersect, ArraySort, GroupArrayArray, If, Tuple, \
     ArrayMap, Modulo
 from clickhouse_search.managers import InvalidDatasetTypeException, InvalidSearchException
@@ -44,6 +45,7 @@ SELECTED_TRANSCRIPT_FIELD = 'selectedTranscript'
 def get_clickhouse_variants(families, user, genome_version=None, sort=None, sample_data_by_dataset_type=None, inheritance=None, locus=None, exclude_keys=None, exclude_key_pairs=None, no_access_project_genome_version=None, **search):
     genome_version = genome_version or no_access_project_genome_version or _get_search_genome_version(families)
 
+    search = apply_dynamic_filters(search)
     search['inheritance_filter'] = (inheritance or {}).get('filter') or {}
     inheritance_mode = None if search['inheritance_filter'].get('genotype') else (inheritance or {}).get('mode')
     _parse_locus_search(locus or {}, genome_version, search)

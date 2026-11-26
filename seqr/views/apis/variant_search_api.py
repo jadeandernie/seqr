@@ -13,6 +13,7 @@ from django.shortcuts import redirect
 from math import ceil
 import re
 
+from clickhouse_search.filter_registry import get_filter_schemas, validate_dynamic_filters
 from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PATHOGENICTY_HGMD_SORT_KEY
 from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
     get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
@@ -131,6 +132,7 @@ def _get_or_create_results_model(search_hash, search_context, user):
             ).distinct()
 
         search_dict = search_context.get('search', {})
+        validate_dynamic_filters(search_dict)
         if search_context.get('previousSearchHash') and (search_dict.get('exclude') or {}).get('previousSearch'):
             search_dict.update(_get_exclude_keys(search_context['previousSearchHash'], user))
         if include_no_access_projects:
@@ -487,6 +489,11 @@ def _add_projects_response_context(response, project_guids, project_guid, user):
 
 
 @login_and_policies_required
+def search_filter_schema_handler(request):
+    return create_json_response({'searchFilterSchema': get_filter_schemas()})
+
+
+@login_and_policies_required
 def get_saved_search_handler(request):
     return create_json_response(_get_saved_searches(request.user))
 
@@ -502,6 +509,8 @@ def create_saved_search_handler(request):
     if (request_json.get('inheritance') or {}).get('filter', {}).get('genotype'):
         error = 'Saved searches cannot include custom genotype filters'
         return create_json_response({'error': error}, status=400, reason=error)
+
+    validate_dynamic_filters(request_json)
 
     try:
         saved_search, _ = get_or_create_model_from_json(

@@ -8,6 +8,7 @@ from django.urls.base import reverse
 
 from seqr.models import LocusList, Project, VariantSearch
 from seqr.views.apis.variant_search_api import vlm_lookup_handler, search_context_handler, get_saved_search_handler, \
+    search_filter_schema_handler, \
     create_saved_search_handler, update_saved_search_handler, delete_saved_search_handler
 from seqr.views.utils.test_utils import AuthenticationTestCase, AnvilAuthenticationTestCase, LOCUS_LIST_FIELDS, PA_LOCUS_LIST_FIELDS, \
     ANALYSIS_GROUP_FIELDS, DYNAMIC_ANALYSIS_GROUP_FIELDS
@@ -424,6 +425,85 @@ class VariantSearchAPITest(object):
         delete_saved_search_url = reverse(delete_saved_search_handler, args=[global_saved_search_guid])
         response = self.client.get(delete_saved_search_url)
         self.assertEqual(response.status_code, 403)
+
+    def test_search_filter_schema(self):
+        url = reverse(search_filter_schema_handler)
+        self.check_require_login(url)
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertSetEqual(set(response_json.keys()), {'searchFilterSchema'})
+        schema = response_json['searchFilterSchema']
+        self.assertSetEqual(set(schema.keys()), {'37', '38'})
+        self.assertEqual(len(schema['37']), 26)
+        self.assertEqual(len(schema['38']), 53)
+        fields = {(field['group'], field['key']): field for field in schema['38']}
+        self.assertDictEqual(fields[('in_silico', 'gnomad_noncoding')], {
+            'key': 'gnomad_noncoding', 'group': 'in_silico', 'kind': 'min', 'scope': 'variant',
+            'label': 'gnomAD Constraint', 'integer': False, 'min': None, 'max': None, 'step': 0.1,
+            'help': 'Minimum gnomAD non-coding constraint z-score of the genomic region containing the variant',
+            'datasetTypes': ['SNV_INDEL'], 'legacyPath': ['in_silico', 'gnomad_noncoding'],
+        })
+        self.assertDictEqual(fields[('frequency', 'helix_af')], {
+            'key': 'helix_af', 'group': 'frequency', 'kind': 'max', 'scope': 'variant', 'label': 'Helix homoplasmic AF',
+            'help': 'Maximum allele frequency', 'integer': False, 'min': 0, 'max': 1, 'step': 0.0001,
+            'datasetTypes': ['MITO'], 'legacyPath': ['freqs', 'helix', 'af'],
+        })
+        self.assertDictEqual(fields[('quality', 'min_mitoCn')], {
+            'key': 'min_mitoCn', 'group': 'quality', 'kind': 'min', 'scope': 'call',
+            'label': 'Mitochondrial Copy Number', 'help': None, 'integer': False, 'min': 0, 'max': None, 'step': 1,
+            'datasetTypes': ['MITO'], 'legacyPath': ['qualityFilter', 'min_mitoCn'],
+        })
+        self.assertNotIn(('in_silico', 'gnomad_noncoding'), {(field['group'], field['key']) for field in schema['37']})
+
+    def test_invalid_dynamic_filters(self):
+        search_context_url = reverse(search_context_handler)
+        self.check_collaborator_login(search_context_url, request_data={'familyGuid': 'F000001_1'})
+        num_searches = VariantSearch.objects.count()
+
+        invalid_searches = {
+            'Unknown dynamic in_silico filter "not_a_score"': {'in_silico': {'not_a_score': 1}},
+            'Unknown dynamic filter group "annotations". Available groups: in_silico, frequency, quality': {
+                'annotations': {'cadd': 20},
+            },
+            'Invalid value for CADD (cadd): expected a number': {'in_silico': {'cadd': 'high'}},
+            'Invalid value for gnomAD genomes AF (gnomad_genomes_af): must be at most 1': {
+                'frequency': {'gnomad_genomes_af': 3},
+            },
+            'Invalid value for Genotype Quality (min_gq): expected a whole number': {'quality': {'min_gq': 20.5}},
+        }
+        create_saved_search_url = reverse(create_saved_search_handler)
+        for i, (error, dynamic) in enumerate(invalid_searches.items()):
+            search = {**SEARCH, 'dynamic': dynamic}
+            response = self.client.post(search_context_url, content_type='application/json', data=json.dumps({
+                'searchHash': f'invalid_dynamic_{i}', 'searchParams': {'projectFamilies': PROJECT_FAMILIES, 'search': search},
+            }))
+            self.assertEqual(response.status_code, 400)
+            self.assertDictEqual(response.json(), {'error': error})
+
+            response = self.client.post(create_saved_search_url, content_type='application/json', data=json.dumps({
+                'name': 'Invalid Dynamic Search', **search,
+            }))
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()['error'], error)
+        self.assertEqual(VariantSearch.objects.count(), num_searches)
+
+        search = {**SEARCH, 'dynamic': {
+            'in_silico': {'gnomad_noncoding': 2.18}, 'frequency': {'helix_af': '0.01'}, 'quality': {'min_mitoCn': 100},
+        }}
+        response = self.client.post(search_context_url, content_type='application/json', data=json.dumps({
+            'searchHash': 'valid_dynamic', 'searchParams': {'projectFamilies': PROJECT_FAMILIES, 'search': search},
+        }))
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(create_saved_search_url, content_type='application/json', data=json.dumps({
+            'name': 'Dynamic Search', **search,
+        }))
+        self.assertEqual(response.status_code, 200)
+        saved_searches = response.json()['savedSearchesByGuid']
+        self.assertEqual(len(saved_searches), 1)
+        self.assertDictEqual(next(iter(saved_searches.values()))['search'], search)
+        self.assertEqual(VariantSearch.objects.filter(search=search).count(), 1)
 
     def test_search_results_redirect(self):
         response = self.client.get('/report/custom_search/6ebb895dfca0f63c34be1ca59d950205?page=2&sort=cadd')

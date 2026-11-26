@@ -93,6 +93,7 @@ from seqr.views.apis.variant_search_api import \
     query_variants_handler, \
     query_single_variant_handler, \
     search_context_handler, \
+    search_filter_schema_handler, \
     export_variants_handler, \
     get_saved_search_handler, \
     get_variant_gene_breakdown, \
@@ -258,6 +259,7 @@ api_endpoints = {
     'variant_lookup': variant_lookup_handler,
     'vlm_lookup': vlm_lookup_handler,
     'search_context': search_context_handler,
+    'search_filter_schema': search_filter_schema_handler,
     'saved_search/all': get_saved_search_handler,
     'saved_search/create': create_saved_search_handler,
     'saved_search/(?P<saved_search_guid>[^/]+)/update': update_saved_search_handler,

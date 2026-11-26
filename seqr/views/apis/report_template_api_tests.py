@@ -525,31 +525,31 @@ class ReportTemplateAPITest(AuthenticationTestCase):
 
 
 class ReportTemplateClickhouseAPITest(ClickhouseSearchTestCase):
-    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'clickhouse_saved_variants', 'report_templates']
+    fixtures = ['users', 'social_auth', '1kg_project', 'reference_data', 'clickhouse_search', 'clickhouse_transcripts']
 
-    def _get_variant_fields(self):
+    def test_family_report_clickhouse_annotations(self):
+        Project.objects.filter(guid=PROJECT_GUID).update(genome_version='38')
+        SavedVariant.objects.create(
+            family=Family.objects.get(guid=KEY_VARIANT_FAMILY_GUID), key=2, variant_id='1-38724419-T-G',
+            xpos=1038724419, dataset_type='SNV_INDEL',
+            genotypes={'I000004_hg00731': {'numAlt': 2}, 'I000005_hg00732': {'numAlt': 1}},
+        )
+        self.login_data_manager_user()
+
         response = self.client.post(
             reverse(preview_family_report, args=[KEY_VARIANT_FAMILY_GUID]), content_type='application/json',
             data=json.dumps({'body': VARIANTS_BODY}))
         self.assertEqual(response.status_code, 200)
-        return _body(response.json()['markdown']).strip().strip('[]').split('|')
-
-    def test_family_report_clickhouse_annotations(self):
-        Project.objects.filter(guid=PROJECT_GUID).update(genome_version='37')
-        self.login_data_manager_user()
-
-        # The saved variant's selected transcript has no HGVS annotation
-        expected_fields = [
-            '1-248367227-TC-T', 'OR4G11P, RP11', 'Not recorded', 'Not recorded',
-            'HG00731: Homozygous, HG00732: Heterozygous', mock.ANY, 'Uncertain significance', 'Not recorded',
-            'AIP, Excluded, Known gene for phenotype',
-        ]
-        self.assertListEqual(self._get_variant_fields(), expected_fields)
-
-        SavedVariant.objects.filter(family__guid=KEY_VARIANT_FAMILY_GUID).update(selected_main_transcript_id=None)
-        expected_fields[2] = 'ENST00000262738.3:c.3955G\\>A'
-        expected_fields[3] = 'ENST00000505820.2:c.1586-17C\\>G'
-        self.assertListEqual(self._get_variant_fields(), expected_fields)
+        variants = [line.strip('[]').split('|') for line in _body(response.json()['markdown']).strip().split('\n')]
+        self.assertEqual(len(variants), 2)
+        genes = variants[0][1]
+        self.assertListEqual(variants[0], [
+            '1-38724419-T-G', genes, 'ENST00000383791.8:c.156A\\>C', 'ENSP00000373301.3:p.Leu52Phe',
+            'HG00731: Homozygous, HG00732: Heterozygous', 'genomes 0.003445, exomes 0.00289',
+            'Conflicting classifications of pathogenicity', 'Not recorded', 'Not recorded',
+        ])
+        self.assertEqual(genes.split(', ')[0], 'MTHFR')
+        self.assertEqual(len(genes.split(', ')), 2)
 
 
 EXPECTED_RESEARCHER_REPORT = '''# Family analysis summary: 1

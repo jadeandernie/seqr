@@ -5,7 +5,7 @@ import { connect } from 'react-redux'
 import { Icon, Transition, Popup } from 'semantic-ui-react'
 
 import { getGenesById } from 'redux/selectors'
-import { ORDERED_PREDICTOR_FIELDS, ALPHAMISSENSE_THRESHHOLDS, coloredIcon, predictorColorRanges, predictionFieldValue, getVariantMainGeneId, getVariantMainTranscript } from 'shared/utils/constants'
+import { ORDERED_PREDICTOR_FIELDS, coloredIcon, predictorColorRanges, predictionFieldValue, getVariantMainGeneId, getVariantMainTranscript } from 'shared/utils/constants'
 import { snakecaseToTitlecase } from 'shared/utils/stringUtils'
 import { HorizontalSpacer } from '../../Spacers'
 import { ButtonLink } from '../../StyledComponents'
@@ -18,6 +18,8 @@ const PredictionValue = styled.span`
 `
 
 const NUM_TO_SHOW_ABOVE_THE_FOLD = 6 // how many predictors to show immediately
+
+const ALPHAMISSENSE_FIELD = ORDERED_PREDICTOR_FIELDS.find(({ field }) => field === 'alphamissense')
 
 const Prediction = (
   { field, fieldTitle, value, color, infoValue, infoTitle, thresholds, href, ...props },
@@ -113,9 +115,8 @@ class Predictions extends React.PureComponent {
     const mainTranscript = getVariantMainTranscript(variant)
     if (mainTranscript?.alphamissense?.pathogenicity) {
       genePredictors.alphamissense = {
-        field: 'alphamissense',
+        ...ALPHAMISSENSE_FIELD,
         fieldValue: mainTranscript.alphamissense.pathogenicity,
-        thresholds: ALPHAMISSENSE_THRESHHOLDS,
       }
     }
 

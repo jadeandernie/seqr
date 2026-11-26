@@ -72,6 +72,26 @@ test('renders no gene lists when the project has no locusListGuids', () => {
   expect(wrapper.find('ButtonLink').filterWhere(n => n.text() === 'Show More...').length).toBe(0)
 })
 
+test('skips gene lists that have been deleted since the project was loaded', () => {
+  const project = STATE_WITH_2_FAMILIES.projectsByGuid.R0237_1000_genomes_demo
+  const stateWithDeletedList = {
+    ...STATE_WITH_2_FAMILIES,
+    projectsByGuid: {
+      ...STATE_WITH_2_FAMILIES.projectsByGuid,
+      R0237_1000_genomes_demo: { ...project, locusListGuids: ['LL00999_deleted_list', ...project.locusListGuids] },
+    },
+  }
+  const store = configureStore([thunk])(stateWithDeletedList)
+  const wrapper = mount(
+    <Provider store={store}>
+      <GeneLists />
+    </Provider>,
+  )
+
+  expect(wrapper.find('GeneLists__ItemContainer').length).toBe(project.locusListGuids.length)
+  expect(wrapper.find('ButtonLink').at(0).text()).toEqual('Known Genes')
+})
+
 test('shows a "Show More" link when there are more than 20 gene lists', () => {
   const manyLocusListGuids = Array.from({ length: 25 }, (v, i) => `LL${i}_locus_list`)
   const stateWithManyLists = {

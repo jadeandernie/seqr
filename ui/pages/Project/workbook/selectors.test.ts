@@ -1,9 +1,10 @@
 import {
-  DE_NOVO_WORKSHEET, FAMILY_TARGET, FAMILY_TARGET_GUID, GROUP_TARGET, GROUP_TARGET_GUID, OTHER_WORKBOOK,
+  DE_NOVO_WORKSHEET, FAMILY_TARGET, FAMILY_TARGET_GUID, GROUP_SUMMARY, GROUP_TARGET, GROUP_TARGET_GUID, OTHER_WORKBOOK,
   PERMISSIVE_QUERY, PERMISSIVE_QUERY_GUID, QUERY_RESULT, RECESSIVE_QUERY, RECESSIVE_QUERY_GUID, RECESSIVE_WORKSHEET,
   RESTRICTIVE_QUERY, RESTRICTIVE_QUERY_GUID, SAVED_SEARCH_GUID, STATE as FIXTURE_STATE, WORKBOOK, WORKBOOK_GUID,
 } from './fixtures'
 import {
+  getCellGroupSummary, getFamiliesByGuid, getGenesById, getGroupSummaryIsLoading,
   getProjectAnalysisGroupOptions, getProjectFamilyOptions, getProjectWorkbooks, getQueryResultsByQueryTarget,
   getQueryStatus, getRollUpStatus, getSavedSearchOptions, getTargetName, getWorkbook, getWorkbookDetailIsLoading,
   getWorkbookDetailLoadingError, getWorkbookPath, getWorkbookSelection, getWorkbooksIsLoading,
@@ -188,4 +189,18 @@ test('splitTargetTabs keeps the selected target visible', () => {
   expect(names(splitTargetTabs(targets, 'a', 3))).toEqual(['abc', 'de'])
   expect(names(splitTargetTabs(targets, 'e', 3))).toEqual(['abe', 'cd'])
   expect(names(splitTargetTabs(targets, undefined, 3))).toEqual(['abc', 'de'])
+})
+
+test('group summary selectors only return the summary of the given cell', () => {
+  const workbookGroupSummary = { cellKey: 'WSQ1/WBT2', summary: GROUP_SUMMARY }
+  const state = {
+    ...STATE, workbookGroupSummary, workbookGroupSummaryLoading: { isLoading: true }, genesById: { ENSG1: {} },
+  } as unknown as WorkbookReduxState
+
+  expect(getCellGroupSummary(state, 'WSQ1/WBT2')).toBe(workbookGroupSummary)
+  expect(getCellGroupSummary(state, 'WSQ1/WBT3')).toEqual({})
+  expect(getCellGroupSummary(state, 'WSQ1/WBT3')).toBe(getCellGroupSummary(state, 'WSQ2/WBT2'))
+  expect(getGroupSummaryIsLoading(state)).toBe(true)
+  expect(getGenesById(state)).toBe(state.genesById)
+  expect(getFamiliesByGuid(state)).toBe(state.familiesByGuid)
 })

@@ -3,6 +3,8 @@ import { RouterHistory, RouterLocation } from 'react-router-dom'
 
 import BaseUpdateButton from '../../../shared/components/buttons/UpdateButton'
 import BaseDeleteButton from '../../../shared/components/buttons/DeleteButton'
+import BaseSearchResultsLink from '../../../shared/components/buttons/SearchResultsLink'
+import { CATEGORY_NAMES } from '../../../shared/components/panel/HpoPanel'
 import BaseVariantSearchResults from '../../Search/components/VariantSearchResults'
 import { Option } from './types'
 
@@ -46,9 +48,19 @@ interface VariantSearchResultsProps {
   location: RouterLocation
 }
 
+interface SearchResultsLinkProps {
+  buttonText: string
+  location: string
+  familyGuids: string[]
+  initialSearch: Record<string, unknown>
+}
+
+export const HPO_CATEGORY_NAMES: Record<string, string> = CATEGORY_NAMES
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const UpdateButton = BaseUpdateButton as unknown as React.ComponentType<UpdateButtonProps<any>>
 export const DeleteButton = BaseDeleteButton as unknown as React.ComponentType<DeleteButtonProps>
 export const VariantSearchResults = (
   BaseVariantSearchResults as unknown as React.ComponentType<VariantSearchResultsProps>
 )
+export const SearchResultsLink = BaseSearchResultsLink as unknown as React.ComponentType<SearchResultsLinkProps>

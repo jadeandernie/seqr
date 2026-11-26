@@ -8,7 +8,12 @@ Permissions:
   and queries requires view access and either edit access to the project or being the creator of the workbook.
 - Updating or running a cell requires view access to the project and to the families of the target.
 - Every endpoint that returns or uses targets checks view access to the families of those targets.
+
+The group summary of a cell is descriptive only: it counts families by gene, variant and HPO term from the cached
+results of the search of the cell and never runs a search. It does not read free text (notes, nonstandard features)
+and does not test for enrichment or significance.
 """
+from collections import defaultdict
 from copy import deepcopy
 import json
 
@@ -18,9 +23,13 @@ from django.db.models import Max, Q, prefetch_related_objects
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
-from seqr.models import AnalysisGroup, Family, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, WorksheetQueryResult
+from reference_data.models import HumanPhenotypeOntology
+from seqr.models import AnalysisGroup, Family, Individual, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, \
+    WorksheetQueryResult
+from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.middleware import ErrorsWarningsException
-from seqr.views.apis.variant_search_api import _get_or_create_results_model, get_saved_search_models, \
+from seqr.views.apis.variant_search_api import _get_or_create_results_model, flatten_search_results, \
+    get_cached_search_results, get_gene_family_counts, get_saved_search_models, get_variant_gene_ids, \
     validate_saved_search_json
 from seqr.views.utils.json_to_orm_utils import create_model_from_json, get_or_create_model_from_json, \
     update_model_from_json
@@ -33,6 +42,10 @@ from seqr.views.utils.permissions_utils import check_families_view_permission, g
 SEARCH_HASH_PREFIX = 'WB'
 SEARCH_HASH_SALT = 'seqr.workbook.search_hash'
 SEARCH_HASH_DIGEST_LENGTH = 48
+
+MAX_SUMMARY_ROWS = 200
+MAX_PHENOTYPE_TERMS = 10
+RESULTS_NOT_LOADED_STATUS = 409
 
 
 def _error(message):
@@ -486,4 +499,123 @@ def run_worksheet_query_handler(request, workbook_guid, query_guid, target_guid)
     return create_json_response({
         'searchHash': results_model.search_hash,
         'worksheetQueryResultsByGuid': _query_results_json([query_result]),
+    })
+
+
+def _results_not_loaded(message):
+    return create_json_response({'errors': [message], 'resultsNotLoaded': True}, status=RESULTS_NOT_LOADED_STATUS)
+
+
+def _get_family_hpo_ids(family_guids):
+    family_hpo_ids = defaultdict(set)
+    individuals = Individual.objects.filter(
+        family__guid__in=family_guids, affected=Individual.AFFECTED_STATUS_AFFECTED,
+    ).values_list('family__guid', 'features')
+    for family_guid, features in individuals:
+        for feature in features or []:
+            family_hpo_ids[family_guid].add(feature['id'])
+    return family_hpo_ids
+
+
+def _phenotype_rows(families_by_id, hit_families, names=None):
+    rows = [{
+        'id': phenotype_id,
+        'name': (names or {}).get(phenotype_id),
+        'numFamilies': len(families),
+        'numFamiliesWithResults': len(families & hit_families),
+    } for phenotype_id, families in families_by_id.items()]
+    return sorted(rows, key=lambda row: (-row['numFamilies'], row['id'] or ''))
+
+
+def _phenotype_cross_tab(family_hpo_ids, hit_families):
+    hpo_ids = {hpo_id for hpo_ids in family_hpo_ids.values() for hpo_id in hpo_ids}
+    hpo_terms = {
+        hpo_id: (name, category_id) for hpo_id, name, category_id in
+        HumanPhenotypeOntology.objects.filter(hpo_id__in=hpo_ids).values_list('hpo_id', 'name', 'category_id')
+    }
+    families_by_term = defaultdict(set)
+    families_by_category = defaultdict(set)
+    for family_guid, family_ids in family_hpo_ids.items():
+        for hpo_id in family_ids:
+            families_by_term[hpo_id].add(family_guid)
+            families_by_category[hpo_terms.get(hpo_id, (None, None))[1]].add(family_guid)
+
+    terms = _phenotype_rows(families_by_term, hit_families, names={k: name for k, (name, _) in hpo_terms.items()})
+    return {
+        'phenotypeCategories': _phenotype_rows(families_by_category, hit_families),
+        'phenotypeTerms': terms[:MAX_PHENOTYPE_TERMS],
+        'totalPhenotypeTerms': len(terms),
+    }
+
+
+def _group_summary(results, family_guids, gene_id):
+    """
+    One pass over the cached results (at most MAX_VARIANTS results, each with the guids of its families) and one over
+    the HPO terms of the affected individuals: O(variant-family pairs + individual-term pairs) time and memory.
+    """
+    flat_variants = flatten_search_results(results)
+    gene_counts = get_gene_family_counts(flat_variants)
+    genes = sorted([{
+        'geneId': variant_gene_id,
+        'numFamilies': len(counts['families']),
+        'familyGuids': sorted(counts['families']),
+        'numVariants': counts['total'],
+    } for variant_gene_id, counts in gene_counts.items()], key=lambda gene: (
+        -gene['numFamilies'], -gene['numVariants'], gene['geneId']))
+
+    families_by_variant = defaultdict(set)
+    gene_ids_by_variant = {}
+    for variant in flat_variants:
+        families_by_variant[variant['variantId']].update(variant.get('familyGuids', []))
+        gene_ids_by_variant[variant['variantId']] = sorted(get_variant_gene_ids(variant))
+    recurrent_variants = sorted([{
+        'variantId': variant_id,
+        'geneIds': gene_ids_by_variant[variant_id],
+        'numFamilies': len(families),
+        'familyGuids': sorted(families),
+    } for variant_id, families in families_by_variant.items() if len(families) > 1], key=lambda variant: (
+        -variant['numFamilies'], variant['variantId']))
+
+    families_with_results = {guid for families in families_by_variant.values() for guid in families}
+    hit_families = set(gene_counts[gene_id]['families']) if gene_id in gene_counts else set()
+    family_hpo_ids = _get_family_hpo_ids(family_guids)
+    return {
+        'numFamilies': len(family_guids),
+        'numFamiliesWithResults': len(families_with_results),
+        'numFamiliesWithPhenotypes': len(family_hpo_ids),
+        'totalVariants': len(results),
+        'genes': genes[:MAX_SUMMARY_ROWS],
+        'totalGenes': len(genes),
+        'recurrentVariants': recurrent_variants[:MAX_SUMMARY_ROWS],
+        'totalRecurrentVariants': len(recurrent_variants),
+        'phenotypeGeneId': gene_id,
+        **_phenotype_cross_tab(family_hpo_ids, hit_families if gene_id else families_with_results),
+    }
+
+
+@login_and_policies_required
+def worksheet_query_group_summary_handler(request, workbook_guid, query_guid, target_guid):
+    workbook, query, target, family_guids = _get_query_and_target(workbook_guid, query_guid, target_guid, request.user)
+    if not target.analysis_group:
+        raise _error(f'{target} is not an analysis group')
+
+    query_result = WorksheetQueryResult.objects.filter(query=query, target=target).select_related('results').first()
+    results_model = query_result.results if query_result else None
+    if not results_model:
+        return _results_not_loaded(f'This query has not been run for {target} yet, run it to see patterns')
+    if set(results_model.families.values_list('guid', flat=True)) != set(family_guids):
+        return _results_not_loaded(
+            f'The families of {target} have changed since this query was run, run it again to see patterns')
+    results = get_cached_search_results(results_model, request.user)
+    if results is None:
+        return _results_not_loaded(
+            f'The results of this query for {target} are no longer stored, run it again to see patterns')
+
+    summary = _group_summary(results, family_guids, request.GET.get('geneId') or None)
+    gene_ids = {gene['geneId'] for gene in summary['genes']}
+    gene_ids.update(gene_id for variant in summary['recurrentVariants'] for gene_id in variant['geneIds'])
+    return create_json_response({
+        'searchHash': results_model.search_hash,
+        'genesById': get_genes_for_variant_display(list(gene_ids), workbook.project.genome_version),
+        **summary,
     })

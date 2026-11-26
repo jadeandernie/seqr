@@ -1,16 +1,21 @@
-import { RECEIVE_DATA } from '../../../redux/utils/reducerUtils'
-import { createObjectsByIdReducer, loadingReducer } from '../../../redux/utils/reducerFactories'
+import { RECEIVE_DATA, RECEIVE_SAVED_SEARCHES } from '../../../redux/utils/reducerUtils'
+import {
+  createObjectsByIdReducer, createSingleValueReducer, loadingReducer,
+} from '../../../redux/utils/reducerFactories'
 import { HttpRequestHelper } from '../../../shared/utils/httpRequestHelper'
 import { loadSavedSearches } from '../../Search/reducers'
 import { loadCurrentProjectAnalysisGroups, loadFamilies } from '../reducers'
 import {
-  ByGuid, Workbook, WorkbookResponse, WorkbookStatus, WorkbookTarget, WorkbookThunk, Worksheet,
+  ByGuid, GroupSummary, RequestError, Workbook, WorkbookResponse, WorkbookStatus, WorkbookTarget, WorkbookThunk,
+  Worksheet,
 } from './types'
 
 const REQUEST_WORKBOOKS = 'REQUEST_WORKBOOKS'
 const RECEIVE_WORKBOOKS = 'RECEIVE_WORKBOOKS'
 const REQUEST_WORKBOOK_DETAIL = 'REQUEST_WORKBOOK_DETAIL'
 const RECEIVE_WORKBOOK_DETAIL = 'RECEIVE_WORKBOOK_DETAIL'
+const REQUEST_WORKBOOK_GROUP_SUMMARY = 'REQUEST_WORKBOOK_GROUP_SUMMARY'
+const RECEIVE_WORKBOOK_GROUP_SUMMARY = 'RECEIVE_WORKBOOK_GROUP_SUMMARY'
 
 interface TargetValues {
   familyGuids?: string[]
@@ -193,6 +198,60 @@ export const runWorksheetQuery = (
   workbookGuid: string, worksheetQueryGuid: string, workbookTargetGuid: string,
 ): WorkbookThunk => postWorkbookData(`${queryTargetPath(workbookGuid, worksheetQueryGuid, workbookTargetGuid)}/run`)
 
+// The search of an analysis group is run through the search API so that its results are stored for the summary,
+// without loading them into the search results page state
+export const runGroupWorksheetQuery = (
+  workbookGuid: string, worksheetQueryGuid: string, workbookTargetGuid: string,
+): WorkbookThunk => (dispatch) => {
+  let searchHash: string
+  return new HttpRequestHelper(
+    `${queryTargetPath(workbookGuid, worksheetQueryGuid, workbookTargetGuid)}/run`,
+    (responseJson: WorkbookResponse) => {
+      ({ searchHash } = responseJson)
+      dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+    },
+  ).post().then(() => new HttpRequestHelper(
+    `/api/search/${searchHash}?per_page=1`,
+    ({ search }: { search: object }) => {
+      dispatch({ type: RECEIVE_SAVED_SEARCHES, updatesById: { searchesByHash: { [searchHash]: search } } })
+    },
+  ).post())
+}
+
+export const getCellKey = (worksheetQueryGuid: string, workbookTargetGuid: string) => (
+  `${worksheetQueryGuid}/${workbookTargetGuid}`
+)
+
+let currentGroupSummaryRequest = 0
+
+export const loadGroupSummary = (
+  workbookGuid: string, worksheetQueryGuid: string, workbookTargetGuid: string, geneId?: string,
+): WorkbookThunk => (dispatch) => {
+  const cellKey = getCellKey(worksheetQueryGuid, workbookTargetGuid)
+  currentGroupSummaryRequest += 1
+  const request = currentGroupSummaryRequest
+  dispatch({ type: REQUEST_WORKBOOK_GROUP_SUMMARY })
+  return new HttpRequestHelper(
+    `${queryTargetPath(workbookGuid, worksheetQueryGuid, workbookTargetGuid)}/summary`,
+    ({ genesById, ...summary }: GroupSummary & { genesById: object }) => {
+      if (request === currentGroupSummaryRequest) {
+        dispatch({ type: RECEIVE_DATA, updatesById: { genesById } })
+        dispatch({ type: RECEIVE_WORKBOOK_GROUP_SUMMARY, newValue: { cellKey, summary } })
+      }
+    },
+    (e: RequestError) => {
+      if (request === currentGroupSummaryRequest) {
+        dispatch({
+          type: RECEIVE_WORKBOOK_GROUP_SUMMARY,
+          newValue: {
+            cellKey, error: e.body?.errors?.[0] || e.message, resultsNotLoaded: !!e.body?.resultsNotLoaded,
+          },
+        })
+      }
+    },
+  ).get(geneId ? { geneId } : {})
+}
+
 export const reducers = {
   workbooksByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbooksByGuid'),
   workbookTargetsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbookTargetsByGuid'),
@@ -201,4 +260,6 @@ export const reducers = {
   worksheetQueryResultsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'worksheetQueryResultsByGuid'),
   workbooksLoading: loadingReducer(REQUEST_WORKBOOKS, RECEIVE_WORKBOOKS),
   workbookDetailLoading: loadingReducer(REQUEST_WORKBOOK_DETAIL, RECEIVE_WORKBOOK_DETAIL),
+  workbookGroupSummary: createSingleValueReducer(RECEIVE_WORKBOOK_GROUP_SUMMARY, {}),
+  workbookGroupSummaryLoading: loadingReducer(REQUEST_WORKBOOK_GROUP_SUMMARY, RECEIVE_WORKBOOK_GROUP_SUMMARY),
 }

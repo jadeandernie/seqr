@@ -477,7 +477,7 @@ test('never shows the results of a previously selected cell when its search fini
   const { wrapper } = await renderWorkbook(withDetail({
     worksheetQueryResultsByGuid: {
       [QUERY_RESULT_GUID]: RAN_RESULT,
-      WQR2: { ...RAN_RESULT, worksheetQueryResultGuid: 'WQR2', workbookTargetGuid: GROUP_TARGET_GUID, searchHash: otherHash },
+      WQR2: { ...RAN_RESULT, worksheetQueryResultGuid: 'WQR2', worksheetQueryGuid: RECESSIVE_QUERY_GUID, searchHash: otherHash },
     },
   }, {
     [SEARCH_URL]: { ...SEARCH_RESPONSE[SEARCH_URL], wait },
@@ -492,7 +492,7 @@ test('never shows the results of a previously selected cell when its search fini
   expect(getRequests(SEARCH_URL)).toHaveLength(1)
   expect(wrapper.find('#variants').exists()).toBe(false)
 
-  await clickLink(wrapper, 'Test Group')
+  await clickLink(wrapper, 'Recessive')
   await flush(wrapper)
   expect(getRequests(otherUrl)).toHaveLength(1)
   expect(wrapper.find('#variants').text()).toEqual('SV0000003_var')

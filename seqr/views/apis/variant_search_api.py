@@ -274,22 +274,40 @@ MAX_EXPORT_VARIANTS = 1000
 MAX_FAMILIES_PER_ROW = 1000
 
 
+def get_cached_search_results(results_model, user):
+    # Never runs the search: None when the results are not cached for any sort
+    return safe_redis_get_wildcard_json(_get_search_cache_key(results_model, user, sort='*'))
+
+
+def flatten_search_results(results):
+    return [
+        v for variants in results for v in (variants if isinstance(variants, list) else [variants])
+    ]
+
+
+def get_variant_gene_ids(variant):
+    if 'transcripts' in variant:
+        return variant['transcripts'].keys()
+    return {t['geneId'] for t in variant['sortedTranscriptConsequences']}
+
+
+def get_gene_family_counts(flat_variants):
+    gene_counts = defaultdict(lambda: {'total': 0, 'families': defaultdict(int)})
+    for var in flat_variants:
+        for gene_id in get_variant_gene_ids(var):
+            gene_counts[gene_id]['total'] += 1
+            for family_guid in var.get('familyGuids', []):
+                gene_counts[gene_id]['families'][family_guid] += 1
+    return gene_counts
+
+
 @login_and_policies_required
 def get_variant_gene_breakdown(request, search_hash):
     results_model = VariantSearchResults.objects.get(search_hash=search_hash)
     genome_version = _check_results_permission(results_model, request.user)
 
     results = _get_variants_with_cache(_get_search_cache_key, _query_variants, results_model, request.user)
-    flat_variants = [
-        v for variants in results for v in (variants if isinstance(variants, list) else [variants])
-    ]
-    gene_counts = defaultdict(lambda: {'total': 0, 'families': defaultdict(int)})
-    for var in flat_variants:
-        gene_ids = var['transcripts'].keys() if 'transcripts' in var else {t['geneId'] for t in var['sortedTranscriptConsequences']}
-        for gene_id in gene_ids:
-            gene_counts[gene_id]['total'] += 1
-            for family_guid in var.get('familyGuids', []):
-                gene_counts[gene_id]['families'][family_guid] += 1
+    gene_counts = get_gene_family_counts(flatten_search_results(results))
 
     return create_json_response({
         'searchGeneBreakdown': {search_hash: gene_counts},

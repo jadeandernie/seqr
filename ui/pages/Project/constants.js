@@ -300,11 +300,13 @@ export const PROJECT_CATEGORY_FAMILY_FILTERS = {
     {
       value: SHOW_PHENOTYPES_ENTERED,
       name: 'Required Metadata Entered',
+      category: 'Metadata',
       createFilter: familyHasRequiredMetadata,
     },
     {
       value: SHOW_NO_PHENOTYPES_ENTERED,
       name: 'Required Metadata Missing',
+      category: 'Metadata',
       createFilter: family => !familyHasRequiredMetadata(family),
     },
   ],

@@ -8,6 +8,7 @@ import {
   getLocusListIntervalsByChromProject,
   getSpliceOutliersByChromFamily,
   getProjectAnalysisGroupFamilyGuidsByGuid,
+  familyPassesFilters,
 } from './selectors'
 import {DYNAMIC_ANALYSIS_GROUP_GUID, FAMILY_GUID, GENE_ID, SEARCH, SEARCH_HASH, STATE} from "../pages/Search/fixtures";
 
@@ -83,5 +84,158 @@ test('getProjectAnalysisGroupFamilyGuidsByGuid', () => {
   })
   expect(getProjectAnalysisGroupFamilyGuidsByGuid(STATE, {})).toEqual({
     DAG0000183_test: [],
+  })
+})
+
+describe('data loaded filters', () => {
+  const WEEK = 'SHOW_DATA_LOADED_PAST_WEEK'
+  const MONTH = 'SHOW_DATA_LOADED_PAST_MONTH'
+  const THREE_MONTHS = 'SHOW_DATA_LOADED_PAST_3_MONTHS'
+  const SV = 'SHOW_DATA_LOADED_SV'
+  const MITO = 'SHOW_DATA_LOADED_MITO'
+  const RNA = 'SHOW_DATA_LOADED_RNA'
+  const ALL = 'SHOW_DATA_LOADED'
+
+  const FAMILY = STATE.familiesByGuid[FAMILY_GUID]
+  const OLD_SV_STATE = {
+    ...STATE,
+    datasetsByGuid: {
+      ...STATE.datasetsByGuid,
+      S2310657_wal_mc16200_mc16203: {
+        ...STATE.datasetsByGuid.S2310657_wal_mc16200_mc16203, loadedDate: '2017-11-02T13:25:21.551Z',
+      },
+    },
+  }
+
+  const mockNow = (date) => jest.spyOn(Date, 'now').mockReturnValue(Date.parse(date))
+  const passes = (firstSample, { state = STATE, family = FAMILY } = {}) => (
+    familyPassesFilters(state)(family, { firstSample })
+  )
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  test('filters by a fixed cutoff relative to now', () => {
+    mockNow('2018-03-20T23:00:00.000Z')
+    expect(passes([WEEK])).toBe(true)
+    expect(passes([MONTH])).toBe(true)
+    expect(passes([THREE_MONTHS])).toBe(true)
+
+    mockNow('2018-03-21T00:00:00.000Z')
+    expect(passes([WEEK])).toBe(false)
+    expect(passes([MONTH])).toBe(true)
+    expect(passes([WEEK, MONTH])).toBe(true)
+
+    mockNow('2018-04-14T00:00:00.000Z')
+    expect(passes([MONTH])).toBe(false)
+    expect(passes([THREE_MONTHS])).toBe(true)
+
+    mockNow('2018-06-14T00:00:00.000Z')
+    expect(passes([THREE_MONTHS])).toBe(false)
+    expect(passes([WEEK, MONTH, THREE_MONTHS])).toBe(false)
+    expect(passes([ALL])).toBe(true)
+  })
+
+  test('requires the same dataset to match the data type and the loaded date', () => {
+    mockNow('2018-03-15T12:00:00.000Z')
+    expect(passes([SV, WEEK])).toBe(true)
+    expect(passes([ALL, WEEK])).toBe(true)
+    expect(passes([MITO, WEEK])).toBe(false)
+    expect(passes([MITO, SV, WEEK])).toBe(true)
+
+    expect(passes([SV], { state: OLD_SV_STATE })).toBe(true)
+    expect(passes([WEEK], { state: OLD_SV_STATE })).toBe(true)
+    expect(passes([ALL, WEEK], { state: OLD_SV_STATE })).toBe(true)
+    expect(passes([SV, WEEK], { state: OLD_SV_STATE })).toBe(false)
+    expect(passes([SV, MONTH], { state: OLD_SV_STATE })).toBe(false)
+    expect(passes([SV, WEEK, MONTH], { state: OLD_SV_STATE })).toBe(false)
+    expect(passes([SV, MITO, THREE_MONTHS], { state: OLD_SV_STATE })).toBe(false)
+
+    mockNow('2018-01-15T12:00:00.000Z')
+    expect(passes([SV, WEEK], { state: OLD_SV_STATE })).toBe(false)
+    expect(passes([SV, THREE_MONTHS], { state: OLD_SV_STATE })).toBe(true)
+  })
+
+  test('ignores inactive datasets and families with no data', () => {
+    mockNow('2018-03-15T12:00:00.000Z')
+    const state = {
+      ...STATE,
+      datasetsByGuid: {
+        S2310656_wal_mc16200_mc16203: STATE.datasetsByGuid.S2310656_wal_mc16200_mc16203,
+      },
+    }
+    expect(passes([WEEK], { state })).toBe(false)
+    expect(passes([ALL], { state })).toBe(false)
+    expect(passes([WEEK], { state: { ...STATE, datasetsByGuid: {} } })).toBe(false)
+  })
+
+  test('keeps family-level options as alternatives to the dataset options', () => {
+    mockNow('2018-06-14T00:00:00.000Z')
+    expect(passes([RNA, WEEK])).toBe(false)
+    expect(passes([RNA, WEEK], { family: { ...FAMILY, hasRna: true } })).toBe(true)
+    expect(passes([RNA, MITO], { family: { ...FAMILY, hasRna: true } })).toBe(true)
+    expect(passes([RNA, SV])).toBe(true)
+    expect(passes(['SHOW_DATA_LOADED_PHENO', MONTH])).toBe(false)
+    expect(passes(['SHOW_DATA_LOADED_PHENO', MONTH], { family: { ...FAMILY, hasPhenotypePrioritization: true } })).toBe(true)
+  })
+
+  test('uses the loaded dates of search context sample types', () => {
+    mockNow('2018-03-15T12:00:00.000Z')
+    const family = {
+      ...FAMILY,
+      sampleTypes: [
+        { datasetType: 'SNV_INDEL', sampleType: 'WES', isActive: true, loadedDate: '2017-02-05T06:25:55.397+00:00' },
+        { datasetType: 'MITO', sampleType: 'WGS', isActive: true, loadedDate: '2018-03-10T06:25:55.397+00:00' },
+      ],
+    }
+    expect(passes([WEEK], { family })).toBe(true)
+    expect(passes([MITO, WEEK], { family })).toBe(true)
+    expect(passes([SV, WEEK], { family })).toBe(false)
+    expect(passes([SV], { family })).toBe(false)
+    expect(passes([ALL], { family })).toBe(true)
+    expect(passes([WEEK], { family: { ...family, sampleTypes: family.sampleTypes.slice(0, 1) } })).toBe(false)
+    expect(passes([WEEK], {
+      family: { ...family, sampleTypes: [{ datasetType: 'SNV_INDEL', sampleType: 'WES', isActive: true }] },
+    })).toBe(false)
+  })
+
+  test('combines with other criteria in dynamic analysis groups', () => {
+    const state = {
+      ...STATE,
+      datasetsByGuid: {
+        ...STATE.datasetsByGuid,
+        S2310657_wal_mc16200_mc16203: {
+          ...STATE.datasetsByGuid.S2310657_wal_mc16200_mc16203, loadedDate: '2018-01-20T13:25:21.551Z',
+        },
+      },
+      analysisGroupsByGuid: {
+        DAG_recent: { analysisGroupGuid: 'DAG_recent', projectGuid: null, criteria: { firstSample: [WEEK] } },
+        DAG_recent_sv: { analysisGroupGuid: 'DAG_recent_sv', projectGuid: null, criteria: { firstSample: [SV, WEEK] } },
+        DAG_quarter_sv: {
+          analysisGroupGuid: 'DAG_quarter_sv',
+          projectGuid: null,
+          criteria: { firstSample: [SV, THREE_MONTHS], analysisStatus: ['Rcpc'] },
+        },
+        DAG_quarter_sv_status: {
+          analysisGroupGuid: 'DAG_quarter_sv_status',
+          projectGuid: null,
+          criteria: { firstSample: [SV, THREE_MONTHS], analysisStatus: ['I'] },
+        },
+      },
+    }
+    const props = { projectGuid: 'R0237_1000_genomes_demo' }
+
+    mockNow('2018-03-15T12:00:00.000Z')
+    expect(getProjectAnalysisGroupFamilyGuidsByGuid(state, props)).toEqual({
+      DAG_recent: ['F011652_1'], DAG_recent_sv: [], DAG_quarter_sv: ['F011652_1'], DAG_quarter_sv_status: [],
+    })
+
+    mockNow('2018-05-01T12:00:00.000Z')
+    expect(getProjectAnalysisGroupFamilyGuidsByGuid(
+      { ...state, familiesByGuid: { ...state.familiesByGuid } }, props,
+    )).toEqual({
+      DAG_recent: [], DAG_recent_sv: [], DAG_quarter_sv: [], DAG_quarter_sv_status: [],
+    })
   })
 })

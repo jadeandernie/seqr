@@ -44,8 +44,7 @@ class FilterRegistryTest(SimpleTestCase):
         return {field['key']: field for field in schema if field['group'] == group}
 
     def test_schema_matches_ui_fixture(self):
-        # The UI tests render the search form from this file, regenerate it when the models change:
-        # json.dump(get_filter_schemas(), open('ui/pages/Search/filterSchemaFixture.json', 'w'), indent=1)
+        # The UI tests render the search form from this file: update it with get_filter_schemas() when the models change
         with open(UI_SCHEMA_FIXTURE) as f:
             self.assertDictEqual(json.loads(json.dumps(get_filter_schemas())), json.load(f))
 

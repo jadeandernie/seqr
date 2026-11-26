@@ -57,6 +57,7 @@ class BaseFieldView extends React.PureComponent {
     defaultId: PropTypes.string,
     additionalEditFields: PropTypes.arrayOf(PropTypes.object),
     blockDisplay: PropTypes.bool,
+    editButtonComponent: PropTypes.elementType,
   }
 
   static defaultProps = {
@@ -85,6 +86,7 @@ class BaseFieldView extends React.PureComponent {
     const {
       initialValues, modalId, isEditable, formFields, showInLine, editLabel, editIconName, onSubmit, showErrorPanel,
       addConfirm, modalTitle, modalSize, modalStyle, field, formFieldProps, modalTrigger, modalPopup,
+      editButtonComponent: EditButton = UpdateButton,
     } = this.props
     const { showInLineButton } = this.state
 
@@ -123,7 +125,7 @@ class BaseFieldView extends React.PureComponent {
           )}
         </span>
       ) : (
-        <UpdateButton
+        <EditButton
           showInLine={showInLine}
           key="edit"
           modalTitle={modalTitle}

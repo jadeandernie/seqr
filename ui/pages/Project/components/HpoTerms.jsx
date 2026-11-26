@@ -277,7 +277,9 @@ class HpoTermsEditor extends React.PureComponent {
 
 }
 
-export const HPO_FORM_FIELDS = [ // eslint-disable-line import/prefer-default-export
+export { HpoTermSelector }
+
+export const HPO_FORM_FIELDS = [
   {
     name: 'nonstandardFeatures',
     component: HpoTermsEditor,

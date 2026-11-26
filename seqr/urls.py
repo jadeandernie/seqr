@@ -58,6 +58,7 @@ from seqr.views.apis.saved_variant_api import \
 
 from seqr.views.apis.dashboard_api import dashboard_page_data
 
+from seqr.views.apis.hpo_vocabulary_api import hpo_vocabulary
 from seqr.views.apis.gene_api import \
     gene_info, \
     genes_info, \
@@ -280,6 +281,7 @@ api_endpoints = {
     'gene_info/(?P<gene_id>[^/]+)/note/(?P<note_guid>[^/]+)/delete': delete_gene_note_handler,
 
     'hpo_terms/(?P<hpo_parent_id>[^/]+)': get_hpo_terms,
+    'hpo_vocabulary': hpo_vocabulary,
 
     'locus_lists/(?P<locus_list_guid>[^/]+)/update': update_locus_list_handler,
     'locus_lists/(?P<locus_list_guid>[^/]+)/delete': delete_locus_list_handler,

@@ -144,7 +144,10 @@ class LoadableModel(models.Model):
 class HumanPhenotypeOntology(LoadableModel):
 
     URL = 'https://github.com/obophenotype/human-phenotype-ontology/releases/latest/download/hp.obo'
-    HEADER = ['hpo_id', 'is_category', 'parent_id', 'name', 'definition', 'comment']
+    HEADER = ['hpo_id', 'is_category', 'parent_id', 'name', 'definition', 'comment', 'synonyms']
+    # Only synonyms that mean the same as the term are kept, as they are used to assign the term from free text
+    SYNONYM_REGEX = re.compile(r'"(?P<text>(?:[^"\\]|\\.)*)"\s+EXACT(?:\s+(?P<type>\w+))?\s*\[')
+    EXCLUDED_SYNONYM_TYPES = {'abbreviation', 'obsolete_synonym'}
 
     hpo_id = models.CharField(max_length=20, null=False, blank=False, unique=True, db_index=True)
     parent_id = models.CharField(max_length=20, null=True, blank=True)
@@ -158,7 +161,7 @@ class HumanPhenotypeOntology(LoadableModel):
 
     definition = models.TextField(null=True, blank=True)
     comment = models.TextField(null=True, blank=True)
-
+    synonyms = models.JSONField(default=list)
 
     @classmethod
     def get_current_version(cls, **kwargs):
@@ -184,6 +187,7 @@ class HumanPhenotypeOntology(LoadableModel):
                 record = {
                     'hpo_id': value,
                     'is_category': False,
+                    'synonyms': [],
                 }
             elif line.startswith('is_a: '):
                 is_a = value.split(' ')[0]
@@ -196,6 +200,10 @@ class HumanPhenotypeOntology(LoadableModel):
                 record['definition'] = value
             elif line.startswith('comment: '):
                 record['comment'] = value
+            elif line.startswith('synonym: '):
+                synonym = cls.SYNONYM_REGEX.match(value)
+                if synonym and synonym.group('type') not in cls.EXCLUDED_SYNONYM_TYPES:
+                    record['synonyms'].append(synonym.group('text').replace('\\"', '"'))
 
         yield [record.get(f) for f in cls.HEADER] if record else None
 

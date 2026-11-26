@@ -6,7 +6,9 @@
  * http://facebook.github.io/jest/docs/expect.html
  * https://github.com/facebookincubator/create-react-app/blob/master/packages/react-scripts/template/README.md#running-tests
  */
-import { zeroActionsReducer, createSingleValueReducer, createSingleObjectReducer, createObjectsByIdReducer } from './reducerFactories'
+import {
+  zeroActionsReducer, createSingleValueReducer, createSingleObjectReducer, createObjectsByIdReducer, loadingReducer,
+} from './reducerFactories'
 
 
 describe('reducerUtils tests', () => {
@@ -155,5 +157,39 @@ describe('reducerUtils tests', () => {
       id1: { key1: 2, key2: 3, newKey: 4 },
       id2: { key1: 3, key2: 4 },
     })
+  })
+
+  /****************************/
+  /** Test loadingReducer */
+  /****************************/
+
+  test('loadingReducer test initialization', () => {
+    expect(loadingReducer('REQUEST', 'RECEIVE')(undefined, {})).toEqual({ isLoading: false, errorMessage: null })
+    expect(loadingReducer('REQUEST', 'RECEIVE', { isLoading: true })(undefined, {})).toEqual({ isLoading: true })
+  })
+
+  test('loadingReducer test request and receive actions', () => {
+    const reducer = loadingReducer('REQUEST', 'RECEIVE')
+
+    const loading = reducer(undefined, { type: 'REQUEST' })
+    expect(loading).toEqual({ isLoading: true, errorMessage: null })
+    expect(reducer(loading, { type: 'RECEIVE' })).toEqual({ isLoading: false, errorMessage: undefined })
+
+    const failed = reducer(loading, { type: 'RECEIVE', error: 'Failed' })
+    expect(failed).toEqual({ isLoading: false, errorMessage: 'Failed' })
+    expect(reducer(failed, { type: 'REQUEST' })).toEqual({ isLoading: true, errorMessage: 'Failed' })
+    expect(reducer(reducer(failed, { type: 'REQUEST' }), { type: 'RECEIVE' })).toEqual(
+      { isLoading: false, errorMessage: undefined },
+    )
+  })
+
+  test('loadingReducer ignores other action types', () => {
+    const reducer = loadingReducer('REQUEST', 'RECEIVE')
+    const loading = reducer(undefined, { type: 'REQUEST' })
+    const failed = reducer(loading, { type: 'RECEIVE', error: 'Failed' })
+
+    expect(reducer(loading, { type: 'RECEIVE_DATA', updatesById: {} })).toBe(loading)
+    expect(reducer(loading, { type: 'RECEIVE_DATA', error: 'Other request failed' })).toBe(loading)
+    expect(reducer(failed, { type: 'RECEIVE_DATA', updatesById: {} })).toBe(failed)
   })
 })

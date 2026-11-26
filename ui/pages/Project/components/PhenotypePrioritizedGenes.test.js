@@ -81,6 +81,6 @@ test('dispatches an error action when the phenotype gene scores request fails', 
   await flushAll()
 
   expect(store.getActions()).toContainEqual(
-    expect.objectContaining({ type: 'RECEIVE_DATA', error: 'phenotype gene scores request failed' }),
+    expect.objectContaining({ type: 'RECEIVE_PHENOTYPE_GENE_SCORES', error: 'phenotype gene scores request failed' }),
   )
 })

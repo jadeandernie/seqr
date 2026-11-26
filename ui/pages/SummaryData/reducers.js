@@ -1,7 +1,7 @@
 import { combineReducers } from 'redux'
 
 import { loadingReducer, createSingleValueReducer, createSingleObjectReducer } from 'redux/utils/reducerFactories'
-import { RECEIVE_DATA, REQUEST_SAVED_VARIANTS } from 'redux/utils/reducerUtils'
+import { RECEIVE_DATA, REQUEST_SAVED_VARIANTS, RECEIVE_SAVED_VARIANTS } from 'redux/utils/reducerUtils'
 import { SHOW_ALL, SORT_BY_XPOS } from 'shared/utils/constants'
 import { HttpRequestHelper } from 'shared/utils/httpRequestHelper'
 
@@ -62,9 +62,10 @@ export const loadSavedVariants = ({ tag, gene = '' }) => (dispatch, getState) =>
         })
       }
       dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+      dispatch({ type: RECEIVE_SAVED_VARIANTS })
     },
     (e) => {
-      dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+      dispatch({ type: RECEIVE_SAVED_VARIANTS, error: e.message })
     }).get({ gene })
 }
 

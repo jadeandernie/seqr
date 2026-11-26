@@ -14,10 +14,13 @@ import modalReducers from './utils/modalReducer'
 import {
   RECEIVE_DATA,
   REQUEST_PROJECTS,
+  RECEIVE_PROJECTS,
   RECEIVE_PROJECT_CHILD_ENTITES,
   RECEIVE_SAVED_SEARCHES,
   REQUEST_SAVED_VARIANTS,
+  RECEIVE_SAVED_VARIANTS,
   REQUEST_PROJECT_DETAILS,
+  RECEIVE_PROJECT_DETAILS,
   REQUEST_ANALYSIS_GROUPS,
   RECEIVE_ANALYSIS_GROUPS,
   updateEntity,
@@ -30,9 +33,11 @@ import {
 
 // actions
 const REQUEST_GENES = 'REQUEST_GENES'
+const RECEIVE_GENES = 'RECEIVE_GENES'
 const REQUEST_GENE_LISTS = 'REQUEST_GENE_LISTS'
 const RECEIVE_GENE_LISTS = 'RECEIVE_GENE_LISTS'
 const REQUEST_GENE_LIST = 'REQUEST_GENE_LIST'
+const RECEIVE_GENE_LIST = 'RECEIVE_GENE_LIST'
 const REQUEST_USER_OPTIONS = 'REQUEST_USER_OPTIONS'
 const RECEIVE_USER_OPTIONS = 'RECEIVE_USER_OPTIONS'
 const UPDATE_USER = 'UPDATE_USER'
@@ -47,8 +52,9 @@ export const fetchProjects = () => (dispatch) => {
   new HttpRequestHelper('/api/dashboard',
     (responseJson) => {
       dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+      dispatch({ type: RECEIVE_PROJECTS })
     },
-    e => dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })).get()
+    e => dispatch({ type: RECEIVE_PROJECTS, error: e.message })).get()
 }
 
 export const loadUserOptions = familyGuid => (dispatch, getState) => {
@@ -78,7 +84,7 @@ export const updateProject = (values) => {
 }
 
 export const loadFamilyDetails = familyGuid => loadFamilyData(
-  familyGuid, 'detailsLoaded', 'details', REQUEST_FAMILY_DETAILS, true,
+  familyGuid, 'detailsLoaded', 'details', REQUEST_FAMILY_DETAILS, REQUEST_FAMILY_DETAILS,
 )
 
 export const updateFamily = (values) => {
@@ -117,9 +123,10 @@ export const loadGene = geneId => (dispatch, getState) => {
     new HttpRequestHelper(`/api/gene_info/${geneId}`,
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_GENES })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+        dispatch({ type: RECEIVE_GENES, error: e.message })
       }).get()
   }
 }
@@ -131,9 +138,10 @@ export const loadGenes = geneIds => (dispatch, getState) => {
     new HttpRequestHelper('/api/genes_info',
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_GENES })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+        dispatch({ type: RECEIVE_GENES, error: e.message })
       }).get({ geneIds: [...geneIds] })
   }
 }
@@ -162,10 +170,11 @@ export const loadLocusListItems = locusListId => (dispatch, getState) => {
     new HttpRequestHelper(`/api/locus_lists/${locusListId}`,
       (responseJson) => {
         dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_GENE_LIST })
       },
       (e) => {
-        const updates = { locusListsByGuid: { [locusListId]: { items: [] } } }
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: updates })
+        dispatch({ type: RECEIVE_DATA, updatesById: { locusListsByGuid: { [locusListId]: { items: [] } } } })
+        dispatch({ type: RECEIVE_GENE_LIST, error: e.message })
       }).get()
   }
 }
@@ -255,8 +264,8 @@ export const updateLocusList = values => (dispatch) => {
 const rootReducer = combineReducers({
   projectCategoriesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'projectCategoriesByGuid'),
   projectsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'projectsByGuid'),
-  projectsLoading: loadingReducer(REQUEST_PROJECTS, RECEIVE_DATA),
-  projectDetailsLoading: loadingReducer(REQUEST_PROJECT_DETAILS, RECEIVE_DATA),
+  projectsLoading: loadingReducer(REQUEST_PROJECTS, RECEIVE_PROJECTS),
+  projectDetailsLoading: loadingReducer(REQUEST_PROJECT_DETAILS, RECEIVE_PROJECT_DETAILS),
   loadedProjectChildEntities: createObjectsByIdReducer(RECEIVE_PROJECT_CHILD_ENTITES),
   familiesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'familiesByGuid'),
   familyNotesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'familyNotesByGuid'),
@@ -272,14 +281,14 @@ const rootReducer = combineReducers({
   omimIntervals: createObjectsByIdReducer(RECEIVE_DATA, 'omimIntervals'),
   rnaSeqDataByIndividual: createObjectsByIdReducer(RECEIVE_DATA, 'rnaSeqData'),
   phenotypeGeneScoresByIndividual: createObjectsByIdReducer(RECEIVE_DATA, 'phenotypeGeneScores'),
-  genesLoading: loadingReducer(REQUEST_GENES, RECEIVE_DATA),
+  genesLoading: loadingReducer(REQUEST_GENES, RECEIVE_GENES),
   hpoTermsByParent: createObjectsByIdReducer(RECEIVE_HPO_TERMS),
   hpoTermsLoading: loadingReducer(REQUEST_HPO_TERMS, RECEIVE_HPO_TERMS),
   locusListsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'locusListsByGuid'),
   locusListsLoading: loadingReducer(REQUEST_GENE_LISTS, RECEIVE_GENE_LISTS),
-  locusListLoading: loadingReducer(REQUEST_GENE_LIST, RECEIVE_DATA),
+  locusListLoading: loadingReducer(REQUEST_GENE_LIST, RECEIVE_GENE_LIST),
   savedVariantsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'savedVariantsByGuid'),
-  savedVariantsLoading: loadingReducer(REQUEST_SAVED_VARIANTS, RECEIVE_DATA),
+  savedVariantsLoading: loadingReducer(REQUEST_SAVED_VARIANTS, RECEIVE_SAVED_VARIANTS),
   variantTagsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'variantTagsByGuid'),
   variantNotesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'variantNotesByGuid'),
   variantFunctionalDataByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'variantFunctionalDataByGuid'),

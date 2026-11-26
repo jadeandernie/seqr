@@ -4,8 +4,8 @@ import {
   loadingReducer, createSingleObjectReducer, createSingleValueReducer, createObjectsByIdReducer,
 } from 'redux/utils/reducerFactories'
 import {
-  REQUEST_SAVED_VARIANTS, updateEntity, loadProjectChildEntities, loadFamilyData, loadProjectDetails,
-  loadProjectAnalysisGroups,
+  REQUEST_SAVED_VARIANTS, RECEIVE_SAVED_VARIANTS, updateEntity, loadProjectChildEntities, loadFamilyData,
+  loadProjectDetails, loadProjectAnalysisGroups,
 } from 'redux/utils/reducerUtils'
 import { SHOW_ALL, SORT_BY_FAMILY_GUID, NOTE_TAG_NAME } from 'shared/utils/constants'
 import { HttpRequestHelper, loadMultipleData } from 'shared/utils/httpRequestHelper'
@@ -22,7 +22,9 @@ const UPDATE_SAVED_VARIANT_TABLE_STATE = 'UPDATE_VARIANT_STATE'
 const REQUEST_MME_MATCHES = 'REQUEST_MME_MATCHES'
 const RECEIVE_MME_MATCHES = 'RECEIVE_MME_MATCHES'
 const REQUEST_RNA_SEQ_DATA = 'REQUEST_RNA_SEQ_DATA'
+const RECEIVE_RNA_SEQ_DATA = 'RECEIVE_RNA_SEQ_DATA'
 const REQUEST_PHENOTYPE_GENE_SCORES = 'REQUEST_PHENOTYPE_GENE_SCORES'
+const RECEIVE_PHENOTYPE_GENE_SCORES = 'RECEIVE_PHENOTYPE_GENE_SCORES'
 const REQUEST_PROJECT_OVERVIEW = 'REQUEST_PROJECT_OVERVIEW'
 const RECEIVE_PROJECT_OVERVIEW = 'RECEIVE_PROJECT_OVERVIEW'
 const REQUEST_PROJECT_COLLABORATORS = 'REQUEST_PROJECT_COLLABORATORS'
@@ -30,8 +32,11 @@ const RECEIVE_PROJECT_COLLABORATORS = 'RECEIVE_PROJECT_COLLABORATORS'
 const REQUEST_FAMILIES = 'REQUEST_FAMILIES'
 const RECEIVE_FAMILIES = 'RECEIVE_FAMILIES'
 const REQUEST_FAMILY_VARIANT_SUMMARY = 'REQUEST_FAMILY_VARIANT_SUMMARY'
+const RECEIVE_FAMILY_VARIANT_SUMMARY = 'RECEIVE_FAMILY_VARIANT_SUMMARY'
 const REQUEST_INDIVIDUALS = 'REQUEST_INDIVIDUALS'
+const RECEIVE_INDIVIDUALS = 'RECEIVE_INDIVIDUALS'
 const REQUEST_MME_SUBMISSIONS = 'REQUEST_MME_SUBMISSIONS'
+const RECEIVE_MME_SUBMISSIONS = 'RECEIVE_MME_SUBMISSIONS'
 const REQUEST_LOCUS_LISTS = 'REQUEST_LOCUS_LISTS'
 const RECEIVE_LOCUS_LISTS = 'RECEIVE_LOCUS_LISTS'
 const RECEIVE_RNA_SEQ_UPLOAD_STATS = 'RECEIVE_RNA_SEQ_UPLOAD_STATS'
@@ -50,9 +55,13 @@ const loadCurrentProjectChildEntities = (entityType, dispatchType, receiveDispat
 
 export const loadFamilies = () => loadCurrentProjectChildEntities('families', REQUEST_FAMILIES, RECEIVE_FAMILIES)
 
-export const loadIndividuals = () => loadCurrentProjectChildEntities('individuals', REQUEST_INDIVIDUALS)
+export const loadIndividuals = () => loadCurrentProjectChildEntities(
+  'individuals', REQUEST_INDIVIDUALS, RECEIVE_INDIVIDUALS,
+)
 
-export const loadMmeSubmissions = () => loadCurrentProjectChildEntities('mme submissions', REQUEST_MME_SUBMISSIONS)
+export const loadMmeSubmissions = () => loadCurrentProjectChildEntities(
+  'mme submissions', REQUEST_MME_SUBMISSIONS, RECEIVE_MME_SUBMISSIONS,
+)
 
 const loadFamilyNotes = () => loadCurrentProjectChildEntities('family notes', REQUEST_FAMILIES, RECEIVE_FAMILIES)
 
@@ -93,6 +102,7 @@ export const loadProjectLocusLists = () => loadCurrentProjectChildEntities('locu
 
 export const loadFamilyVariantSummary = familyGuid => loadFamilyData(
   familyGuid, 'discoveryGeneIds', 'variant_tag_summary', REQUEST_FAMILY_VARIANT_SUMMARY,
+  RECEIVE_FAMILY_VARIANT_SUMMARY,
 )
 
 export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatch, getState) => {
@@ -151,9 +161,10 @@ export const loadSavedVariants = ({ familyGuids, variantGuid, tag }) => (dispatc
         })
       }
       dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+      dispatch({ type: RECEIVE_SAVED_VARIANTS })
     },
     (e) => {
-      dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+      dispatch({ type: RECEIVE_SAVED_VARIANTS, error: e.message })
     }).get(params)
 }
 
@@ -334,12 +345,11 @@ export const loadRnaSeqData = individualGuid => (dispatch, getState) => {
     dispatch({ type: REQUEST_RNA_SEQ_DATA })
     new HttpRequestHelper(`/api/individual/${individualGuid}/rna_seq_data`,
       (responseJson) => {
-        dispatch({
-          type: RECEIVE_DATA, updatesById: responseJson,
-        })
+        dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_RNA_SEQ_DATA })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+        dispatch({ type: RECEIVE_RNA_SEQ_DATA, error: e.message })
       }).get()
   }
 }
@@ -363,12 +373,11 @@ export const loadPhenotypeGeneScores = individualGuid => (dispatch, getState) =>
     dispatch({ type: REQUEST_PHENOTYPE_GENE_SCORES })
     new HttpRequestHelper(`/api/family/${familyGuid}/phenotype_gene_scores`,
       (responseJson) => {
-        dispatch({
-          type: RECEIVE_DATA, updatesById: responseJson,
-        })
+        dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_PHENOTYPE_GENE_SCORES })
       },
       (e) => {
-        dispatch({ type: RECEIVE_DATA, error: e.message, updatesById: {} })
+        dispatch({ type: RECEIVE_PHENOTYPE_GENE_SCORES, error: e.message })
       }).get()
   }
 }
@@ -420,15 +429,15 @@ export const reducers = {
   currentProjectGuid: createSingleValueReducer(UPDATE_CURRENT_PROJECT, null),
   matchmakerMatchesLoading: loadingReducer(REQUEST_MME_MATCHES, RECEIVE_MME_MATCHES),
   mmeContactNotes: createObjectsByIdReducer(RECEIVE_DATA, 'mmeContactNotes'),
-  rnaSeqDataLoading: loadingReducer(REQUEST_RNA_SEQ_DATA, RECEIVE_DATA),
-  phenotypeDataLoading: loadingReducer(REQUEST_PHENOTYPE_GENE_SCORES, RECEIVE_DATA),
+  rnaSeqDataLoading: loadingReducer(REQUEST_RNA_SEQ_DATA, RECEIVE_RNA_SEQ_DATA),
+  phenotypeDataLoading: loadingReducer(REQUEST_PHENOTYPE_GENE_SCORES, RECEIVE_PHENOTYPE_GENE_SCORES),
   familyTagTypeCounts: createObjectsByIdReducer(RECEIVE_DATA, 'familyTagTypeCounts'),
   importStats: createObjectsByIdReducer(RECEIVE_DATA, 'importStats'),
   savedVariantFamilies: createSingleObjectReducer(RECEIVE_SAVED_VARIANT_FAMILIES),
   familiesLoading: loadingReducer(REQUEST_FAMILIES, RECEIVE_FAMILIES),
-  familyVariantSummaryLoading: loadingReducer(REQUEST_FAMILY_VARIANT_SUMMARY, RECEIVE_DATA),
-  individualsLoading: loadingReducer(REQUEST_INDIVIDUALS, RECEIVE_DATA),
-  mmeSubmissionsLoading: loadingReducer(REQUEST_MME_SUBMISSIONS, RECEIVE_DATA),
+  familyVariantSummaryLoading: loadingReducer(REQUEST_FAMILY_VARIANT_SUMMARY, RECEIVE_FAMILY_VARIANT_SUMMARY),
+  individualsLoading: loadingReducer(REQUEST_INDIVIDUALS, RECEIVE_INDIVIDUALS),
+  mmeSubmissionsLoading: loadingReducer(REQUEST_MME_SUBMISSIONS, RECEIVE_MME_SUBMISSIONS),
   projectOverviewLoading: loadingReducer(REQUEST_PROJECT_OVERVIEW, RECEIVE_PROJECT_OVERVIEW),
   projectCollaboratorsLoading: loadingReducer(REQUEST_PROJECT_COLLABORATORS, RECEIVE_PROJECT_COLLABORATORS),
   projectLocusListsLoading: loadingReducer(REQUEST_LOCUS_LISTS, RECEIVE_LOCUS_LISTS),

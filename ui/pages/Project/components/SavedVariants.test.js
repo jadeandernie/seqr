@@ -520,7 +520,7 @@ test('dispatches an error action when the saved variants request fails', async (
   await flushAll()
 
   expect(store.getActions()).toContainEqual(
-    expect.objectContaining({ type: 'RECEIVE_DATA', error: 'saved variants request failed' }),
+    expect.objectContaining({ type: 'RECEIVE_SAVED_VARIANTS', error: 'saved variants request failed' }),
   )
 })
 

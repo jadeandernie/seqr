@@ -38,3 +38,8 @@ export const getLastFetchBody = () => {
   const options = getLastFetchOptions()
   return options?.body ? JSON.parse(options.body) : undefined
 }
+
+// Queue up the next fetch() call to stay pending, e.g. to assert on state while a request is in flight.
+export const mockFetchPending = () => {
+  fetch.mockImplementationOnce(() => new Promise(() => {}))
+}

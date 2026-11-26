@@ -25,6 +25,8 @@ from seqr.views.apis.family_api import \
     get_family_phenotype_gene_scores, \
     family_variant_tag_summary
 
+from seqr.views.apis.search_suggestions_api import family_search_suggestions
+
 from seqr.views.apis.individual_api import \
     get_individual_rna_seq_data, \
     get_hpo_terms, \
@@ -202,6 +204,7 @@ api_endpoints = {
     'family/(?P<family_guid>[\w.|-]+)/note/(?P<note_guid>[\w.|-]+)/delete': delete_family_note,
     'family/(?P<family_guid>[\w.|-]+)/rna_seq_data/(?P<gene_id>[\w.|-]+)': get_family_rna_seq_data,
     'family/(?P<family_guid>[\w.|-]+)/phenotype_gene_scores': get_family_phenotype_gene_scores,  # noqa: W605
+    'family/(?P<family_guid>[\w.|-]+)/search_suggestions': family_search_suggestions,  # noqa: W605
 
     'dashboard': dashboard_page_data,
 

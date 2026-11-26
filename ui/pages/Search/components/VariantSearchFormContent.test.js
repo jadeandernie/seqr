@@ -14,3 +14,10 @@ test('shallow-render without crashing', () => {
 
   shallow(<VariantSearchFormContent store={store} />)
 })
+
+test('shows the Clear and Autofill controls above the saved searches and filters', () => {
+  const wrapper = shallow(<VariantSearchFormContent noEditProjects />)
+  const children = wrapper.children().map(child => child.name())
+  expect(children[0]).toEqual('SearchAutofill')
+  expect(children.indexOf('SearchAutofill')).toBeLessThan(children.indexOf('Header'))
+})

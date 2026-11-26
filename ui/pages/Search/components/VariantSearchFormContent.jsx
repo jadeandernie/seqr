@@ -7,6 +7,7 @@ import { configuredField } from 'shared/components/form/FormHelpers'
 import VariantSearchFormPanels from './VariantSearchFormPanels'
 import { SavedSearchDropdown } from './SavedSearch'
 import ProjectFamiliesField from './filters/ProjectFamiliesField'
+import SearchAutofill from './SearchAutofill'
 
 const SavedSearchColumn = styled(Grid.Column)`
   font-size: 0.75em;
@@ -21,6 +22,7 @@ const SAVED_SEARCH_FIELD = {
 const VariantSearchFormContent = React.memo(({ noEditProjects }) => (
   <div>
     {!noEditProjects && <ProjectFamiliesField />}
+    <SearchAutofill />
     <Header size="huge" block>
       <Grid padded="horizontally" relaxed>
         <Grid.Row>

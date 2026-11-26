@@ -17,7 +17,8 @@ from clickhouse_search.constants import XPOS_SORT_KEY, PATHOGENICTY_SORT_KEY, PA
 from clickhouse_search.search import get_clickhouse_variants, format_clickhouse_results, format_clickhouse_export_results, \
     get_sorted_search_results, clickhouse_variant_lookup, InvalidSearchException
 from reference_data.models import HumanPhenotypeOntology, GENOME_VERSION_GRCh38, GENOME_VERSION_LOOKUP
-from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset
+from seqr.models import Project, Family, SavedVariant, VariantSearch, VariantSearchResults, ProjectCategory, Dataset, \
+    WorksheetQueryResult
 from seqr.views.utils.export_utils import export_table
 from seqr.utils.gene_utils import get_genes_for_variant_display
 from seqr.utils.logging_utils import SeqrLogger
@@ -56,6 +57,7 @@ def query_variants_handler(request, search_hash):
     all_variants = _get_variants_with_cache(
         _get_search_cache_key, _query_variants, results_model, request.user, sort=sort,
     )
+    WorksheetQueryResult.objects.filter(results=results_model).update(num_results=len(all_variants))
     variants = all_variants[(page-1)*per_page:page*per_page]
 
     response = _process_variants(variants or [], results_model.families.all(), request,
@@ -491,6 +493,12 @@ def get_saved_search_handler(request):
     return create_json_response(_get_saved_searches(request.user))
 
 
+def validate_saved_search_json(search):
+    if (search.get('inheritance') or {}).get('filter', {}).get('genotype'):
+        return 'Saved searches cannot include custom genotype filters'
+    return None
+
+
 @login_and_policies_required
 def create_saved_search_handler(request):
     request_json = json.loads(request.body)
@@ -499,8 +507,8 @@ def create_saved_search_handler(request):
         error = '"Name" is required'
         return create_json_response({'error': error}, status=400, reason=error)
 
-    if (request_json.get('inheritance') or {}).get('filter', {}).get('genotype'):
-        error = 'Saved searches cannot include custom genotype filters'
+    error = validate_saved_search_json(request_json)
+    if error:
         return create_json_response({'error': error}, status=400, reason=error)
 
     try:
@@ -577,12 +585,15 @@ def _get_search_context(results_model):
     }
 
 
-def _get_saved_searches(user):
-    saved_search_models = VariantSearch.objects.filter(
+def get_saved_search_models(user):
+    return VariantSearch.objects.filter(
         Q(name__isnull=False),
         Q(created_by=user) | Q(created_by__isnull=True)
     )
-    saved_searches = get_json_for_saved_searches(saved_search_models, user)
+
+
+def _get_saved_searches(user):
+    saved_searches = get_json_for_saved_searches(get_saved_search_models(user), user)
     return {'savedSearchesByGuid': {search['savedSearchGuid']: search for search in saved_searches}}
 
 

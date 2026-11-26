@@ -201,7 +201,7 @@ LOGGING = {
         # Log the google-cloud-storage client library's own logs (e.g. retries, auth) to console as json
         'google': {
             'handlers': ['console_json'],
-            'level': 'DEBUG',
+            'level': 'INFO',
             'propagate': False,
         },
     }

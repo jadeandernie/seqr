@@ -12,6 +12,5 @@ export TERM=xterm
 
 resize
 
-alias gs='gsutil'
 
 

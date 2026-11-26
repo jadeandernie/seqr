@@ -30,6 +30,29 @@ const UPDATE_SEARCHED_VARIANT_DISPLAY = 'UPDATE_SEARCHED_VARIANT_DISPLAY'
 
 // actions
 
+// Responses are only applied while their request is still the current one, so results of a search that was
+// replaced or unloaded while loading are never shown for another search
+const searchedVariantsRequestHandlers = (requestKey, dispatch, getState, onSuccess) => {
+  const isCurrentRequest = () => getState().searchedVariantsRequest === requestKey
+  dispatch({ type: REQUEST_SEARCHED_VARIANTS, requestKey })
+  return [
+    (responseJson) => {
+      if (isCurrentRequest()) {
+        dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
+        dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: responseJson.searchedVariantIds })
+        if (onSuccess) {
+          onSuccess(responseJson)
+        }
+      }
+    },
+    (e) => {
+      if (isCurrentRequest()) {
+        dispatch({ type: RECEIVE_SEARCHED_VARIANTS, error: e.message, newValue: [] })
+      }
+    },
+  ]
+}
+
 export const loadProjectFamiliesContext = (
   { searchHash, projectGuid, familyGuids, analysisGroupGuid }, onSuccess,
 ) => (dispatch, getState) => {
@@ -120,18 +143,12 @@ export const updateCompoundHetDisplay = updates => dispatch => dispatch(
   { type: UPDATE_COMPOUND_HET_DISPLAY, updates },
 )
 
-export const loadSingleSearchedVariant = ({ variantId, familyGuid }) => (dispatch) => {
+export const loadSingleSearchedVariant = ({ variantId, familyGuid }) => (dispatch, getState) => {
   const url = `/api/search/variant/${variantId}?${getUrlQueryString({ familyGuid })}`
 
-  dispatch({ type: REQUEST_SEARCHED_VARIANTS })
-  return new HttpRequestHelper(url,
-    (responseJson) => {
-      dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: responseJson.searchedVariantIds })
-    },
-    (e) => {
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, error: e.message, newValue: [] })
-    }).post()
+  return new HttpRequestHelper(
+    url, ...searchedVariantsRequestHandlers(`${variantId}-${familyGuid}`, dispatch, getState),
+  ).post()
 }
 
 export const loadSavedSearches = () => (dispatch, getState) => {
@@ -156,11 +173,13 @@ export const loadSearchedVariants = (
   { searchHash }, { displayUpdates, queryParams, updateQueryParams },
 ) => (dispatch, getState) => {
   const state = getState()
-  if (state.searchedVariantsLoading.isLoading) {
+  if (state.searchedVariantsLoading.isLoading && state.searchedVariantsRequest === searchHash) {
     return
   }
 
-  dispatch({ type: REQUEST_SEARCHED_VARIANTS })
+  const requestHandlers = searchedVariantsRequestHandlers(searchHash, dispatch, getState, (responseJson) => {
+    dispatch({ type: RECEIVE_SAVED_SEARCHES, updatesById: { searchesByHash: { [searchHash]: responseJson.search } } })
+  })
 
   let { sort, page } = displayUpdates || queryParams
   if (!page) {
@@ -191,15 +210,7 @@ export const loadSearchedVariants = (
   const url = `/api/search/${searchHash}?${getUrlQueryString(apiQueryParams)}`
 
   // Fetch variants
-  new HttpRequestHelper(url,
-    (responseJson) => {
-      dispatch({ type: RECEIVE_DATA, updatesById: responseJson })
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: responseJson.searchedVariantIds })
-      dispatch({ type: RECEIVE_SAVED_SEARCHES, updatesById: { searchesByHash: { [searchHash]: responseJson.search } } })
-    },
-    (e) => {
-      dispatch({ type: RECEIVE_SEARCHED_VARIANTS, error: e.message, newValue: [] })
-    }).post(search)
+  new HttpRequestHelper(url, ...requestHandlers).post(search)
 }
 
 export const unloadSearchResults = () => dispatch => dispatch({ type: RECEIVE_SEARCHED_VARIANTS, newValue: [] })
@@ -225,6 +236,17 @@ export const sendVlmContactEmail = values => () => new HttpRequestHelper(
 
 // reducers
 
+const searchedVariantsRequestReducer = (state = null, action) => {
+  switch (action.type) {
+    case REQUEST_SEARCHED_VARIANTS:
+      return action.requestKey
+    case RECEIVE_SEARCHED_VARIANTS:
+      return null
+    default:
+      return state
+  }
+}
+
 export const reducers = {
   searchContextLoading: loadingReducer(REQUEST_SEARCH_CONTEXT, RECEIVE_SEARCH_CONTEXT),
   multiProjectSearchContextLoading: loadingReducer(
@@ -233,6 +255,7 @@ export const reducers = {
   flattenCompoundHet: createSingleObjectReducer(UPDATE_COMPOUND_HET_DISPLAY),
   searchedVariantIds: createSingleValueReducer(RECEIVE_SEARCHED_VARIANTS, []),
   searchedVariantsLoading: loadingReducer(REQUEST_SEARCHED_VARIANTS, RECEIVE_SEARCHED_VARIANTS),
+  searchedVariantsRequest: searchedVariantsRequestReducer,
   searchGeneBreakdown: createObjectsByIdReducer(RECEIVE_SEARCH_GENE_BREAKDOWN, 'searchGeneBreakdown'),
   searchGeneBreakdownLoading: loadingReducer(REQUEST_SEARCH_GENE_BREAKDOWN, RECEIVE_SEARCH_GENE_BREAKDOWN),
   savedSearchesByGuid: createObjectsByIdReducer(RECEIVE_SAVED_SEARCHES, 'savedSearchesByGuid'),

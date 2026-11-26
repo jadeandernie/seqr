@@ -145,6 +145,7 @@
         "statements": -2
       }
     },
+    "globalSetup": "<rootDir>/config/jest/globalSetup.js",
     "setupFiles": [
       "<rootDir>/config/polyfills.js"
     ],

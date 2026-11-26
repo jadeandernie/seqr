@@ -133,10 +133,10 @@
     ],
     "coverageThreshold": {
       "global": {
-        "branches": 30,
-        "functions": 30,
-        "lines": 55,
-        "statements": 50
+        "branches": 45,
+        "functions": 49,
+        "lines": 64,
+        "statements": 63
       },
       "pages/Project/**/*.{js,jsx}": {
         "branches": 95,

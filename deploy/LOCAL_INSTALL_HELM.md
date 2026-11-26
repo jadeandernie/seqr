@@ -68,6 +68,43 @@ seqr:
           key: clingen_allele_registry_password
 ```
 
+## Enabling ClinVar submission
+- This optional feature lets users with edit access to a project draft a ClinVar submission for a saved SNV or indel that has an ACMG classification in seqr, have a second user approve it, and validate or submit it through the [ClinVar Submission API](https://www.ncbi.nlm.nih.gov/clinvar/docs/api_http/). Analysts get a "Clinvar Submissions" page under Summary Data. Structural and mitochondrial variants are not supported, and no free-text comment is ever sent.
+- Submitting to ClinVar publishes classifications under your organisation's name, so the feature is off by default and nothing is sent unless you explicitly configure it. It is controlled by the `CLINVAR_SUBMISSION_MODE` environment variable:
+
+| `CLINVAR_SUBMISSION_MODE` | Behaviour |
+|---|---|
+| `disabled` (default) | The feature is hidden and its endpoints return an error. |
+| `dry_run` | Drafting, review and validation only. Records are validated by seqr; if `CLINVAR_API_KEY` is set they are also sent to ClinVar with `dry-run=true`, which checks them against the ClinVar schema and creates nothing. No submission can be made. |
+| `test` | Approved records are sent to the ClinVar test endpoint, which validates them fully but never makes them public. Requires `CLINVAR_API_KEY`. |
+| `live` | Approved records are submitted to ClinVar and become public. Requires `CLINVAR_API_KEY`. |
+
+- Before using `test` or `live` you need, from NCBI:
+  - your organisation registered as a ClinVar submitter in the NCBI Submission Portal;
+  - a service account for API submission, requested from clinvar@ncbi.nlm.nih.gov;
+  - a 64-character API key for that account, created on the "API Access" tab of the organisation's group in the Submission Portal. It is shown only once;
+  - an assertion criteria citation that describes how your organisation classifies variants, set as `CLINVAR_ASSERTION_CRITERIA` in the form `PubMed:<id>`, `DOI:<id>` or `pmc:<id>`.
+- Store the key in a kubernetes secret and reference it in your [values overrides](https://github.com/broadinstitute/seqr-helm?tab=readme-ov-file#valuesenvironment-overrides). seqr sends the key only in the `SP-API-KEY` request header and never logs or returns it:
+```bash
+kubectl create secret generic clinvar-secrets --from-literal=clinvar_api_key='my-64-character-key'
+```
+```yaml
+seqr:
+  environment:
+    CLINVAR_SUBMISSION_MODE: 'dry_run'
+    CLINVAR_ASSERTION_CRITERIA: 'PubMed:12345678'
+  additionalSecrets:
+    - name: CLINVAR_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: clinvar-secrets
+          key: clinvar_api_key
+```
+- ClinVar processes submissions asynchronously. In `test` and `live` modes, schedule the following command (for example as an hourly kubernetes CronJob that runs in the seqr image with the same environment) to poll the status of submitted records and store their SCV accessions. seqr does not schedule it for you:
+```bash
+python manage.py check_clinvar_submissions
+```
+
 ## Using the Load Data page to load VCF Callsets
 ### Option #1
 #### Annotate and load on-prem

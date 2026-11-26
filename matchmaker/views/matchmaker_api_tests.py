@@ -782,8 +782,24 @@ class MatchmakerAPITest(AuthenticationTestCase):
             subject='some email subject',
             body='some email content',
             to=['test@test.com', 'other_test@gmail.com'],
+            cc=['test_user@broadinstitute.org'],
+            reply_to=['test_user@broadinstitute.org'],
             from_email='matchmaker@broadinstitute.org')
         mock_email.return_value.send.assert_called()
+
+        response = self.client.post(url, content_type='application/json', data=json.dumps({
+            'to': 'test@test.com,test_user@broadinstitute.org',
+            'body': 'some email content',
+            'subject': 'some email subject'
+        }))
+        self.assertEqual(response.status_code, 200)
+        mock_email.assert_called_with(
+            subject='some email subject',
+            body='some email content',
+            to=['test@test.com', 'test_user@broadinstitute.org'],
+            cc=[],
+            reply_to=['test_user@broadinstitute.org'],
+            from_email='matchmaker@broadinstitute.org')
 
         mock_email.return_value.send.side_effect = EmailException()
         response = self.client.post(url, content_type='application/json', data=json.dumps({

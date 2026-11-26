@@ -362,10 +362,17 @@ def send_mme_contact_email(request, matchmaker_result_guid):
     check_mme_permissions(result.submission, request.user)
 
     request_json = json.loads(request.body)
+    to = [s.strip() for s in request_json['to'].split(',')]
+    contact_emails = [
+        contact['email'] for contact in result.submission.contacts
+        if contact.get('email') and contact['email'] != MME_DEFAULT_CONTACT_EMAIL
+    ]
     email_message = EmailMessage(
         subject=request_json['subject'],
         body=request_json['body'],
-        to=[s.strip() for s in request_json['to'].split(',')],
+        to=to,
+        cc=[email for email in contact_emails if email not in to],
+        reply_to=contact_emails,
         from_email=MME_DEFAULT_CONTACT_EMAIL,
     )
     try:

@@ -6,6 +6,7 @@ import { Message, Table } from 'semantic-ui-react'
 import DataLoader from '../../../shared/components/DataLoader'
 import { VerticalSpacer } from '../../../shared/components/Spacers'
 import { loadWorkbooksPage } from './reducers'
+import { TemplateManager } from './Templates'
 import { getProjectWorkbooks, getWorkbookPath, getWorkbooksIsLoading, getWorkbooksLoadingError } from './selectors'
 import { Workbook, WorkbookReduxState } from './types'
 import {
@@ -36,32 +37,36 @@ interface WorkbooksProps {
 }
 
 const Workbooks = React.memo(({ workbooks, loading, errorMessage, load }: WorkbooksProps) => (
-  <DataLoader
-    load={load}
-    loading={loading}
-    content={workbooks}
-    errorMessage={errorMessage && <Message error content={errorMessage} />}
-  >
-    <VerticalSpacer height={10} />
-    {workbooks.length ? (
-      <Table basic="very" aria-label="Workbooks">
-        <Table.Header>
-          <Table.Row>
-            <Table.HeaderCell content="Name" />
-            <Table.HeaderCell content="Description" />
-            <Table.HeaderCell content="Created" />
-            <Table.HeaderCell content="Last Modified" />
-            <Table.HeaderCell />
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {workbooks.map(workbook => <WorkbookRow key={workbook.workbookGuid} workbook={workbook} />)}
-        </Table.Body>
-      </Table>
-    ) : <Message content="This project has no workbooks yet" />}
-    <VerticalSpacer height={10} />
-    <CreateWorkbookButton />
-  </DataLoader>
+  <React.Fragment>
+    <DataLoader
+      load={load}
+      loading={loading}
+      content={workbooks}
+      errorMessage={errorMessage && <Message error content={errorMessage} />}
+    >
+      <VerticalSpacer height={10} />
+      {workbooks.length ? (
+        <Table basic="very" aria-label="Workbooks">
+          <Table.Header>
+            <Table.Row>
+              <Table.HeaderCell content="Name" />
+              <Table.HeaderCell content="Description" />
+              <Table.HeaderCell content="Created" />
+              <Table.HeaderCell content="Last Modified" />
+              <Table.HeaderCell />
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {workbooks.map(workbook => <WorkbookRow key={workbook.workbookGuid} workbook={workbook} />)}
+          </Table.Body>
+        </Table>
+      ) : <Message content="This project has no workbooks yet" />}
+      <VerticalSpacer height={10} />
+      <CreateWorkbookButton />
+      <VerticalSpacer height={30} />
+    </DataLoader>
+    <TemplateManager />
+  </React.Fragment>
 ))
 
 const mapStateToProps = (state: WorkbookReduxState) => ({

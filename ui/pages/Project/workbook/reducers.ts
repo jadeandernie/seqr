@@ -5,6 +5,7 @@ import {
 import { HttpRequestHelper } from '../../../shared/utils/httpRequestHelper'
 import { loadSavedSearches } from '../../Search/reducers'
 import { loadCurrentProjectAnalysisGroups, loadFamilies } from '../reducers'
+import { getCanSetTemplatePublic } from './selectors'
 import {
   ByGuid, CellHistory, GroupSummary, RequestError, Workbook, WorkbookResponse, WorkbookStatus, WorkbookTarget,
   WorkbookThunk, Worksheet,
@@ -18,6 +19,8 @@ const REQUEST_WORKBOOK_GROUP_SUMMARY = 'REQUEST_WORKBOOK_GROUP_SUMMARY'
 const RECEIVE_WORKBOOK_GROUP_SUMMARY = 'RECEIVE_WORKBOOK_GROUP_SUMMARY'
 const REQUEST_WORKBOOK_CELL_HISTORY = 'REQUEST_WORKBOOK_CELL_HISTORY'
 const RECEIVE_WORKBOOK_CELL_HISTORY = 'RECEIVE_WORKBOOK_CELL_HISTORY'
+const REQUEST_WORKSHEET_TEMPLATES = 'REQUEST_WORKSHEET_TEMPLATES'
+const RECEIVE_WORKSHEET_TEMPLATES = 'RECEIVE_WORKSHEET_TEMPLATES'
 
 interface TargetValues {
   familyGuids?: string[]
@@ -40,6 +43,14 @@ interface WorksheetValues {
 interface WorkbookAutomationValues {
   rerunIntervalDays?: number | null
   notifyOnNewResults?: boolean
+}
+
+interface TemplateValues {
+  worksheetTemplateGuid?: string
+  name?: string
+  description?: string | null
+  isPublic?: boolean
+  delete?: boolean
 }
 
 interface WorksheetQueryValues {
@@ -309,6 +320,54 @@ export const markWorksheetQueryResultReviewed = (
   () => loadCellHistory(workbookGuid, worksheetQueryGuid, workbookTargetGuid)(dispatch, getState),
 )
 
+export const loadWorksheetTemplates = (): WorkbookThunk => (dispatch, getState) => {
+  dispatch({ type: REQUEST_WORKSHEET_TEMPLATES })
+  return new HttpRequestHelper('/api/worksheet_templates',
+    (responseJson: WorkbookResponse) => {
+      const worksheetTemplatesByGuid = replaceEntities(
+        getState().worksheetTemplatesByGuid, responseJson.worksheetTemplatesByGuid, () => true,
+      )
+      dispatch({ type: RECEIVE_DATA, updatesById: { worksheetTemplatesByGuid } })
+      dispatch({ type: RECEIVE_WORKSHEET_TEMPLATES })
+    },
+    (e: Error) => {
+      dispatch({ type: RECEIVE_WORKSHEET_TEMPLATES, error: e.message })
+    }).get()
+}
+
+export const createWorksheetFromTemplate = (
+  workbookGuid: string, { worksheetTemplateGuid, name }: TemplateValues,
+): WorkbookThunk => postWorkbookData(
+  `/api/workbook/${workbookGuid}/worksheets/create_from_template`, { worksheetTemplateGuid, name: name || undefined },
+)
+
+// Only users who may change whether a template is public submit it
+const postTemplate = (url: string, { name, description, isPublic }: TemplateValues, extra: object = {}): WorkbookThunk => (
+  (dispatch, getState) => postWorkbookData(url, {
+    ...extra, name, description: description || null, isPublic: getCanSetTemplatePublic(getState()) ? !!isPublic : undefined,
+  })(dispatch, getState)
+)
+
+export const saveWorksheetAsTemplate = (
+  workbookGuid: string, worksheetGuid: string, values: TemplateValues,
+): WorkbookThunk => postTemplate('/api/worksheet_templates/create', values, { workbookGuid, worksheetGuid })
+
+export const updateWorksheetTemplate = (
+  { worksheetTemplateGuid, delete: isDelete, ...values }: TemplateValues,
+): WorkbookThunk => (isDelete ?
+  postWorkbookData(`/api/worksheet_templates/${worksheetTemplateGuid}/delete`) :
+  postTemplate(`/api/worksheet_templates/${worksheetTemplateGuid}/update`, values))
+
+export const setWorksheetTemplateAttached = (
+  worksheetTemplateGuid: string, isAttached: boolean,
+): WorkbookThunk => (dispatch, getState) => postWorkbookData(
+  `/api/project/${getState().currentProjectGuid}/worksheet_templates/${worksheetTemplateGuid}/${isAttached ? 'attach' : 'detach'}`,
+)(dispatch, getState)
+
+export const updateWorkbookEditors = (
+  workbookGuid: string, { usernames }: { usernames?: string[] },
+): WorkbookThunk => postWorkbookData(`/api/workbook/${workbookGuid}/editors/update`, { usernames: usernames || [] })
+
 export const reducers = {
   workbooksByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbooksByGuid'),
   workbookTargetsByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'workbookTargetsByGuid'),
@@ -321,4 +380,6 @@ export const reducers = {
   workbookGroupSummaryLoading: loadingReducer(REQUEST_WORKBOOK_GROUP_SUMMARY, RECEIVE_WORKBOOK_GROUP_SUMMARY),
   workbookCellHistory: createSingleValueReducer(RECEIVE_WORKBOOK_CELL_HISTORY, {}),
   workbookCellHistoryLoading: loadingReducer(REQUEST_WORKBOOK_CELL_HISTORY, RECEIVE_WORKBOOK_CELL_HISTORY),
+  worksheetTemplatesByGuid: createObjectsByIdReducer(RECEIVE_DATA, 'worksheetTemplatesByGuid'),
+  worksheetTemplatesLoading: loadingReducer(REQUEST_WORKSHEET_TEMPLATES, RECEIVE_WORKSHEET_TEMPLATES),
 }

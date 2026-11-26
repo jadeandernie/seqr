@@ -229,6 +229,9 @@ def _has_project_view_permission(project, user):
         return True
     return _has_project_permissions(project, user, CAN_VIEW)
 
+
+has_project_view_permission = _has_project_view_permission
+
 def has_family_view_permission(family, user):
     if _has_project_view_permission(family.project, user):
         return True
@@ -298,6 +301,27 @@ def check_locus_list_permissions(locus_list, user):
     )
     if not access_projects:
         raise PermissionDenied(f'{user} does not have view permissions for {locus_list}')
+
+
+def has_worksheet_template_view_permission(template, user):
+    if template.is_public or _is_user_created_object(template, user):
+        return True
+    project_guids = set(template.projects.values_list('guid', flat=True))
+    return bool(project_guids) and bool(project_guids.intersection(get_project_guids_user_can_view(user)))
+
+
+def check_worksheet_template_permissions(template, user):
+    if not has_worksheet_template_view_permission(template, user):
+        raise PermissionDenied(f'{user} does not have view permissions for {template}')
+
+
+def user_can_set_worksheet_template_public(user):
+    return user_is_analyst(user) or user_is_data_manager(user)
+
+
+def has_worksheet_template_edit_permission(template, user):
+    return _is_user_created_object(template, user) or (
+        template.is_public and user_can_set_worksheet_template_public(user))
 
 
 def get_project_guids_any_family_user_can_view(user):

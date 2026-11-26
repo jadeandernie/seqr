@@ -8,6 +8,7 @@ import DataLoader from '../../../shared/components/DataLoader'
 import AutomationSummary from './AutomationSummary'
 import { WORK_PANE_ID } from './constants'
 import { loadWorkbookPage } from './reducers'
+import WorkbookSharing from './Sharing'
 import {
   getNumUnreviewedByTarget, getQueryResultsByQueryTarget, getWorkbook, getWorkbookDetailIsLoading,
   getWorkbookDetailLoadingError,
@@ -76,6 +77,7 @@ const WorkbookContent = React.memo(({
   return (
     <WorkArea>
       <AutomationSummary workbook={workbook} />
+      <WorkbookSharing workbook={workbook} />
       <TargetTabs
         workbook={workbook}
         targets={targets}

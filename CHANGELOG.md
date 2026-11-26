@@ -6,6 +6,8 @@
 * Adds automatic reruns of workbook queries on an interval and after data is loaded, with notifications for new results.
   Reruns on an interval only happen if the new `rerun_workbook_queries` command is scheduled, see
   [Scheduled jobs](deploy/LOCAL_INSTALL_HELM.md#scheduled-jobs) (REQUIRES DB MIGRATION)
+* Adds worksheet templates, with default templates loaded by `python manage.py loaddata worksheet_templates`, and
+  editors that a workbook is shared with (REQUIRES DB MIGRATION)
 * Adds Strict-Transport-Security header to restrict all traffic to HTTPS
 
 ## 11/24/26

@@ -5,7 +5,11 @@ their queries (search patterns). A WorksheetQueryResult is the "cell" for one qu
 Permissions:
 - All endpoints require view access to the project of the workbook.
 - Any user with view access to a project can create a workbook in it. Changing a workbook and its targets, worksheets
-  and queries requires view access and either edit access to the project or being the creator of the workbook.
+  and queries requires view access and either edit access to the project, being the creator of the workbook or being
+  one of its editors.
+- The editors of a workbook are set by its creator or by a user with edit access to the project, and must have view
+  access to the project. Editors can not delete the workbook or change its editors. Being an editor never gives access to a project, a family or anything outside the workbook:
+  every endpoint checks project access first.
 - Updating or running a cell, marking its results as reviewed and reading its run history require view access to
   the project and to the families of the target.
 - Every endpoint that returns or uses targets checks view access to the families of those targets.
@@ -26,16 +30,20 @@ from collections import defaultdict
 from copy import deepcopy
 import json
 
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import BooleanField, ExpressionWrapper, Max, Q, prefetch_related_objects
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
+from notifications.signals import notify
+
 from reference_data.models import HumanPhenotypeOntology
 from seqr.models import AnalysisGroup, Family, Individual, Workbook, WorkbookTarget, Worksheet, WorksheetQuery, \
     WorksheetQueryResult, WorksheetQueryRun, MIN_RERUN_INTERVAL_DAYS, MAX_RERUN_INTERVAL_DAYS
 from seqr.utils.gene_utils import get_genes_for_variant_display
+from seqr.utils.logging_utils import SeqrLogger, log_model_update
 from seqr.utils.middleware import ErrorsWarningsException
 from seqr.views.apis.variant_search_api import _get_or_create_results_model, flatten_search_results, \
     get_cached_search_results, get_gene_family_counts, get_saved_search_models, get_variant_gene_ids, \
@@ -45,9 +53,11 @@ from seqr.views.utils.json_to_orm_utils import create_model_from_json, get_or_cr
 from seqr.views.utils.json_utils import create_json_response
 from seqr.views.utils.orm_to_json_utils import _get_json_for_models, get_json_for_saved_searches
 from seqr.views.utils.permissions_utils import check_families_view_permission, get_project_and_check_view_permission, \
-    has_project_edit_permission, login_and_policies_required
+    has_project_edit_permission, has_project_view_permission, login_and_policies_required
 from seqr.views.utils.workbook_utils import get_completed_runs, get_key_variant_ids, get_unreviewed_keys_by_cell, \
     to_key_set
+
+logger = SeqrLogger(__name__)
 
 # The search page hashes are 32 character hex MD5 digests, so a prefixed hash can never be equal to one of them
 SEARCH_HASH_PREFIX = 'WB'
@@ -74,6 +84,12 @@ def _get_workbook(workbook_guid, user, can_edit=False):
 
 
 def _has_workbook_edit_permission(workbook, user, has_project_edit=None):
+    if workbook.created_by_id == user.id or user in workbook.editors.all():
+        return True
+    return has_project_edit_permission(workbook.project, user) if has_project_edit is None else has_project_edit
+
+
+def _can_manage_workbook_editors(workbook, user, has_project_edit=None):
     if workbook.created_by_id == user.id:
         return True
     return has_project_edit_permission(workbook.project, user) if has_project_edit is None else has_project_edit
@@ -142,8 +158,15 @@ def _workbooks_json(workbooks, project, user):
     has_project_edit = has_project_edit_permission(project, user)
 
     def _process_result(result, workbook):
-        result['canEdit'] = _has_workbook_edit_permission(workbook, user, has_project_edit=has_project_edit)
+        result.update({
+            'canEdit': _has_workbook_edit_permission(workbook, user, has_project_edit=has_project_edit),
+            'canManageEditors': _can_manage_workbook_editors(workbook, user, has_project_edit=has_project_edit),
+            'editors': sorted([{
+                'username': editor.username, 'displayName': editor.get_full_name(), 'email': editor.email,
+            } for editor in workbook.editors.all()], key=lambda editor: (editor['displayName'] or editor['email']).lower()),
+        })
 
+    prefetch_related_objects(workbooks, 'editors')
     return _by_guid(_get_json_for_models(
         workbooks, nested_fields=[{'fields': ('project', 'guid'), 'value': project.guid}], process_result=_process_result,
     ), 'workbookGuid')
@@ -404,8 +427,43 @@ def update_workbook_handler(request, workbook_guid):
 
 
 @login_and_policies_required
+def update_workbook_editors_handler(request, workbook_guid):
+    workbook = _get_workbook(workbook_guid, request.user)
+    if not _can_manage_workbook_editors(workbook, request.user):
+        raise PermissionDenied(f'{request.user} does not have sufficient permissions to share {workbook}')
+
+    usernames = json.loads(request.body).get('usernames')
+    if not (isinstance(usernames, list) and all(isinstance(username, str) for username in usernames)):
+        raise _error('"usernames" must be a list of usernames')
+    editors = {user.username: user for user in User.objects.filter(username__in=usernames, is_active=True)}
+    # Unknown users and users without access to the project get the same error, so that users can not be looked up
+    invalid_usernames = sorted(
+        username for username in set(usernames)
+        if not (username in editors and has_project_view_permission(workbook.project, editors[username]))
+    )
+    if invalid_usernames:
+        raise _error(
+            f'The following users do not have access to this project: {", ".join(invalid_usernames)}')
+
+    current_editors = set(workbook.editors.all())
+    new_editors = [editor for editor in editors.values() if editor not in current_editors and editor != request.user]
+    workbook.editors.set(editors.values())
+    log_model_update(logger, workbook, request.user, 'update', update_fields=['editors'])
+    if new_editors:
+        # Not public: project notifications that are public are also shown to project members that are not recipients
+        notify.send(
+            workbook.project, recipient=new_editors, public=False,
+            verb=f'{_user_name(request.user)} shared workbook {workbook.name} with you')
+
+    return create_json_response({'workbooksByGuid': _workbooks_json([workbook], workbook.project, request.user)})
+
+
+@login_and_policies_required
 def delete_workbook_handler(request, workbook_guid):
-    workbook = _get_workbook(workbook_guid, request.user, can_edit=True)
+    workbook = _get_workbook(workbook_guid, request.user)
+    # Editors can change a workbook but not delete it
+    if not _can_manage_workbook_editors(workbook, request.user):
+        raise PermissionDenied(f'{request.user} does not have sufficient permissions to delete {workbook}')
     workbook.delete_model(request.user, user_can_delete=True)
     return create_json_response({'workbooksByGuid': {workbook_guid: None}})
 

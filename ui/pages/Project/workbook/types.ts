@@ -11,6 +11,39 @@ export interface Workbook {
   canEdit: boolean
   rerunIntervalDays?: number | null
   notifyOnNewResults?: boolean
+  editors?: WorkbookEditor[]
+  canManageEditors?: boolean
+}
+
+export interface WorkbookEditor {
+  username: string
+  displayName: string
+  email: string
+}
+
+export interface TemplateQuery {
+  name: string
+  search: Record<string, unknown>
+}
+
+// A worksheet created from a template is a copy of its queries, it does not change when the template does
+export interface WorksheetTemplate {
+  worksheetTemplateGuid: string
+  name: string
+  description: string | null
+  queries: TemplateQuery[]
+  isPublic: boolean
+  createdDate: string
+  createdBy: string | null
+  lastModifiedDate: string
+  projectGuids: string[]
+  isCreator: boolean
+  canEdit: boolean
+}
+
+export interface TemplateGroup {
+  title: string
+  templates: WorksheetTemplate[]
 }
 
 export interface WorkbookTarget {
@@ -28,6 +61,7 @@ export interface Worksheet {
   name: string
   order: number
   rerunIntervalDays?: number | null
+  templateGuid?: string | null
 }
 
 export interface WorksheetQuery {
@@ -190,6 +224,11 @@ export interface WorkbookReduxState {
   workbookCellHistoryLoading: LoadingState
   savedVariantsByGuid: ByGuid<SavedVariant>
   variantTagsByGuid: ByGuid<VariantTag>
+  worksheetTemplatesByGuid: ByGuid<WorksheetTemplate>
+  worksheetTemplatesLoading: LoadingState
+  projectsByGuid: ByGuid<{ canEdit?: boolean, collaborators?: Partial<WorkbookEditor>[] }>
+  projectCollaboratorsLoading: LoadingState
+  user: { isAnalyst?: boolean, isDataManager?: boolean }
 }
 
 export interface WorkbookResponse {
@@ -198,6 +237,7 @@ export interface WorkbookResponse {
   worksheetsByGuid?: ByGuid<Worksheet | null>
   worksheetQueriesByGuid?: ByGuid<WorksheetQuery | null>
   worksheetQueryResultsByGuid?: ByGuid<WorksheetQueryResult | null>
+  worksheetTemplatesByGuid?: ByGuid<WorksheetTemplate | null>
   searchHash?: string
 }
 

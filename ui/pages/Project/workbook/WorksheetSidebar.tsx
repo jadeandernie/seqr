@@ -5,6 +5,7 @@ import styled from 'styled-components'
 import NewResultsBadge from './NewResultsBadge'
 import { getNumUnreviewed, getQueryStatus, getRollUpStatus, getWorkbookPath } from './selectors'
 import StatusIcon from './StatusIcon'
+import { NewWorksheetFromTemplateButton, SaveAsTemplateButton } from './Templates'
 import {
   ByGuid, TargetDisplay, Workbook, WorksheetDisplay, WorksheetQuery, WorksheetQueryResult,
 } from './types'
@@ -93,6 +94,7 @@ const WorksheetSidebar = React.memo((
             {workbook.canEdit && <AddQueryButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <UpdateWorksheetButton workbook={workbook} worksheet={worksheet} />}
             {workbook.canEdit && <WorksheetAutomationButton workbook={workbook} worksheet={worksheet} />}
+            <SaveAsTemplateButton workbook={workbook} worksheet={worksheet} />
             {workbook.canEdit && <DeleteWorksheetButton workbook={workbook} worksheet={worksheet} />}
             <NewResultsBadge
               count={getNumUnreviewed(resultsByQueryTarget, worksheet.queries, targetGuid)}
@@ -135,6 +137,7 @@ const WorksheetSidebar = React.memo((
       ))}
       {worksheets.length === 0 && <EmptyText>No worksheets</EmptyText>}
       {workbook.canEdit && <EmptyText><UpdateWorksheetButton workbook={workbook} /></EmptyText>}
+      {workbook.canEdit && <EmptyText><NewWorksheetFromTemplateButton workbook={workbook} /></EmptyText>}
     </Sidebar>
   )
 })

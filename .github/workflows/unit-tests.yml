@@ -18,7 +18,8 @@ on:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    # Python 3.9 is not available from actions/setup-python on newer runner images
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: [3.9]

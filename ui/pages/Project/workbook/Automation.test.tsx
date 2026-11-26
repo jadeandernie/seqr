@@ -71,7 +71,7 @@ test('describes the automation of a workbook', () => {
   expect(getAutomationSummary(WORKBOOK)).toEqual('Automatic reruns: off')
   expect(getAutomationSummary({ ...WORKBOOK, rerunIntervalDays: 14 })).toEqual('Automatic reruns: every 2 weeks')
   expect(getAutomationSummary(WEEKLY_WORKBOOK)).toEqual(
-    'Automatic reruns: weekly, the creator of the workbook is notified of new results',
+    'Automatic reruns: weekly, with a project notification and an email to the creator for new results',
   )
   expect(getAutomationSummary({ ...WORKBOOK, notifyOnNewResults: true })).toEqual('Automatic reruns: off')
   expect(getRerunIntervalLabel(1)).toEqual('Daily')
@@ -136,7 +136,7 @@ test('edits the rerun interval and the notification of a workbook', async () => 
   )
   const checkbox = getOpenModal(wrapper).find('Checkbox')
   expect(checkbox.prop('checked')).toBe(false)
-  expect(checkbox.prop('label')).toEqual('Notify the creator of this workbook when a rerun has new results to review')
+  expect(checkbox.prop('label')).toEqual('Send a project notification and email the creator of this workbook when a rerun has new results to review')
   setDropdown(getOpenModal(wrapper), 'rerunIntervalDays', 7 as unknown as string)
   getOpenModal(wrapper).find('input[type="checkbox"]').simulate('change', { target: { checked: true } })
   await submitForm(wrapper)
@@ -144,7 +144,7 @@ test('edits the rerun interval and the notification of a workbook', async () => 
   expect(getRequests(UPDATE_URL)).toEqual([{ rerunIntervalDays: 7, notifyOnNewResults: true }])
   expect(store.getState().workbooksByGuid[WORKBOOK_GUID]).toEqual(WEEKLY_WORKBOOK)
   expect(getSummary(wrapper).text()).toContain(
-    'Automatic reruns: weekly, the creator of the workbook is notified of new results',
+    'Automatic reruns: weekly, with a project notification and an email to the creator for new results',
   )
   expect(getOpenModal(wrapper).exists()).toBe(false)
 
@@ -206,7 +206,7 @@ test('shows the automation without controls to users who can not edit the workbo
   }))
 
   expect(getSummary(wrapper).text()).toContain(
-    'Automatic reruns: weekly, the creator of the workbook is notified of new results',
+    'Automatic reruns: weekly, with a project notification and an email to the creator for new results',
   )
   expect(wrapper.find('button').filterWhere(
     (button: Wrapper) => (button.prop('aria-label') || '').startsWith('Automatic reruns'),

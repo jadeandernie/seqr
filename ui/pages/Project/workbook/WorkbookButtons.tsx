@@ -223,7 +223,7 @@ const WORKBOOK_AUTOMATION_FIELDS: FormField[] = [
   { ...RERUN_INTERVAL_FIELD, options: WORKBOOK_RERUN_INTERVAL_OPTIONS },
   {
     name: 'notifyOnNewResults',
-    label: 'Notify the creator of this workbook when a rerun has new results to review',
+    label: 'Send a project notification and email the creator of this workbook when a rerun has new results to review',
     component: BooleanCheckbox,
   },
 ]

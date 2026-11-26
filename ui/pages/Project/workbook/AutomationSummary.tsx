@@ -14,7 +14,7 @@ export const getAutomationSummary = ({ rerunIntervalDays, notifyOnNewResults }: 
   if (!rerunIntervalDays) {
     return 'Automatic reruns: off'
   }
-  const notification = notifyOnNewResults ? ', the creator of the workbook is notified of new results' : ''
+  const notification = notifyOnNewResults ? ', with a project notification and an email to the creator for new results' : ''
   return `Automatic reruns: ${getRerunIntervalLabel(rerunIntervalDays).toLowerCase()}${notification}`
 }
 

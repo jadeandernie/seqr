@@ -1,3 +1,4 @@
+import gzip
 import os
 import re
 
@@ -112,7 +113,7 @@ def _validate_vcf_and_get_samples(vcf_filename, genome_version, dataset_type, da
         raise ErrorsWarningsException([f'Data file or path {path_name or data_path} is not found.'], [])
     except StopIteration:
         raise ErrorsWarningsException(['No header found in the VCF file.'], [])
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, gzip.BadGzipFile):
         raise ErrorsWarningsException([
             'Unable to read the VCF file. This often occurs when a file is improperly gzipped, or when the file extension does not align with the file type (i.e. a .gz file that is not actually gzipped)'
         ], [])

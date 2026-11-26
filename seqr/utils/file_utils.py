@@ -1,9 +1,12 @@
 import glob
 import gzip
 import os
+import zlib
 
 from seqr.utils.google_storage_utils import is_google_bucket_file_path, does_gs_file_exist, google_bucket_file_stream, \
     google_bucket_read_bytes, get_gs_files, get_gs_wildcard_match_files
+
+CHUNK_SIZE = 65536
 
 
 def does_file_exist(file_path):
@@ -31,14 +34,17 @@ def _list_local_wildcard_files(wildcard_path, **kwargs):
 def file_iter(file_path, raw_content=False, no_project=False):
     if not does_file_exist(file_path):
         raise FileNotFoundError(f'Could not access file {file_path}')
-    is_gz = file_path.endswith('gz')
-    mode = 'rb' if raw_content or is_gz else 'r'
     file_stream = google_bucket_file_stream(no_project) if is_google_bucket_file_path(file_path) else open
-    with file_stream(file_path, mode) as f:
-        if is_gz:
-            f = gzip.open(f, 'r' if raw_content else 'rt')
-        for line in f:
-            yield line
+    if raw_content:
+        with file_stream(file_path, 'rb') as f:
+            yield from iter(lambda: f.read(CHUNK_SIZE), b'')
+    elif file_path.endswith('gz'):
+        with file_stream(file_path, 'rb') as f:
+            with gzip.open(f, 'rt') as gz_f:
+                yield from gz_f
+    else:
+        with file_stream(file_path, 'r') as f:
+            yield from f
 
 
 def file_bytes_iter(file_path, first_byte, last_byte, raw_content=False):
@@ -49,11 +55,30 @@ def file_bytes_iter(file_path, first_byte, last_byte, raw_content=False):
     else:
         with open(file_path, 'rb') as f:
             f.seek(first_byte)
-            data = f.read(last_byte - first_byte+1)
+            data = f.read(last_byte - first_byte + 1)
+
+    if raw_content:
+        yield data
+        return
 
     if file_path.endswith('gz'):
-        data = gzip.decompress(data)
-    for line in data:
-        if not raw_content:
-            line = line.decode('utf-8')
-        yield line
+        data = _decompress_partial_gzip(data)
+    lines = data.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        is_truncated = i == len(lines) - 1 and not line.endswith(b'\n')
+        yield line.decode('utf-8', errors='ignore' if is_truncated else 'strict')
+
+
+def _decompress_partial_gzip(data):
+    # A byte range of a gzip file is usually cut off mid-stream, and bgzip files consist of many concatenated members
+    decompressed = []
+    while data:
+        decompressor = zlib.decompressobj(wbits=31)
+        try:
+            decompressed.append(decompressor.decompress(data))
+        except zlib.error as e:
+            raise gzip.BadGzipFile(str(e))
+        if not decompressor.eof:
+            break
+        data = decompressor.unused_data
+    return b''.join(decompressed)

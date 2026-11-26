@@ -91,8 +91,8 @@ kubectl create secret generic clinvar-secrets --from-literal=clinvar_api_key='my
 ```yaml
 seqr:
   environment:
-    CLINVAR_SUBMISSION_MODE: 'dry_run'
-    CLINVAR_ASSERTION_CRITERIA: 'PubMed:12345678'
+    - CLINVAR_SUBMISSION_MODE=dry_run
+    - CLINVAR_ASSERTION_CRITERIA=PubMed:12345678
   additionalSecrets:
     - name: CLINVAR_API_KEY
       valueFrom:

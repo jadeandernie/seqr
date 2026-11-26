@@ -11,15 +11,15 @@ import schemaFixture from '../../filterSchemaFixture.json'
 import { loadSearchFilterSchema, reducers } from '../../reducers'
 import VariantSearchFormPanels from '../VariantSearchFormPanels'
 import DynamicFilterPanel, {
-  DynamicFilterSummary, FilterSchema, FilterSchemaField, LEGACY_FILTER_KEYS, getAdditionalFilterFields,
-  getDynamicFilterSummary, getSearchAdditionalFilterFields,
+  DynamicFilterSummary, LEGACY_FILTER_KEYS, getAdditionalFilterFields, getDynamicFilterSummary,
+  getSearchAdditionalFilterFields,
 } from './DynamicFilterPanel'
 
 configure({ adapter: new Adapter() })
 
-const SCHEMA = schemaFixture as unknown as FilterSchema
+const SCHEMA = schemaFixture
 
-const METHYLATION_FIELD: FilterSchemaField = {
+const METHYLATION_FIELD = {
   key: 'methylation_outlier',
   group: 'in_silico',
   kind: 'min',
@@ -33,7 +33,7 @@ const METHYLATION_FIELD: FilterSchemaField = {
   datasetTypes: ['SNV_INDEL'],
   legacyPath: ['in_silico', 'methylation_outlier'],
 }
-const TISSUE_FIELD: FilterSchemaField = {
+const TISSUE_FIELD = {
   key: 'methylation_tissue',
   group: 'in_silico',
   kind: 'enum',
@@ -43,7 +43,7 @@ const TISSUE_FIELD: FilterSchemaField = {
   datasetTypes: ['SNV_INDEL'],
   legacyPath: ['in_silico', 'methylation_tissue'],
 }
-const COHORT_FIELD: FilterSchemaField = {
+const COHORT_FIELD = {
   key: 'methylation_cohort_ac',
   group: 'frequency',
   kind: 'max',
@@ -57,7 +57,7 @@ const COHORT_FIELD: FilterSchemaField = {
   datasetTypes: ['SNV_INDEL', 'MITO'],
   legacyPath: ['freqs', 'methylation_cohort', 'ac'],
 }
-const DEPTH_FIELD: FilterSchemaField = {
+const DEPTH_FIELD = {
   key: 'min_dp',
   group: 'quality',
   kind: 'min',
@@ -70,7 +70,7 @@ const DEPTH_FIELD: FilterSchemaField = {
   datasetTypes: ['SNV_INDEL'],
   legacyPath: ['qualityFilter', 'min_dp'],
 }
-const PHASED_FIELD: FilterSchemaField = {
+const PHASED_FIELD = {
   key: 'phased_only',
   group: 'quality',
   kind: 'bool',
@@ -80,16 +80,16 @@ const PHASED_FIELD: FilterSchemaField = {
   legacyPath: ['qualityFilter', 'phased_only'],
 }
 const NEW_FIELDS = [METHYLATION_FIELD, TISSUE_FIELD, COHORT_FIELD, DEPTH_FIELD, PHASED_FIELD]
-const MOCK_SCHEMA: FilterSchema = { 38: [...SCHEMA['38'], ...NEW_FIELDS] }
+const MOCK_SCHEMA = { 38: [...SCHEMA['38'], ...NEW_FIELDS] }
 
-const keys = (fields: FilterSchemaField[]) => fields.map(({ key }) => key)
+const keys = fields => fields.map(({ key }) => key)
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
 const SCHEMA_URL = '/api/search_filter_schema?'
 const fetchMock = jest.fn()
 const schemaRequests = () => fetchMock.mock.calls.filter(([url]) => url === SCHEMA_URL)
-const schemaActions = (store: { getActions: () => { type: string }[] }) => store.getActions().filter(
+const schemaActions = store => store.getActions().filter(
   ({ type }) => type === 'RECEIVE_SEARCH_FILTER_SCHEMA',
 )
 
@@ -98,12 +98,12 @@ beforeEach(() => {
   fetchMock.mockImplementation(() => Promise.resolve({
     ok: true, status: 200, json: () => Promise.resolve({ searchFilterSchema: MOCK_SCHEMA }),
   }))
-  global.fetch = fetchMock as unknown as typeof fetch
+  global.fetch = fetchMock
 })
 
 test('every filter of the hard-coded panels is in the filter schema', () => {
-  const schemaKeys = (group: string) => new Set(Object.values(SCHEMA).reduce(
-    (acc, fields) => [...acc, ...fields.filter(field => field.group === group).map(({ key }) => key)], [] as string[],
+  const schemaKeys = group => new Set(Object.values(SCHEMA).reduce(
+    (acc, fields) => [...acc, ...fields.filter(field => field.group === group).map(({ key }) => key)], [],
   ))
   expect(LEGACY_FILTER_KEYS.in_silico.length).toEqual(23)
   expect(LEGACY_FILTER_KEYS.in_silico.filter(key => !schemaKeys('in_silico').has(key))).toEqual(
@@ -140,7 +140,7 @@ test('additional filters are the schema fields the hard-coded panels do not offe
   expect(getAdditionalFilterFields(undefined, [], [])).toEqual([])
 
   // A field added to the backend registry is offered with no UI change, unless the UI cannot render its kind
-  const rangeField = { ...METHYLATION_FIELD, key: 'methylation_range', kind: 'range' } as unknown as FilterSchemaField
+  const rangeField = { ...METHYLATION_FIELD, key: 'methylation_range', kind: 'range' }
   expect(keys(getAdditionalFilterFields({ 38: [...MOCK_SCHEMA['38'], rangeField] }, ['SNV_INDEL'], ['38']))).toEqual([
     'gnomad_noncoding', 'topmed_hh', 'methylation_outlier', 'methylation_tissue', 'methylation_cohort_ac', 'min_dp',
   ])
@@ -161,15 +161,15 @@ test('additional filters are selected for the searched projects', () => {
     'gnomad_noncoding', 'topmed_hh', 'sv_callset_hh', 'sv_callset_af', 'methylation_outlier', 'methylation_tissue',
     'methylation_cohort_ac', 'min_dp', 'phased_only',
   ]
-  expect(keys(getSearchAdditionalFilterFields(state, { projectFamilies: [...projectFamilies, ...projectFamilies] }))).toEqual(
-    expectedKeys,
-  )
+  expect(
+    keys(getSearchAdditionalFilterFields(state, { projectFamilies: [...projectFamilies, ...projectFamilies] })),
+  ).toEqual(expectedKeys)
   expect(getSearchAdditionalFilterFields({ ...state, searchFilterSchema: null }, { projectFamilies })).toEqual([])
   expect(keys(getSearchAdditionalFilterFields(state, {})).length).toEqual(16)
 })
 
-const renderPanel = (fields: FilterSchemaField[], initialValues = {}) => {
-  let formValues: Record<string, unknown> = null
+const renderPanel = (fields, initialValues = {}) => {
+  let formValues = null
   const wrapper = mount(
     <Provider store={configureStore([thunk])({ ...STATE, searchFilterSchema: MOCK_SCHEMA })}>
       <Form onSubmit={() => {}} initialValues={initialValues}>
@@ -197,7 +197,7 @@ test('the panel is rendered from the schema and writes typed values to search.dy
   expect(wrapper.text()).not.toContain('gnomAD genomes')
   expect(wrapper.text()).not.toContain('Genotype Quality')
 
-  const input = (key: string) => wrapper.find(`input[name="search.dynamic.${key}"]`)
+  const input = key => wrapper.find(`input[name="search.dynamic.${key}"]`)
   expect(input('in_silico.methylation_outlier').props()).toEqual(expect.objectContaining(
     { type: 'number', max: 20, step: 0.5, value: '' },
   ))
@@ -212,9 +212,13 @@ test('the panel is rendered from the schema and writes typed values to search.dy
   expect(getValues()).toEqual({ search: { dynamic: { in_silico: { methylation_outlier: 2.5 } } } })
   input('frequency.methylation_cohort_ac').simulate('change', { target: { value: '10' } })
   input('quality.min_dp').simulate('change', { target: { value: '0' } })
-  expect(getValues()).toEqual({ search: { dynamic: {
-    in_silico: { methylation_outlier: 2.5 }, frequency: { methylation_cohort_ac: 10 }, quality: { min_dp: 0 },
-  } } })
+  expect(getValues()).toEqual({
+    search: {
+      dynamic: {
+        in_silico: { methylation_outlier: 2.5 }, frequency: { methylation_cohort_ac: 10 }, quality: { min_dp: 0 },
+      },
+    },
+  })
   wrapper.update()
   expect(input('in_silico.methylation_outlier').props().value).toEqual(2.5)
   expect(input('quality.min_dp').props().value).toEqual(0)
@@ -223,11 +227,15 @@ test('the panel is rendered from the schema and writes typed values to search.dy
   expect(tissueOptions.map(option => option.text())).toEqual(['', 'blood', 'fibroblast'])
   tissueOptions.at(2).simulate('click')
   wrapper.find('input[type="checkbox"]').simulate('change', { target: { checked: true } })
-  expect(getValues()).toEqual({ search: { dynamic: {
-    in_silico: { methylation_outlier: 2.5, methylation_tissue: 'F' },
-    frequency: { methylation_cohort_ac: 10 },
-    quality: { min_dp: 0, phased_only: true },
-  } } })
+  expect(getValues()).toEqual({
+    search: {
+      dynamic: {
+        in_silico: { methylation_outlier: 2.5, methylation_tissue: 'F' },
+        frequency: { methylation_cohort_ac: 10 },
+        quality: { min_dp: 0, phased_only: true },
+      },
+    },
+  })
 
   // Cleared inputs are removed from the search rather than submitted as empty values
   input('frequency.methylation_cohort_ac').simulate('change', { target: { value: '' } })
@@ -258,7 +266,7 @@ test('summary of the dynamic filters of a search', () => {
   expect(getDynamicFilterSummary(undefined, MOCK_SCHEMA)).toEqual('')
   expect(getDynamicFilterSummary({}, null)).toEqual('')
   const dynamic = {
-    quality: { min_dp: 15, phased_only: true, vcf_filter: false, min_gq: null as number },
+    quality: { min_dp: 15, phased_only: true, vcf_filter: false, min_gq: null },
     in_silico: { methylation_outlier: 2.5, methylation_tissue: 'F', gnomad_noncoding: 0, removed_score: 3 },
     frequency: { helix_af: 0.01, methylation_cohort_ac: '' },
   }
@@ -279,7 +287,7 @@ test('summary of the dynamic filters of a search', () => {
 
 const PROJECT_FAMILIES = [{ projectGuid: 'R0237_1000_genomes_demo', familyGuids: ['F011652_1'] }]
 
-const renderSearchPanels = (searchFilterSchema: FilterSchema | null, search?: Record<string, unknown>) => {
+const renderSearchPanels = (searchFilterSchema, search) => {
   const initialValues = { projectFamilies: PROJECT_FAMILIES, search }
   const store = configureStore([thunk])({
     ...STATE, modal: {}, locusListsLoading: {}, locusListLoading: {}, searchFilterSchema,
@@ -295,7 +303,7 @@ const renderSearchPanels = (searchFilterSchema: FilterSchema | null, search?: Re
 }
 
 const PANEL_TITLES = ['Inheritance', 'Pathogenicity', 'Annotations', 'In Silico Filters', 'Frequency', 'Location', 'Call Quality']
-const panelTitles = (wrapper: ReturnType<typeof mount>) => wrapper.find('AccordionTitle').map(
+const panelTitles = wrapper => wrapper.find('AccordionTitle').map(
   title => title.find('GridColumn').first().text(),
 )
 
@@ -339,13 +347,13 @@ test('the filter schema is loaded once when the search form is shown', async () 
   expect(loadedSchema).toEqual(MOCK_SCHEMA)
 
   const loadedStore = configureStore([thunk])({ searchFilterSchema: loadedSchema })
-  loadedStore.dispatch(loadSearchFilterSchema() as never)
+  loadedStore.dispatch(loadSearchFilterSchema())
   expect(schemaRequests().length).toEqual(1)
 
   // A failed request leaves the schema unloaded so it is requested again
   fetchMock.mockImplementation(() => Promise.reject(new Error('Network error')))
   const failedStore = configureStore([thunk])({ searchFilterSchema: null })
-  failedStore.dispatch(loadSearchFilterSchema() as never)
+  failedStore.dispatch(loadSearchFilterSchema())
   await flush()
   expect(failedStore.getActions()).toEqual([{ type: 'RECEIVE_SEARCH_FILTER_SCHEMA', newValue: null }])
 })
